@@ -257,7 +257,7 @@ PIPELINE_PHASES = [
     {
         "id":         "validation",
         "label":      "Fase 2 — Validação, DNS e Escopo",
-        "modules":    ["dns", "dns_brute", "leaks"],
+        "modules":    ["dns", "dns_brute", "leaks", "git_leaks"],
         "rate_phase": "dns",
         "parallel":   True,
         "merge_hosts": True,
@@ -268,7 +268,7 @@ PIPELINE_PHASES = [
         "label":      "Fase 3 — Intel Útil para Bug Bounty",
         "modules":    [
             "shodan", "postman_collections", "cloud", "container_registry",
-            "bulk_dataset", "breach", "phishing", "dep_confusion",
+            "bulk_dataset", "breach", "phishing", "dep_confusion", "s3_scanner",
         ],
         "rate_phase": "passive",
         "parallel":   True,
@@ -303,7 +303,7 @@ PIPELINE_PHASES = [
     {
         "id":         "api_mapping",
         "label":      "Fase 7 — APIs, Endpoints e Secrets",
-        "modules":    ["js_endpoints", "js_secrets", "api_discovery_extra", "graphql"],
+        "modules":    ["js_endpoints", "js_secrets", "api_discovery_extra", "graphql", "jwt_analysis"],
         "rate_phase": "tech",
         "parallel":   True,
         "gate":       "has_live_hosts",
@@ -323,7 +323,7 @@ PIPELINE_PHASES = [
             "takeover", "subjack", "cors_scan", "open_redirect",
             "host_header_injection", "infra_exposure", "cloud_enum",
             "default_creds", "dnssec", "waf_bypass", "tableau",
-            "github_repos", "supply_chain",
+            "github_repos", "supply_chain", "xss_scan",
         ],
         "rate_phase": "vulnscan",
         "parallel":   True,
@@ -624,25 +624,44 @@ class ReconRunner:
     def _checkpoint_dir(self, cid: str) -> Path:
         return self.base / "scans" / cid / ".checkpoints"
 
-    def _save_checkpoint(self, cid: str, module: str):
+    def _checkpoint_key(self, cid: str, module: str, target: str = "") -> str:
+        """Build a unique on-disk filename for per-target isolation.
+        In-memory key stays as {cid}:{module} regardless of target so that
+        _persist_pipeline_results and other consumers find data correctly."""
+        return f"{cid}:{module}"
+
+    def _checkpoint_filename(self, module: str, target: str = "") -> str:
+        """Disk filename — includes target for per-domain isolation in queue mode."""
+        if target:
+            return f"{module}__{target}.json"
+        return f"{module}.json"
+
+    def _save_checkpoint(self, cid: str, module: str, target: str = ""):
         """Persist a completed module result to disk so it survives server restarts."""
-        result = self.results.get(f"{cid}:{module}")
+        key = self._checkpoint_key(cid, module, target)
+        result = self.results.get(key)
         if not result or result.get("status") != "done":
             return
         try:
             cp_dir = self._checkpoint_dir(cid)
             cp_dir.mkdir(parents=True, exist_ok=True)
-            (cp_dir / f"{module}.json").write_text(
-                json.dumps(result, default=str), encoding="utf-8"
+            data = dict(result)
+            data["module"] = module
+            data["target"] = target
+            (cp_dir / self._checkpoint_filename(module, target)).write_text(
+                json.dumps(data, default=str), encoding="utf-8"
             )
         except Exception as e:
-            print(f"[checkpoint] failed to save {cid}:{module}: {e}")
+            print(f"[checkpoint] failed to save {key}: {e}")
 
-    def _load_checkpoints(self, cid: str):
+    def _load_checkpoints(self, cid: str, target: str = ""):
         """Load all saved checkpoints into self.results (called at pipeline start).
 
         Disk is the source of truth — clear all in-memory results for this company
         first so that deleted checkpoint files actually force a re-run.
+
+        In queue mode (target is set), only load checkpoints for this specific
+        domain so that completed modules for domain A do not skip domain B.
         """
         # Evict all in-memory results for this company so deleted files take effect
         stale = [k for k in self.results if k.startswith(f"{cid}:")]
@@ -656,9 +675,16 @@ class ReconRunner:
         for f in cp_dir.glob("*.json"):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
-                if data.get("status") == "done":
-                    self.results[f"{cid}:{f.stem}"] = data
-                    loaded.append(f.stem)
+                if data.get("status") != "done":
+                    continue
+                # In queue mode, skip checkpoints from other domains
+                cp_target = data.get("target", "")
+                if target and cp_target and cp_target != target:
+                    continue
+                module = data.get("module", f.stem.split("__")[0])
+                key = f"{cid}:{module}"
+                self.results[key] = data
+                loaded.append(f.stem)
             except Exception:
                 pass
         if loaded:
@@ -1338,6 +1364,9 @@ class ReconRunner:
             )
             if result.returncode != 0:
                 return False
+            # Running as root — skip sudo check
+            if os.geteuid() == 0:
+                return True
             test_result = subprocess.run(
                 ["sudo", "-n", "masscan", "--echo"],
                 capture_output=True, timeout=5
@@ -1376,8 +1405,9 @@ class ReconRunner:
             tf_path = tf.name
 
         try:
+            cmd = ["sudo", "masscan"] if os.geteuid() != 0 else ["masscan"]
             result = subprocess.run(
-                ["sudo", "masscan", "-iL", tf_path, "-p",
+                cmd + ["-iL", tf_path, "-p",
                  "21,22,23,25,80,110,143,389,443,445,"
                  "512,513,514,636,1433,1521,2181,2222,2375,2376,2379,"
                  "3000,3306,3389,4243,4443,4848,5000,5432,5601,5900,"
@@ -1604,6 +1634,11 @@ class ReconRunner:
                 hosts, os.path.join(self.base, "scans", cid, "screenshots"),
                 previous_dir=os.path.join(self.base, "scans", cid, "screenshots_prev"),
             ),
+            # ── NEW MODULES: gitleaks, S3, JWT, XSS ──────────────────────────────
+            "git_leaks":   lambda: r.run_git_leaks(hosts, domains, options.get("github_token", "")),
+            "s3_scanner":  lambda: r.run_s3_scanner(domains, co.get("name", "")),
+            "jwt_analysis": lambda: r.run_jwt_analysis(hosts, None),
+            "xss_scan":    lambda: r.run_xss_scan(hosts, options.get("mode", "balanced")),
         }
 
     def _browser_recon_wrapper(self, cid: str, co: dict, hosts: list[dict] | None = None) -> dict:
@@ -2516,18 +2551,20 @@ class ReconRunner:
             try:
                 if module not in SELF_CONTAINED_MODULES and not self.recon_available:
                     raise RuntimeError("recon module not available")
+                prev = self.results.get(job_key) or {}
                 result = self._make_fn_map(cid, co, options, hosts)[module]()
                 self.results[job_key] = {
                     "status":      "done",
                     "data":        result,
-                    "started_at":  self.results[job_key]["started_at"],
+                    "started_at":  prev.get("started_at", ""),
                     "finished_at": datetime.now().isoformat(timespec="seconds"),
                 }
             except Exception as e:
+                prev = self.results.get(job_key) or {}
                 self.results[job_key] = {
                     "status":      "error",
                     "error":       str(e),
-                    "started_at":  self.results[job_key].get("started_at", ""),
+                    "started_at":  prev.get("started_at", ""),
                     "finished_at": datetime.now().isoformat(timespec="seconds"),
                 }
             finally:
@@ -3782,27 +3819,37 @@ class ReconRunner:
 
         # Fallback: link screenshots from disk when gowitness result is missing
         # (browser recon, playwright agent, or previous runs left files on disk)
+        # Supports both flat file structure and gowitness v3 directory-per-host layout.
         log(f"  ↳ [persist] Ligando screenshots do disco...")
         try:
             shots_dir = self.base / "scans" / cid / "screenshots"
             if shots_dir.exists():
                 disk_shots = {}
-                for f in shots_dir.iterdir():
-                    if f.suffix.lower() not in (".png", ".jpg", ".jpeg"):
+                for f in shots_dir.rglob("*"):
+                    if not f.is_file() or f.suffix.lower() not in (".png", ".jpg", ".jpeg"):
                         continue
-                    name = f.stem
+                    rel = f.relative_to(shots_dir)
+                    parts = rel.parts
+                    # gowitness v3: screenshot/<hostname>/<hash>.png
                     host = ""
-                    if name.startswith("browser_"):
-                        host = name[8:].replace("___", "://").replace("_", ".")
-                        host = host.split("://", 1)[-1] if "://" in host else host
-                    elif name.startswith(("http---", "https---")):
-                        host = re.sub(r"^https?---", "", name, flags=re.I)
-                        host = re.sub(r"-\d+$", "", host)
-                    else:
-                        host = name.replace("-", ".")
+                    if len(parts) >= 2:
+                        host = parts[-2]  # parent dir = hostname
+                    if not host or host in ("screenshot", "response"):
+                        # Flat file: extract host from filename
+                        name = f.stem
+                        if name.startswith("browser_"):
+                            host = name[8:].replace("___", "://").replace("_", ".")
+                            host = host.split("://", 1)[-1] if "://" in host else host
+                        elif name.startswith(("http---", "https---")):
+                            host = re.sub(r"^https?---", "", name, flags=re.I)
+                            host = re.sub(r"-\d+$", "", host)
+                        else:
+                            host = name.replace("-", ".")
                     host = host.lower().strip(".")
                     if host:
-                        disk_shots[host] = f"screenshots/{cid}/{f.name}"
+                        # Use relative path from screenshots dir for serving
+                        serve_path = str(rel).replace("\\", "/")
+                        disk_shots[host] = f"screenshots/{cid}/{serve_path}"
                 linked = 0
                 for h in co_data.get("hosts", []):
                     hn = h.get("host", "").lower()
@@ -4822,8 +4869,11 @@ class ReconRunner:
         total_phases = len(PIPELINE_PHASES)
         cf_detected  = False
 
+        # In queue mode, use the specific target domain for checkpoint isolation
+        queue_target = options.get("queue_domain", "")
+
         # Load any previously completed modules so we can resume after a restart
-        self._load_checkpoints(cid)
+        self._load_checkpoints(cid, target=queue_target)
         current_hosts = self._filter_hosts_for_options(self._load_hosts(cid), co, options)
         previous_state = self.pipeline_state.get(cid, {}) or self._load_pipeline_state(cid) or {}
         current_scope_hash = self._scan_scope_hash(co)
@@ -4966,7 +5016,7 @@ class ReconRunner:
                         _log(f"  ⏹ {module} interrompido — pipeline stopped")
                         now_ts = datetime.now()
                         finished_at = now_ts.isoformat(timespec="seconds")
-                        started_at = self.results[job_key].get("started_at", finished_at)
+                        started_at = (self.results.get(job_key) or {}).get("started_at", finished_at)
                         duration_s = round(
                             (now_ts - datetime.fromisoformat(started_at)).total_seconds(), 2
                         ) if started_at else 0.0
@@ -4994,7 +5044,7 @@ class ReconRunner:
 
                     now_ts = datetime.now()
                     finished_at = now_ts.isoformat(timespec="seconds")
-                    started_at = self.results[job_key].get("started_at", finished_at)
+                    started_at = (self.results.get(job_key) or {}).get("started_at", finished_at)
                     duration_s = round(
                         (now_ts - datetime.fromisoformat(started_at)).total_seconds(), 2
                     ) if started_at else 0.0
@@ -5020,7 +5070,7 @@ class ReconRunner:
                         if metrics_preview:
                             summary += f" | {metrics_preview}"
                         _log(f"  ✓ {module} concluído — {summary}")
-                        self._save_checkpoint(cid, module)
+                        self._save_checkpoint(cid, module, target=queue_target)
                     elif envelope["status"] == "skipped":
                         _log(f"  ⏭ {module} pulado — {envelope['reason'] or 'skipped'} | in={len(hosts)}")
                     elif envelope["status"] == "timeout":
@@ -5040,7 +5090,7 @@ class ReconRunner:
                     status, reason = _classify_result_status(None, str(e))
                     now_ts = datetime.now()
                     finished_at = now_ts.isoformat(timespec="seconds")
-                    started_at = self.results[job_key].get("started_at", finished_at)
+                    started_at = (self.results.get(job_key) or {}).get("started_at", finished_at)
                     duration_s = round(
                         (now_ts - datetime.fromisoformat(started_at)).total_seconds(), 2
                     ) if started_at and started_at != finished_at else 0.0

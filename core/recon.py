@@ -9983,3 +9983,270 @@ def run_screenshot_diff(hosts: list, output_dir: str,
         "previous_screenshots": len(previous_files),
         "scanned_at": now,
     }
+
+
+# ── NEW MODULES: gitleaks, jwt_tool, S3Scanner, XSS ────────────────────────────
+
+def run_git_leaks(hosts: list, domains: list, github_token: str = None) -> dict:
+    """Scan exposed .git directories and git history for secrets using gitleaks."""
+    findings = []
+    scanned = 0
+    gitleaks_bin = shutil.which("gitleaks")
+
+    for h in hosts[:50]:  # cap at 50 hosts
+        host = h.get("host", "")
+        if not host:
+            continue
+        for scheme in ("https", "http"):
+            try:
+                url = f"{scheme}://{host}/.git/HEAD"
+                status, body, _ = http_get(url, timeout=5, retries=1)
+                if status == 200 and "ref:" in (body or ""):
+                    # Clone and scan
+                    import tempfile
+                    with tempfile.TemporaryDirectory() as tmp:
+                        clone_url = f"{scheme}://{host}/.git"
+                        result = subprocess.run(
+                            ["git", "clone", "--depth", "1", clone_url, tmp],
+                            capture_output=True, text=True, timeout=60
+                        )
+                        if result.returncode == 0 and gitleaks_bin:
+                            scan = subprocess.run(
+                                [gitleaks_bin, "detect", "--source", tmp, "-f", "json", "--no-git"],
+                                capture_output=True, text=True, timeout=60
+                            )
+                            if scan.stdout.strip():
+                                try:
+                                    leaks = json.loads(scan.stdout)
+                                    for leak in (leaks if isinstance(leaks, list) else []):
+                                        findings.append({
+                                            "type": "git_leak",
+                                            "severity": "high",
+                                            "title": f"Git secret exposed: {leak.get('Description','')}",
+                                            "host": host,
+                                            "value": leak.get("Secret", ""),
+                                            "file": leak.get("File", ""),
+                                            "module": "git_leaks",
+                                        })
+                                except json.JSONDecodeError:
+                                    pass
+                            scanned += 1
+                    break  # one scheme per host
+            except Exception:
+                continue
+
+    return {
+        "findings": findings,
+        "total": len(findings),
+        "hosts_scanned": scanned,
+        "scanned_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def run_s3_scanner(domains: list, company_name: str = "") -> dict:
+    """Check for open S3 buckets using common naming patterns."""
+    findings = []
+    scanned = 0
+    s3_bin = shutil.which("S3Scanner") or shutil.which("s3scanner")
+    names = set()
+    for d in domains:
+        base = d.split(".")[0]
+        names.update([base, f"{base}-prod", f"{base}-dev", f"{base}-staging", f"{base}-static",
+                       f"{base}-assets", f"{base}-media", f"{base}-backup", f"{base}-logs"])
+    if company_name:
+        slug = re.sub(r"[^a-z0-9]", "", company_name.lower())[:20]
+        names.update([slug, f"{slug}-prod", f"{slug}-dev"])
+
+    if s3_bin:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
+            tf.write("\n".join(names))
+            tf_path = tf.name
+        try:
+            result = subprocess.run(
+                [s3_bin, "-b", "-f", tf_path] if "S3Scanner" in str(s3_bin) else [s3_bin] + list(names),
+                capture_output=True, text=True, timeout=120
+            )
+            for line in result.stdout.strip().splitlines():
+                if "OPEN" in line.upper() or "200" in line:
+                    parts = line.strip().split()
+                    bucket = parts[0] if parts else line.strip()
+                    findings.append({
+                        "type": "open_s3_bucket",
+                        "severity": "high",
+                        "title": f"Open S3 bucket: {bucket}",
+                        "value": bucket,
+                        "module": "s3_scanner",
+                        "category": "cloud",
+                    })
+                scanned += 1
+        except Exception:
+            pass
+        finally:
+            Path(tf_path).unlink(missing_ok=True)
+    else:
+        # Fallback: HTTP checks
+        for name in list(names)[:20]:
+            try:
+                url = f"http://{name}.s3.amazonaws.com"
+                status, _, _ = http_get(url, timeout=5, retries=1)
+                if status == 200:
+                    findings.append({
+                        "type": "open_s3_bucket",
+                        "severity": "high",
+                        "title": f"Open S3 bucket: {name}",
+                        "value": name,
+                        "module": "s3_scanner",
+                    })
+                scanned += 1
+            except Exception:
+                pass
+
+    return {
+        "findings": findings,
+        "total": len(findings),
+        "buckets_scanned": scanned,
+        "scanned_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def run_jwt_analysis(hosts: list, js_files: list = None) -> dict:
+    """Analyze JWT tokens found in JS files for weaknesses using jwt_tool."""
+    findings = []
+    jwt_bin = shutil.which("jwt_tool")
+    tokens = set()
+
+    # Extract JWTs from JS files
+    if js_files:
+        for jf in js_files[:30]:
+            try:
+                content = jf.get("content", "") or ""
+                if not content and jf.get("url"):
+                    status, body, _ = http_get(jf["url"], timeout=8, retries=1)
+                    if status == 200:
+                        content = body or ""
+                # Find JWT patterns
+                for match in re.finditer(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", content):
+                    tokens.add(match.group(0))
+            except Exception:
+                pass
+
+    # Analyze each token
+    for token in list(tokens)[:10]:
+        try:
+            # Decode header without verification
+            parts = token.split(".")
+            if len(parts) >= 2:
+                header = base64.urlsafe_b64decode(parts[0] + "==").decode()
+                payload_data = base64.urlsafe_b64decode(parts[1] + "==").decode()
+                header_json = json.loads(header)
+                payload_json = json.loads(payload_data)
+                alg = header_json.get("alg", "none")
+                if alg.lower() == "none":
+                    findings.append({
+                        "type": "jwt_none_alg",
+                        "severity": "critical",
+                        "title": f"JWT with 'none' algorithm — bypass authentication",
+                        "value": token[:60] + "...",
+                        "module": "jwt_analysis",
+                    })
+                elif alg.lower().startswith("hs"):
+                    findings.append({
+                        "type": "jwt_hs_weak",
+                        "severity": "medium",
+                        "title": f"JWT uses HMAC-SHA — potential key brute-force",
+                        "value": token[:60] + "...",
+                        "metadata": {"alg": alg, "kid": header_json.get("kid", "")},
+                        "module": "jwt_analysis",
+                    })
+                else:
+                    findings.append({
+                        "type": "jwt_info",
+                        "severity": "low",
+                        "title": f"JWT found: {payload_json.get('sub','?')} ({alg})",
+                        "value": token[:60] + "...",
+                        "module": "jwt_analysis",
+                    })
+        except Exception:
+            pass
+
+    return {
+        "findings": findings,
+        "total": len(findings),
+        "tokens_found": len(tokens),
+        "tokens_analyzed": len(tokens),
+        "scanned_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def run_xss_scan(hosts: list, mode: str = "balanced") -> dict:
+    """Scan live web hosts for XSS vulnerabilities using dalfox and XSStrike."""
+    findings = []
+    scanned = 0
+    dalfox_bin = shutil.which("dalfox")
+    xsstrike_bin = shutil.which("xsstrike")
+
+    live = [h for h in hosts if _is_responsive(h)][:25]  # cap at 25 hosts
+
+    # Quick dalfox scan on each live host
+    if dalfox_bin:
+        for h in live[:15]:
+            host = h.get("host", "")
+            url = f"https://{host}" if h.get("status_code") == 200 else f"http://{host}"
+            try:
+                result = subprocess.run(
+                    [dalfox_bin, "url", url, "--silence", "--skip-mining-all",
+                     "--timeout", "5", "--delay", "100", "--waf-evasion",
+                     "--worker", "3", "--format", "json"],
+                    capture_output=True, text=True, timeout=120
+                )
+                if result.stdout.strip():
+                    try:
+                        data = json.loads(result.stdout)
+                        for item in (data if isinstance(data, list) else [data]):
+                            findings.append({
+                                "type": "xss_reflected",
+                                "severity": item.get("severity", "medium"),
+                                "title": f"XSS: {item.get('param','?')} @ {host}",
+                                "host": host,
+                                "value": item.get("payload", ""),
+                                "url": item.get("url", url),
+                                "tool": "dalfox",
+                                "module": "xss_scan",
+                            })
+                    except json.JSONDecodeError:
+                        pass
+                scanned += 1
+            except Exception:
+                pass
+
+    # Quick XSStrike on a few hosts
+    if xsstrike_bin and scanned < len(live):
+        for h in live[scanned:scanned + 5]:
+            host = h.get("host", "")
+            url = f"https://{host}" if h.get("status_code") == 200 else f"http://{host}"
+            try:
+                result = subprocess.run(
+                    [xsstrike_bin, "-u", url, "--crawl", "-l", "1", "--skip",
+                     "--console-log-level", "vuln", "--threads", "3"],
+                    capture_output=True, text=True, timeout=120
+                )
+                for line in result.stdout.strip().splitlines():
+                    if "VULNERABLE" in line.upper() or "XSS" in line.upper():
+                        findings.append({
+                            "type": "xss",
+                            "severity": "high",
+                            "title": f"XSStrike: {line.strip()[:120]}",
+                            "host": host,
+                            "tool": "xsstrike",
+                            "module": "xss_scan",
+                        })
+                scanned += 1
+            except Exception:
+                pass
+
+    return {
+        "findings": findings,
+        "total": len(findings),
+        "hosts_scanned": scanned,
+        "scanned_at": datetime.now().isoformat(timespec="seconds"),
+    }
