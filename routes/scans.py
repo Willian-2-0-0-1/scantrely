@@ -6,6 +6,7 @@ Scan lifecycle and scan artifact Flask routes.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 from collections import Counter
@@ -354,19 +355,36 @@ def create_scan_blueprint(
             pass
 
         shots = []
+        # Support both flat files and gowitness v3 directory-per-host structure
         for ext in ("*.jpeg", "*.jpg", "*.png"):
-            for file_path in shots_dir.glob(ext):
-                url = _gowitness_name_to_url(file_path.stem)
-                try:
-                    from urllib.parse import urlparse
-                    hostname = urlparse(url).hostname or ""
-                except Exception:
+            for file_path in shots_dir.rglob(ext):
+                # Skip files that aren't images (gwitness may store text responses)
+                if file_path.suffix.lower() not in ('.png', '.jpg', '.jpeg'):
+                    continue
+                # Determine hostname from path: <screenshots>/screenshot/<hostname>/<hash>.png
+                rel = file_path.relative_to(shots_dir)
+                parts = rel.parts
+                if len(parts) >= 2:
+                    hostname = parts[-2]  # parent dir = hostname
+                else:
                     hostname = ""
+                if not hostname or hostname in ("screenshot", "response"):
+                    url = _gowitness_name_to_url(file_path.stem)
+                    try:
+                        from urllib.parse import urlparse
+                        hostname = urlparse(url).hostname or ""
+                    except Exception:
+                        hostname = ""
+                if not hostname:
+                    continue
+                # Build relative path for serving (subdir/hash.png)
+                serve_path = str(rel).replace("\\", "/")
                 meta = host_meta.get(hostname, {})
                 sc = meta.get("status_code")
                 shots.append({
-                    "filename":    file_path.name,
-                    "url":         url,
+                    "filename":    serve_path,
+                    "url":         f"https://{hostname}",
+                    "host":        hostname,
                     "size":        file_path.stat().st_size,
                     "mtime":       file_path.stat().st_mtime,
                     "status_code": sc,
@@ -379,9 +397,13 @@ def create_scan_blueprint(
 
     @bp.route("/screenshots/<cid>/<path:filename>")
     def serve_screenshot(cid: str, filename: str):
-        if not re.match(r'^[a-zA-Z0-9._-]+\.(png|jpeg|jpg)$', filename):
-            abort(404)
         shots_dir = base_dir / "scans" / cid / "screenshots"
+        # Security: prevent path traversal
+        safe_path = os.path.normpath(str(shots_dir / filename))
+        if not safe_path.startswith(str(shots_dir)):
+            abort(404)
+        if not os.path.isfile(safe_path):
+            abort(404)
         return send_from_directory(str(shots_dir), filename)
 
     # ── Enterprise: Alerts, Timeline, Diff ────────────────────────────────────

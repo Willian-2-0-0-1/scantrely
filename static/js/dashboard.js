@@ -6521,7 +6521,7 @@ async function loadScreenshots(cid, co) {
     secArr.push({type:s.type || "browser_secret", value:s.value || s.secret || JSON.stringify(s), file:r.url || "", host:"", severity:s.severity || "high", _src:"browser"});
   }));
 
-  html += _secHead('🔑', `Secrets & Hardcoded Keys (${secArr.length})`, 'Credentials, tokens and API keys extracted from JS bundles and browser globals. Click value to reveal.', null);
+  html += _secHead('🔑', `Secrets & Hardcoded Keys (${secArr.length})`, 'Credentials, tokens and API keys extracted from JS bundles and browser globals. Click value to reveal. Click file path to copy.', null);
   if (secArr.length) {
     const SEVC = {critical:'#fb7185',high:'#fb923c',medium:'#fbbf24',low:'#4ade80'};
     function maskVal(v) {
@@ -6532,20 +6532,73 @@ async function loadScreenshots(cid, co) {
     const secRows = secArr.map((s, i) => {
       const clr = SEVC[s.severity] || '#94a3b8';
       const src = s._src === 'playwright' ? `<span style="font-size:.56rem;color:var(--teal);opacity:.7;margin-left:3px">PW</span>` : '';
+      const filePath = esc(s.file||'');
+      const fileCell = s.file
+        ? `<span title="${filePath}&#10;Click to copy path" onclick="navigator.clipboard.writeText(this.getAttribute('data-path')).then(()=>{this.style.color='var(--teal)';setTimeout(()=>this.style.color='',1200)});return false" data-path="${filePath}" style="cursor:pointer;border-bottom:1px dashed var(--text3);font-size:.67rem;font-family:var(--mono);word-break:break-all">${filePath}</span>`
+        : '<span style="font-size:.67rem;color:var(--text3)">—</span>';
       return `<tr>
         <td><span style="font-size:.68rem;background:rgba(251,146,60,.1);color:#fb923c;border:1px solid rgba(251,146,60,.2);border-radius:4px;padding:1px 6px">${esc(s.type)}</span>${src}</td>
         <td><code class="secret-value" style="cursor:pointer;font-size:.7rem;font-family:var(--mono);color:var(--text2)"
-          onclick="this.textContent=${JSON.stringify(String(s.value||''))};this.style.color='var(--teal)'">${esc(maskVal(s.value))}</code></td>
-        <td style="font-size:.67rem;color:var(--text3);font-family:var(--mono);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.file)}">${esc(s.file||'—')}</td>
+          onclick="var m=this.getAttribute('data-masked'),v=this.getAttribute('data-value');if(this.textContent===m){this.textContent=v;this.style.color='var(--teal)';this.style.cursor='pointer'}else{this.textContent=m;this.style.color='var(--text2)';this.style.cursor='pointer'}" data-masked="${esc(maskVal(s.value))}" data-value="${esc(String(s.value||''))}">${esc(maskVal(s.value))}</code></td>
+        <td style="max-width:260px">${fileCell}</td>
         <td style="font-size:.67rem;color:var(--text3)">${esc(s.host||'—')}</td>
         <td><span style="font-size:.62rem;font-weight:700;color:${clr}">${s.severity.toUpperCase()}</span></td>
       </tr>`;
     }).join('');
     html += `<div class="table-shell"><div class="tl-wrap" style="max-height:320px;overflow-y:auto"><table class="jobs-table">
-      <thead><tr><th>Type</th><th>Value (click to reveal)</th><th>File</th><th>Host</th><th>Risk</th></tr></thead>
+      <thead><tr><th>Type</th><th>Value (click to reveal)</th><th>File (click to copy path)</th><th>Host</th><th>Risk</th></tr></thead>
       <tbody>${secRows}</tbody></table></div></div>`;
   } else {
     html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">No secrets or hardcoded keys found. Run js_secrets, trufflehog or Playwright Recon.</div>`;
+  }
+
+  // ── POSTMAN COLLECTIONS ─────────────────────────────────────────────────
+  const postmanData = co?.postman_data;
+  const pmCollections = postmanData?.collections || [];
+  const pmGithubHits  = postmanData?.github_hits || [];
+  const pmSecrets     = postmanData?.secrets || [];
+  const pmHasData     = pmCollections.length + pmGithubHits.length + pmSecrets.length > 0;
+  const pmTotal       = postmanData?.total || pmCollections.length + pmGithubHits.length;
+
+  html += _secHead('📮', `Postman Collections (${pmTotal})`, 'Public Postman collections and GitHub-committed postman files referencing the target. Click URLs to open.', null);
+  if (pmHasData) {
+    // Collections
+    if (pmCollections.length) {
+      html += `<div style="padding:4px 0 12px;font-size:.7rem;color:var(--text3)"><strong>Public Collections (${pmCollections.length})</strong></div>`;
+      const pmcRows = pmCollections.slice(0, 20).map(c => `<tr>
+        <td style="font-size:.72rem"><a href="${esc(c.url||'')}" target="_blank" style="color:var(--teal);text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${esc(c.name||c.id||'?')}</a></td>
+        <td style="font-size:.67rem;color:var(--text3)">${esc(c.owner||'')}</td>
+        <td style="font-size:.64rem;color:var(--teal)">${esc(c.id||'')}</td>
+      </tr>`).join('');
+      html += `<div class="table-shell"><div class="tl-wrap" style="max-height:240px;overflow-y:auto"><table class="jobs-table">
+        <thead><tr><th>Collection</th><th>Owner</th><th>ID</th></tr></thead>
+        <tbody>${pmcRows}</tbody></table></div></div>`;
+    }
+    // GitHub hits
+    if (pmGithubHits.length) {
+      html += `<div style="padding:8px 0 4px;font-size:.7rem;color:var(--text3)"><strong>GitHub Files (${pmGithubHits.length})</strong></div>`;
+      const pmgRows = pmGithubHits.slice(0, 15).map(g => `<tr>
+        <td style="font-size:.7rem"><a href="${esc(g.url||'')}" target="_blank" style="color:var(--teal);text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${esc(g.repo||'')}/${esc(g.file||'')}</a></td>
+        <td style="font-size:.67rem;color:var(--text3)">${esc(g.repo||'')}</td>
+      </tr>`).join('');
+      html += `<div class="table-shell"><div class="tl-wrap" style="max-height:200px;overflow-y:auto"><table class="jobs-table">
+        <thead><tr><th>File</th><th>Repository</th></tr></thead>
+        <tbody>${pmgRows}</tbody></table></div></div>`;
+    }
+    // Secrets from Postman files
+    if (pmSecrets.length) {
+      html += `<div style="padding:8px 0 4px;font-size:.7rem;color:var(--text3)"><strong>Extracted Secrets (${pmSecrets.length})</strong></div>`;
+      const pmsRows = pmSecrets.slice(0, 15).map(s => `<tr>
+        <td style="font-size:.7rem"><code style="font-family:var(--mono);font-size:.66rem;color:var(--text2)">${esc(s.type||'secret')}</code></td>
+        <td style="font-size:.67rem;color:var(--text3);font-family:var(--mono);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.value||'')}">${esc((s.value||'').slice(0,40))}...</td>
+        <td style="font-size:.64rem;color:var(--teal)">${esc(s.repo||'')}</td>
+      </tr>`).join('');
+      html += `<div class="table-shell"><div class="tl-wrap" style="max-height:200px;overflow-y:auto"><table class="jobs-table">
+        <thead><tr><th>Type</th><th>Value</th><th>Repo</th></tr></thead>
+        <tbody>${pmsRows}</tbody></table></div></div>`;
+    }
+  } else {
+    html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">No Postman collections found. Run postman_collections module to discover exposed API collections.</div>`;
   }
 
   // ── Playwright findings summary (if any) ─────────────────────────────────
