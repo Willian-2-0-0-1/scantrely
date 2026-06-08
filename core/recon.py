@@ -10153,41 +10153,108 @@ def _is_salesforce_host(host: str) -> bool:
     return False
 
 
-def run_salesforce_recon(hosts: list) -> dict:
-    """Detect Salesforce instances and check for common misconfigurations.
-    
-    Checks: Community guest access, exposed Aura/LWR endpoints, debug mode,
-    CORS, API version disclosure, open redirect vectors, and more.
+def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
+    """Detect and scan Salesforce instances for common misconfigurations.
+
+    Two-phase approach:
+      1. DISCOVERY: probe subdomain patterns + check CNAME/DNS for SF redirects
+      2. ANALYSIS: check Community guest access, exposed Aura/LWR, debug mode,
+         CORS, API version disclosure, open redirect vectors, and more.
+
+    Returns dict with keys: findings, total, salesforce_hosts, discovered, hosts_scanned, scanned_at
     """
     findings = []
     scanned = 0
+    discovered = 0
+
+    # ── Phase 1: DISCOVERY ─────────────────────────────────────────────────
     sf_hosts = [h for h in hosts if _is_salesforce_host(h.get("host", ""))]
-    
-    if not sf_hosts:
-        # Also check non-salesforce hosts for force.com CNAME redirects
+
+    # Probe common Salesforce subdomain patterns for each target domain
+    if domains:
+        for domain in domains[:20]:
+            base = domain.split(".")[0]
+            sf_subdomain_patterns = [
+                f"{base}.my.salesforce.com",
+                f"{base}.force.com",
+                f"{base}.cloudforce.com",
+                f"{base}.salesforce.com",
+                f"{base}-community.force.com",
+                f"{base}-uat.my.salesforce.com",
+                f"{base}-dev.my.salesforce.com",
+                f"{base}-staging.my.salesforce.com",
+                f"cs-{base}.force.com",
+                f"c.{base}.force.com",
+                f"{base}.secure.force.com",
+                f"login.{base}.force.com",
+                f"www.{base}.my.salesforce.com",
+            ]
+            for probe_host in sf_subdomain_patterns[:8]:  # limit per domain
+                if any(h.get("host") == probe_host for h in sf_hosts):
+                    continue  # already known
+                try:
+                    status, body, _ = http_get(f"https://{probe_host}", timeout=5, retries=0)
+                    if status and status < 500:
+                        sf_hosts.append({"host": probe_host, "status_code": status, "ip": "", "ports": []})
+                        discovered += 1
+                        findings.append({
+                            "type": "salesforce_discovered",
+                            "severity": "info",
+                            "title": f"Salesforce instance discovered: {probe_host}",
+                            "host": probe_host,
+                            "module": "salesforce_recon",
+                        })
+                except Exception:
+                    pass
+
+    # Also check non-SF hosts for DNS CNAME / HTTP redirect to Salesforce
+    if not sf_hosts or len(sf_hosts) < 10:
         for h in hosts[:100]:
             host = h.get("host", "")
             if not host or _is_salesforce_host(host):
                 continue
             try:
-                status, body, headers = http_get(f"https://{host}", timeout=5, retries=0)
-                if status in (301, 302, 200) and body:
-                    for pattern in _SALESFORCE_PATTERNS:
-                        if re.search(pattern, str(headers.get("Location", "")) + (body or ""), re.I):
+                # DNS CNAME check
+                try:
+                    answers = dns.resolver.resolve(host, "CNAME")
+                    for rdata in answers:
+                        target = str(rdata.target).rstrip(".")
+                        if _is_salesforce_host(target):
                             sf_hosts.append(h)
+                            discovered += 1
                             findings.append({
-                                "type": "salesforce_redirect",
-                                "severity": "low",
-                                "title": f"Redirects to Salesforce: {host}",
+                                "type": "salesforce_cname",
+                                "severity": "medium",
+                                "title": f"DNS CNAME to Salesforce: {host} -> {target}",
                                 "host": host,
+                                "value": target,
                                 "module": "salesforce_recon",
                             })
                             break
+                except Exception:
+                    pass
+
+                # HTTP redirect check
+                status, body, headers = http_get(f"https://{host}", timeout=5, retries=0)
+                if status in (301, 302) and headers:
+                    location = str(headers.get("Location", ""))
+                    if _is_salesforce_host(location):
+                        sf_hosts.append(h)
+                        discovered += 1
+                        findings.append({
+                            "type": "salesforce_redirect",
+                            "severity": "low",
+                            "title": f"HTTP redirect to Salesforce: {host} -> {location}",
+                            "host": host,
+                            "value": location,
+                            "module": "salesforce_recon",
+                        })
             except Exception:
                 pass
-    
+
     sf_hosts = sf_hosts[:30]  # cap
-    
+
+    # ── Phase 2: ANALYSIS ────────────────────────────────────────────────
     for h in sf_hosts:
         host = h.get("host", "")
         scheme = "https"
@@ -10321,6 +10388,7 @@ def run_salesforce_recon(hosts: list) -> dict:
         "findings": findings,
         "total": len(findings),
         "salesforce_hosts": len(sf_hosts),
+        "discovered": discovered,
         "hosts_scanned": scanned,
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
     }

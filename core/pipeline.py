@@ -1639,7 +1639,7 @@ class ReconRunner:
             "s3_scanner":  lambda: r.run_s3_scanner(domains, co.get("name", "")),
             "jwt_analysis": lambda: r.run_jwt_analysis(hosts, None),
             "xss_scan":    lambda: r.run_xss_scan(hosts, options.get("mode", "balanced")),
-            "salesforce_recon": lambda: r.run_salesforce_recon(hosts),
+            "salesforce_recon": lambda: r.run_salesforce_recon(hosts, domains),
         }
 
     def _browser_recon_wrapper(self, cid: str, co: dict, hosts: list[dict] | None = None) -> dict:
