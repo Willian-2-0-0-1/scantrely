@@ -10104,7 +10104,224 @@ def run_s3_scanner(domains: list, company_name: str = "") -> dict:
     return {
         "findings": findings,
         "total": len(findings),
-        "buckets_scanned": scanned,
+        "hosts_scanned": scanned,
+        "scanned_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+# ── SALESFORCE RECON ──────────────────────────────────────────────────────────
+
+_SALESFORCE_PATTERNS = [
+    r"\.my\.salesforce\.com$",
+    r"\.my\.salesforce-setup\.com$",
+    r"\.force\.com$",
+    r"\.salesforce\.com$",
+    r"\.cloudforce\.com$",
+    r"\.database\.com$",
+    r"\.site\.com$",  # force.com sites
+]
+
+_SALESFORCE_COMMUNITY_CHECKS = [
+    "/s/",                                  # Community URL base
+    "/services/apexrest/",                  # REST API exposed
+    "/services/data/v",                     # REST API version endpoint
+    "/s/global-search/%40uri?query=",       # Guest search (misconfig)
+    "/sfsites/aura",                        # Aura framework
+    "/webruntime",                          # LWR framework  
+    "/_nc_external/identity/session/",      # Session endpoint
+    "/idp/endpoint/HttpPost",               # SAML endpoint
+    "/.well-known/org-issuer-id",           # Org issuer
+    "/s/sfsites/aura?r=",                   # Aura guest access
+]
+
+_SALESFORCE_ADMIN_CHECKS = [
+    "/_ui/common/apex/debug/ApexCSIPage",   # Debug console
+    "/soap/",                                # SOAP API info
+    "/p/setup/custent/CustomizePage",       # Setup page (should be auth-walled)
+    "/secur/logout.jsp",                    # Logout redirect vuln
+    "/_ui/identity/verification/method",    # MFA verification page
+    "/setup/forcecomHomepage.apexp",        # Setup homepage
+    "/ui/setup/Setup",                      # Classic setup
+    "/c/",                                  # Custom domain community
+]
+
+
+def _is_salesforce_host(host: str) -> bool:
+    for pattern in _SALESFORCE_PATTERNS:
+        if re.search(pattern, host, re.IGNORECASE):
+            return True
+    return False
+
+
+def run_salesforce_recon(hosts: list) -> dict:
+    """Detect Salesforce instances and check for common misconfigurations.
+    
+    Checks: Community guest access, exposed Aura/LWR endpoints, debug mode,
+    CORS, API version disclosure, open redirect vectors, and more.
+    """
+    findings = []
+    scanned = 0
+    sf_hosts = [h for h in hosts if _is_salesforce_host(h.get("host", ""))]
+    
+    if not sf_hosts:
+        # Also check non-salesforce hosts for force.com CNAME redirects
+        for h in hosts[:100]:
+            host = h.get("host", "")
+            if not host or _is_salesforce_host(host):
+                continue
+            try:
+                status, body, headers = http_get(f"https://{host}", timeout=5, retries=0)
+                if status in (301, 302, 200) and body:
+                    for pattern in _SALESFORCE_PATTERNS:
+                        if re.search(pattern, str(headers.get("Location", "")) + (body or ""), re.I):
+                            sf_hosts.append(h)
+                            findings.append({
+                                "type": "salesforce_redirect",
+                                "severity": "low",
+                                "title": f"Redirects to Salesforce: {host}",
+                                "host": host,
+                                "module": "salesforce_recon",
+                            })
+                            break
+            except Exception:
+                pass
+    
+    sf_hosts = sf_hosts[:30]  # cap
+    
+    for h in sf_hosts:
+        host = h.get("host", "")
+        scheme = "https"
+        
+        # 1. Fingerprint the org: get instance info
+        try:
+            status, body, headers = http_get(f"{scheme}://{host}", timeout=8, retries=1)
+            if status:
+                scanned += 1
+                sf_content = (body or "")[:2000]
+                
+                # Detect Salesforce version/flavor
+                if "Salesforce" in sf_content or "sfdc" in sf_content.lower():
+                    findings.append({
+                        "type": "salesforce_detected",
+                        "severity": "info",
+                        "title": f"Salesforce instance: {host}",
+                        "host": host,
+                        "module": "salesforce_recon",
+                    })
+        except Exception:
+            pass
+        
+        # 2. Community guest user checks
+        for check_path in _SALESFORCE_COMMUNITY_CHECKS[:6]:  # most important checks
+            try:
+                url = f"{scheme}://{host}{check_path}"
+                status, body, headers = http_get(url, timeout=6, retries=0)
+                
+                if check_path == "/services/data/v" and status == 200:
+                    # API version disclosure
+                    findings.append({
+                        "type": "salesforce_api_exposed",
+                        "severity": "medium",
+                        "title": f"Salesforce REST API version exposed: {host}/services/data/v",
+                        "host": host,
+                        "url": url,
+                        "module": "salesforce_recon",
+                    })
+                
+                elif check_path.startswith("/s/global-search") and status == 200:
+                    findings.append({
+                        "type": "salesforce_guest_search",
+                        "severity": "high",
+                        "title": f"Salesforce Community guest search enabled: {host}",
+                        "host": host,
+                        "url": url,
+                        "module": "salesforce_recon",
+                    })
+                
+                elif check_path == "/sfsites/aura" and status in (200, 302):
+                    findings.append({
+                        "type": "salesforce_aura_exposed",
+                        "severity": "medium",
+                        "title": f"Salesforce Aura framework exposed (check for guest-accessible components): {host}",
+                        "host": host,
+                        "url": url,
+                        "module": "salesforce_recon",
+                    })
+                
+                elif check_path.startswith("/services/apexrest/") and status in (200, 401, 403, 405):
+                    if status in (200, 405):  # 405 = endpoint exists but method wrong = exposed
+                        findings.append({
+                            "type": "salesforce_apex_rest",
+                            "severity": "high",
+                            "title": f"Salesforce Apex REST endpoint accessible: {host}/services/apexrest/",
+                            "host": host,
+                            "url": url,
+                            "module": "salesforce_recon",
+                        })
+                
+            except Exception:
+                pass
+        
+        # 3. Admin/debug page checks  
+        for check_path in _SALESFORCE_ADMIN_CHECKS[:5]:
+            try:
+                url = f"{scheme}://{host}{check_path}"
+                status, body, _ = http_get(url, timeout=5, retries=0)
+                
+                if check_path == "/_ui/common/apex/debug/ApexCSIPage" and status == 200:
+                    findings.append({
+                        "type": "salesforce_debug_console",
+                        "severity": "high",
+                        "title": f"Salesforce Debug Console exposed: {host}",
+                        "host": host,
+                        "url": url,
+                        "module": "salesforce_recon",
+                    })
+                
+                elif "/secur/logout.jsp" in check_path and status == 200:
+                    findings.append({
+                        "type": "salesforce_logout_open_redirect",
+                        "severity": "medium",
+                        "title": f"Salesforce logout page — potential open redirect via retURL parameter: {host}",
+                        "host": host,
+                        "url": url,
+                        "module": "salesforce_recon",
+                    })
+                
+                elif "/setup/" in check_path and status in (200, 302):
+                    findings.append({
+                        "type": "salesforce_setup_exposed",
+                        "severity": "high",
+                        "title": f"Salesforce Setup page accessible (should be auth-walled): {host}{check_path}",
+                        "host": host,
+                        "url": url,
+                        "module": "salesforce_recon",
+                    })
+                    
+            except Exception:
+                pass
+        
+        # 4. CORS check
+        try:
+            status, body, headers = http_get(f"{scheme}://{host}", timeout=5, retries=0,
+                                             extra_headers={"Origin": "https://evil.com"})
+            acao = (headers or {}).get("Access-Control-Allow-Origin", "")
+            if acao == "*" or acao == "https://evil.com":
+                findings.append({
+                    "type": "salesforce_cors_misconfig",
+                    "severity": "medium",
+                    "title": f"Salesforce CORS misconfiguration: reflects Origin ({acao})",
+                    "host": host,
+                    "module": "salesforce_recon",
+                })
+        except Exception:
+            pass
+    
+    return {
+        "findings": findings,
+        "total": len(findings),
+        "salesforce_hosts": len(sf_hosts),
+        "hosts_scanned": scanned,
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
     }
 

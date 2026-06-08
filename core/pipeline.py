@@ -323,7 +323,7 @@ PIPELINE_PHASES = [
             "takeover", "subjack", "cors_scan", "open_redirect",
             "host_header_injection", "infra_exposure", "cloud_enum",
             "default_creds", "dnssec", "waf_bypass", "tableau",
-            "github_repos", "supply_chain", "xss_scan",
+            "github_repos", "supply_chain", "xss_scan", "salesforce_recon",
         ],
         "rate_phase": "vulnscan",
         "parallel":   True,
@@ -1639,6 +1639,7 @@ class ReconRunner:
             "s3_scanner":  lambda: r.run_s3_scanner(domains, co.get("name", "")),
             "jwt_analysis": lambda: r.run_jwt_analysis(hosts, None),
             "xss_scan":    lambda: r.run_xss_scan(hosts, options.get("mode", "balanced")),
+            "salesforce_recon": lambda: r.run_salesforce_recon(hosts),
         }
 
     def _browser_recon_wrapper(self, cid: str, co: dict, hosts: list[dict] | None = None) -> dict:
