@@ -6486,26 +6486,36 @@ async function loadScreenshots(cid, co) {
   }));
   const mergedEp = [...epMap.values()];
 
-  html += _secHead('🔗', `Endpoints (${mergedEp.length})`, 'API paths and routes from JS analysis and browser crawl.', null);
-  if (mergedEp.length) {
+  // Filter out static resources and dedup
+  const epFiltered = mergedEp.filter(e => {
+    const t = (e.type||'').toLowerCase();
+    if (t === 'static_resource' || t === 'static resource') return false;
+    return true;
+  });
+
+  html += _secHead('🔗', `Endpoints (${epFiltered.length})`, 'API paths and routes from JS analysis and browser crawl. Click row to copy URL.', null);
+  if (epFiltered.length) {
+    html += `<div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0;align-items:center">
+      <input id="ep-filter" placeholder="Filter endpoints..." style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.7rem;width:200px" oninput="document.querySelectorAll('.ep-row').forEach(r=>{const t=r.textContent.toLowerCase();r.style.display=t.includes(this.value.toLowerCase())?'':'none'})">
+    </div>`;
+    
     const SEV = {critical:'#fb7185',high:'#fb923c',medium:'#fbbf24',low:'#4ade80',info:'#94a3b8'};
-    const epRows = mergedEp.slice(0, 500).map(e => {
+    const epRows = epFiltered.slice(0, 500).map(e => {
       const mc = _methodColor ? _methodColor(e.method||'GET') : '#60a5fa';
-      return `<tr>
+      const copyUrl = esc(e.url);
+      return `<tr class="ep-row" style="cursor:pointer" onclick="navigator.clipboard.writeText(this.getAttribute('data-copy')).then(()=>{this.style.background='rgba(0,201,167,.08)';setTimeout(()=>this.style.background='',600)})" data-copy="${copyUrl}" title="Click to copy URL">
         <td style="width:60px">
           <span style="font-family:var(--mono);font-size:.64rem;font-weight:700;color:${mc}">${esc(e.method||'GET')}</span>
         </td>
-        <td style="font-family:var(--mono);font-size:.7rem;word-break:break-all">
-          <a href="${esc(e.url)}" target="_blank" rel="noopener" style="color:var(--text1);text-decoration:none">${esc(e.url)}</a>
-        </td>
+        <td style="font-family:var(--mono);font-size:.7rem;word-break:break-all;color:var(--text1)">${esc(e.url)} 📋</td>
         <td style="font-size:.62rem;color:var(--teal);font-family:var(--mono)">${esc(e._src || e.source || '')}</td>
         <td style="font-size:.66rem;color:var(--text3)">${esc(e.type||'')}</td>
         <td style="font-size:.66rem;color:${e.severity?SEV[e.severity]||'#94a3b8':'var(--text3)'}">${e.severity?e.severity.toUpperCase():''}</td>
       </tr>`;
     }).join('');
-    const overflow = mergedEp.length > 500 ? `<tr><td colspan="5" style="padding:8px 12px;color:var(--text3);font-size:.7rem">${mergedEp.length - 500} more endpoints — export CSV for full list.</td></tr>` : '';
+    const overflow = epFiltered.length > 500 ? `<tr><td colspan="5" style="padding:8px 12px;color:var(--text3);font-size:.7rem">${epFiltered.length - 500} more endpoints — use filter or export CSV.</td></tr>` : '';
     html += `<div class="table-shell"><div class="tl-wrap" style="max-height:360px;overflow-y:auto"><table class="jobs-table">
-      <thead><tr><th>Method</th><th>URL</th><th>Source</th><th>Type</th><th>Risk</th></tr></thead>
+      <thead><tr><th>Method</th><th>URL (click to copy)</th><th>Source</th><th>Type</th><th>Risk</th></tr></thead>
       <tbody>${epRows}${overflow}</tbody></table></div></div>`;
   } else {
     html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">No endpoints discovered yet. Run wayback, urlfinder, js_endpoints or Playwright Recon.</div>`;
@@ -6523,6 +6533,9 @@ async function loadScreenshots(cid, co) {
 
   html += _secHead('🔑', `Secrets & Hardcoded Keys (${secArr.length})`, 'Credentials, tokens and API keys extracted from JS bundles and browser globals. Click value to reveal. Click file path to copy.', null);
   if (secArr.length) {
+    html += `<div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0;align-items:center">
+      <input id="sec-filter" placeholder="Filter secrets..." style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.7rem;width:200px" oninput="document.querySelectorAll('.sec-row').forEach(r=>{const t=r.textContent.toLowerCase();r.style.display=t.includes(this.value.toLowerCase())?'':'none'})">
+    </div>`;
     const SEVC = {critical:'#fb7185',high:'#fb923c',medium:'#fbbf24',low:'#4ade80'};
     function maskVal(v) {
       const s = String(v||'');
@@ -6534,9 +6547,9 @@ async function loadScreenshots(cid, co) {
       const src = s._src === 'playwright' ? `<span style="font-size:.56rem;color:var(--teal);opacity:.7;margin-left:3px">PW</span>` : '';
       const filePath = esc(s.file||'');
       const fileCell = s.file
-        ? `<span title="${filePath}&#10;Click to copy path" onclick="navigator.clipboard.writeText(this.getAttribute('data-path')).then(()=>{this.style.color='var(--teal)';setTimeout(()=>this.style.color='',1200)});return false" data-path="${filePath}" style="cursor:pointer;border-bottom:1px dashed var(--text3);font-size:.67rem;font-family:var(--mono);word-break:break-all">${filePath}</span>`
+        ? `<span title="${filePath}&#10;Click to copy path" onclick="event.stopPropagation();navigator.clipboard.writeText(this.getAttribute('data-path')).then(()=>{this.style.color='var(--teal)';setTimeout(()=>this.style.color='',1200)});return false" data-path="${filePath}" style="cursor:pointer;border-bottom:1px dashed var(--text3);font-size:.67rem;font-family:var(--mono);word-break:break-all">${filePath}</span>`
         : '<span style="font-size:.67rem;color:var(--text3)">—</span>';
-      return `<tr>
+      return `<tr class="sec-row">
         <td><span style="font-size:.68rem;background:rgba(251,146,60,.1);color:#fb923c;border:1px solid rgba(251,146,60,.2);border-radius:4px;padding:1px 6px">${esc(s.type)}</span>${src}</td>
         <td><code class="secret-value" style="cursor:pointer;font-size:.7rem;font-family:var(--mono);color:var(--text2)"
           onclick="var m=this.getAttribute('data-masked'),v=this.getAttribute('data-value');if(this.textContent===m){this.textContent=v;this.style.color='var(--teal)';this.style.cursor='pointer'}else{this.textContent=m;this.style.color='var(--text2)';this.style.cursor='pointer'}" data-masked="${esc(maskVal(s.value))}" data-value="${esc(String(s.value||''))}">${esc(maskVal(s.value))}</code></td>
@@ -6599,6 +6612,41 @@ async function loadScreenshots(cid, co) {
     }
   } else {
     html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">No Postman collections found. Run postman_collections module to discover exposed API collections.</div>`;
+  }
+
+  // ── VULNERABILITY FINDINGS (host header, redirect, CORS, CRLF, XSS, etc) ───
+  const vulnModules = ['host_header_injection', 'open_redirect', 'cors_scan', 'xss_scan',
+                       'crlf_injection', 'smtp_probe', 'snmp_probe', 'infra_exposure',
+                       'default_creds', 'salesforce_recon', 'git_leaks'];
+  const vulnFindings = (co?.findings || []).filter(f => vulnModules.includes(f.module));
+  
+  if (vulnFindings.length) {
+    const sevOrder = {critical:0, high:1, medium:2, low:3, info:4};
+    vulnFindings.sort((a,b) => (sevOrder[a.severity]||5) - (sevOrder[b.severity]||5));
+    
+    // Filter chips
+    const vulnModulesUniq = [...new Set(vulnFindings.map(f => f.module))].sort();
+    const vulnFilterId = 'vuln-filter';
+    html += _secHead('🎯', `Vulnerability Findings (${vulnFindings.length})`, 'Host header injection, open redirects, CORS misconfigs, XSS, CRLF, default creds, and other active checks.', null);
+    html += `<div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0;align-items:center">
+      <input id="${vulnFilterId}" placeholder="Filter findings..." style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.7rem;width:180px" oninput="document.querySelectorAll('.vuln-row').forEach(r=>{const t=r.textContent.toLowerCase();r.style.display=t.includes(this.value.toLowerCase())?'':'none'})">
+    </div>`;
+    
+    const vulnRows = vulnFindings.slice(0, 100).map(f => {
+      const clr = f.severity === 'critical' ? '#fb7185' : f.severity === 'high' ? '#fb923c' : f.severity === 'medium' ? '#fbbf24' : f.severity === 'low' ? '#4ade80' : '#94a3b8';
+      const moduleLabel = f.module ? f.module.replace(/_/g, ' ') : '';
+      const copyVal = esc(f.url||f.value||'');
+      return `<tr class="vuln-row" style="cursor:pointer" onclick="navigator.clipboard.writeText(this.getAttribute('data-copy')).then(()=>{this.style.background='rgba(0,201,167,.08)';setTimeout(()=>this.style.background='',600)})" data-copy="${copyVal}" title="Click to copy: ${copyVal}">
+        <td><span style="font-size:.62rem;font-weight:700;color:${clr}">${(f.severity||'').toUpperCase()}</span></td>
+        <td style="font-size:.72rem"><span style="color:var(--teal);font-size:.6rem;opacity:.7">${esc(moduleLabel)}</span> ${esc(f.title||f.type||'')}</td>
+        <td style="font-size:.67rem;color:var(--text3);font-family:var(--mono);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(f.host||'')}">${esc((f.host||'—').slice(0,35))}</td>
+        <td style="font-size:.64rem;color:var(--teal);font-family:var(--mono);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${copyVal}">${esc((f.url||f.value||'').slice(0,50))} 📋</td>
+      </tr>`;
+    }).join('');
+    
+    html += `<div class="table-shell"><div class="tl-wrap" style="max-height:400px;overflow-y:auto"><table class="jobs-table">
+      <thead><tr><th>Sev</th><th>Finding</th><th>Host</th><th>URL / Value (click to copy)</th></tr></thead>
+      <tbody>${vulnRows}</tbody></table></div></div>`;
   }
 
   // ── Playwright findings summary (if any) ─────────────────────────────────

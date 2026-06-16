@@ -50,3 +50,4 @@ config/admins.json
 config/settings.json
 wordlists/
 bin/
+fotoscomplemento_guest_pii_leak.txt
