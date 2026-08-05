@@ -280,11 +280,38 @@ class JobScheduler:
                 time.sleep(self.poll_interval)
 
     def _watchdog_loop(self) -> None:
+        _consecutive_ok = 0
+        _required_ok = 6  # 6 x 5s = 30s of clean health before auto-releasing hold
         while not self._stop.is_set():
             try:
                 reason = self._resource_violation()
                 if reason:
+                    _consecutive_ok = 0
                     self._trigger_safety_hold(reason)
+                elif self._safety_stop.is_set():
+                    _consecutive_ok += 1
+                    if _consecutive_ok >= _required_ok:
+                        self._safety_stop.clear()
+                        _consecutive_ok = 0
+                        now = datetime.now().isoformat(timespec="seconds")
+                        try:
+                            if hasattr(self.db, "release_safety_hold"):
+                                self.db.release_safety_hold()
+                        except Exception:
+                            pass
+                        for cid, state in list(self.pipeline_state.items()):
+                            if isinstance(state, dict) and state.get("status") == "stopped":
+                                reason_log = str(state.get("log", [{}])[-1].get("msg", ""))
+                                if "SAFETY-WATCHDOG" in reason_log:
+                                    state["status"] = "queued"
+                                    state.setdefault("log", []).append({"ts": now, "msg": "SAFETY-WATCHDOG released — resources healthy"})
+                                    if self.save_pipeline_state:
+                                        try:
+                                            self.save_pipeline_state(cid)
+                                        except Exception:
+                                            pass
+                else:
+                    _consecutive_ok = 0
                 self._trim_pipeline_logs()
                 time.sleep(5)
             except Exception:
