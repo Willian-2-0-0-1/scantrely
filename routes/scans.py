@@ -427,21 +427,32 @@ def create_scan_blueprint(
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+    ALERT_RULE_TYPES = {
+        "new_host", "new_port", "new_tech", "cert_expiring",
+        "status_change", "cve_critical", "waf_change", "supply_chain_critical",
+    }
+
     @bp.route("/api/alert-rules/<cid>", methods=["GET"])
     @require_auth
     def api_alert_rules(cid: str):
         try:
-            rules = db.get_alert_rules(cid) if hasattr(db, "get_alert_rules") else []
-            return jsonify({"rules": rules})
+            rules = db.get_all_alert_rules(cid) if hasattr(db, "get_all_alert_rules") else []
+            return jsonify({"rules": rules, "rule_types": sorted(ALERT_RULE_TYPES)})
         except Exception:
-            return jsonify({"rules": []})
+            return jsonify({"rules": [], "rule_types": sorted(ALERT_RULE_TYPES)})
 
     @bp.route("/api/alert-rules/<cid>", methods=["POST"])
     @require_auth
     def api_create_alert_rule(cid: str):
         body = request.get_json(force=True) or {}
+        rule_type = body.get("rule_type", "")
+        if rule_type not in ALERT_RULE_TYPES:
+            return jsonify({"error": "Tipo de regra inválido"}), 400
         try:
-            rid = db.create_alert_rule(cid, body.get("name",""), body.get("rule_type",""), body.get("channels",[]))
+            rid = db.create_alert_rule(
+                cid, body.get("name", ""), rule_type,
+                body.get("channels", []), bool(body.get("enabled", True)),
+            )
             return jsonify({"id": rid, "ok": True})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -450,8 +461,61 @@ def create_scan_blueprint(
     @require_auth
     def api_update_alert_rule(cid: str, rid: str):
         body = request.get_json(force=True) or {}
-        # Simple toggle: just update enabled
-        return jsonify({"ok": True})
+        fields = {}
+        if "name" in body:
+            fields["name"] = body["name"]
+        if "rule_type" in body:
+            if body["rule_type"] not in ALERT_RULE_TYPES:
+                return jsonify({"error": "Tipo de regra inválido"}), 400
+            fields["rule_type"] = body["rule_type"]
+        if "enabled" in body:
+            fields["enabled"] = bool(body["enabled"])
+        if "channels" in body:
+            fields["channels"] = body["channels"]
+        try:
+            ok = db.update_alert_rule(cid, rid, **fields)
+            if not ok:
+                return jsonify({"error": "Regra não encontrada"}), 404
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @bp.route("/api/alert-rules/<cid>/<rid>", methods=["DELETE"])
+    @require_auth
+    def api_delete_alert_rule(cid: str, rid: str):
+        try:
+            ok = db.delete_alert_rule(cid, rid)
+            if not ok:
+                return jsonify({"error": "Regra não encontrada"}), 404
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    FINDING_TRIAGE_STATUSES = {"open", "in_progress", "fixed", "accepted_risk"}
+
+    @bp.route("/api/findings/<cid>/triage", methods=["GET"])
+    @require_auth
+    def api_get_finding_triage(cid: str):
+        try:
+            triage = db.get_finding_triage(cid) if hasattr(db, "get_finding_triage") else {}
+            return jsonify({"triage": triage})
+        except Exception:
+            return jsonify({"triage": {}})
+
+    @bp.route("/api/findings/<cid>/triage", methods=["POST"])
+    @require_auth
+    def api_set_finding_triage(cid: str):
+        body = request.get_json(force=True) or {}
+        finding_key = body.get("finding_key", "")
+        status = body.get("status", "")
+        if not finding_key or status not in FINDING_TRIAGE_STATUSES:
+            return jsonify({"error": "finding_key/status inválido"}), 400
+        try:
+            user = getattr(g, "user", "") or ""
+            db.set_finding_triage(cid, finding_key, status, body.get("note", ""), str(user))
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @bp.route("/api/timeline/<cid>", methods=["GET"])
     @require_auth

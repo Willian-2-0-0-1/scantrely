@@ -34,6 +34,35 @@ def _mem_available_mb() -> int:
                     return int(line.split()[1]) // 1024
     except Exception:
         pass
+    # Non-Linux fallback (Windows dev boxes, etc.) so the memory watchdog
+    # isn't silently a no-op outside of Linux containers.
+    try:
+        import psutil  # type: ignore
+        return int(psutil.virtual_memory().available // (1024 * 1024))
+    except Exception:
+        pass
+    try:
+        import ctypes
+
+        class _MEMSTAT(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        stat = _MEMSTAT()
+        stat.dwLength = ctypes.sizeof(_MEMSTAT)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):  # type: ignore[attr-defined]
+            return int(stat.ullAvailPhys // (1024 * 1024))
+    except Exception:
+        pass
     return 999999
 
 
@@ -283,16 +312,26 @@ class JobScheduler:
                                             pass
                 else:
                     _consecutive_ok = 0
+                self._trim_pipeline_logs()
                 time.sleep(5)
             except Exception:
                 time.sleep(5)
 
+    def _trim_pipeline_logs(self, keep: int = 500) -> None:
+        """Cap in-memory pipeline log lists so long-running runs across many
+        concurrent company pipelines don't grow unbounded RAM usage."""
+        for state in list(self.pipeline_state.values()):
+            log = state.get("log") if isinstance(state, dict) else None
+            if isinstance(log, list) and len(log) > keep:
+                del log[: len(log) - keep]
+
     def _resource_violation(self) -> str:
         if not self.watchdog_enabled:
             return ""
-        load1 = os.getloadavg()[0]
-        if load1 > self.watchdog_max_load:
-            return f"watchdog load {load1:.2f} > {self.watchdog_max_load:.2f}"
+        if hasattr(os, "getloadavg"):
+            load1 = os.getloadavg()[0]
+            if load1 > self.watchdog_max_load:
+                return f"watchdog load {load1:.2f} > {self.watchdog_max_load:.2f}"
         mem_mb = _mem_available_mb()
         if mem_mb < self.watchdog_min_mem_mb:
             return f"watchdog mem {mem_mb}MB < {self.watchdog_min_mem_mb}MB"

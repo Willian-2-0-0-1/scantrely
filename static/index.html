@@ -7,9 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" crossorigin="anonymous">
-  <link rel="stylesheet" href="dashboard.css?v=22">
+  <link rel="stylesheet" href="dashboard.css?v=24">
   <script src="js/config.js?v=1"></script>
-<script src="js/i18n.js?v=5"></script>
+<script src="js/i18n.js?v=6"></script>
 </head>
 <body>
 
@@ -52,6 +52,14 @@
     <div class="login-err" id="login-err"></div>
   </div>
 </div>
+<script>
+(function(){
+  try {
+    var t = localStorage.getItem("asmToken") || localStorage.getItem("asm_token");
+    if (t) document.getElementById("login-screen").style.display = "none";
+  } catch(e) {}
+})();
+</script>
 
 <!-- ═══════════════════════════ SIDEBAR ══ -->
 <aside class="sidebar" id="app-sidebar" aria-label="Primary navigation">
@@ -65,10 +73,10 @@
   <nav class="sidebar-nav">
     <div class="nav-section" data-i18n-key="nav_workspace">Workspace</div>
     <button class="nav-item active" id="nav-all" onclick="showPage('companies')">
-      <span class="nav-icon">◈</span> Todas as Empresas
+      <span class="nav-icon">◈</span> <span data-i18n-key="nav_all">All Companies</span>
     </button>
     <button class="nav-item" id="nav-jobs" onclick="showPage('jobs')">
-      <span class="nav-icon">▣</span> Job Queue
+      <span class="nav-icon">▣</span> <span data-i18n-key="nav_jobs">Job Queue</span>
       <span class="nav-badge" id="nav-jobs-badge" style="display:none"></span>
       <span class="nav-badge" id="nav-playwright-badge" style="display:none;background:var(--orange);color:#050a14">PW</span>
     </button>
@@ -77,23 +85,35 @@
     <button class="nav-add" onclick="openAddCompany()" data-i18n-key="add_company_button">＋ Add Company</button>
     <div class="nav-section" id="nav-admin-section" style="display:none" data-i18n-key="nav_admin">Admin</div>
     <button class="nav-item" id="nav-admins" style="display:none" onclick="showPage('admins')">
-      <span class="nav-icon">👥</span> Manage Admins
+      <span class="nav-icon">👥</span> <span data-i18n-key="nav_admins">Manage Admins</span>
     </button>
     <button class="nav-item" id="nav-tools" onclick="showPage('tools')">
-      <span class="nav-icon">🔧</span> Tools
+      <span class="nav-icon">🔧</span> <span data-i18n-key="nav_tools">Tools</span>
+    </button>
+    <button class="nav-item" id="nav-bbhelper" onclick="showPage('bbhelper')">
+      <span class="nav-icon">🎯</span> <span data-i18n-key="nav_bbhelper">Bug Bounty Helper</span>
+    </button>
+    <button class="nav-item" id="nav-exttools" onclick="showPage('exttools')">
+      <span class="nav-icon">✦</span> <span data-i18n-key="nav_exttools">External Tools</span>
+    </button>
+    <button class="nav-item" id="nav-bbprograms" onclick="showPage('bbprograms')">
+      <span class="nav-icon">🏆</span> <span data-i18n-key="nav_bbprograms">Bug Bounty Programs</span>
+    </button>
+    <button class="nav-item" id="nav-generators" onclick="showPage('generators')">
+      <span class="nav-icon">⚙️</span> <span data-i18n-key="nav_generators">Geradores</span>
     </button>
     <button class="nav-item" onclick="showPage('settings')">
-      <span class="nav-icon">⚙</span> API Keys
+      <span class="nav-icon">⚙</span> <span data-i18n-key="nav_settings">API Keys</span>
     </button>
     <button class="nav-item" id="nav-runtime" onclick="showPage('runtime')">
-      <span class="nav-icon">⚡</span> Performance
+      <span class="nav-icon">⚡</span> <span data-i18n-key="nav_runtime">Performance</span>
     </button>
   </nav>
   <div class="nav-user" id="nav-user">
     <div class="nu-name" id="nu-name">—</div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px">
       <div class="nu-role" id="nu-role">—</div>
-      <button class="nu-logout" onclick="doLogout()">Sair</button>
+      <button class="nu-logout" onclick="doLogout()" data-i18n-key="nav_logout">Sair</button>
     </div>
   </div>
   <div class="sidebar-footer">
@@ -113,12 +133,16 @@
   <option value="es">Español</option>
 </select>
     <span class="topbar-sep"></span>
-    <span class="topbar-tagline">MONITORAMENTO DE SUPERFÍCIE DE ATAQUE EXTERNA</span>
+    <span class="topbar-tagline" data-i18n-key="topbar_tagline">MONITORAMENTO DE SUPERFÍCIE DE ATAQUE EXTERNA</span>
     <div class="topbar-crumb">
-      <span class="root" onclick="showPage('companies')">Dashboard</span>
+      <span class="root" onclick="showPage('companies')" data-i18n-key="crumb_dashboard">Dashboard</span>
       <span class="sep" id="crumb-sep" style="display:none">/</span>
       <span class="current" id="crumb-current"></span>
     </div>
+    <button class="topbar-search-btn" onclick="openGlobalSearch()" title="Busca global (Ctrl+K)">
+      🔍 <span class="topbar-search-label" data-i18n-key="search_label">Buscar...</span><span class="topbar-search-kbd">Ctrl+K</span>
+    </button>
+    <div id="topbar-scan-progress" class="topbar-scan-progress" style="display:none" onclick="_goToScanProgress()" title="Ir para o scan em execução"></div>
     <div class="topbar-space"></div>
     <div id="topbar-pill"></div>
     
@@ -127,7 +151,7 @@
     <button id="stop-pipeline-btn" class="btn btn-sm" style="display:none;font-size:.68rem;background:var(--red-dim);color:#fb7185;border:1px solid rgba(244,63,94,0.3)" onclick="stopScan()">■ STOP</button>
     <button class="btn-scan btn-scan-sm" id="topbar-scan-btn" style="display:none" onclick="openScanModal(state.currentId)">
       <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 2l10 6-10 6V2z"/></svg>
-      New Scan
+      <span data-i18n-key="new_scan_btn">New Scan</span>
     </button>
   </header>
 
@@ -136,15 +160,15 @@
     <!-- ALL COMPANIES VIEW -->
     <div id="view-all" class="view active">
       <div class="page-hdr">
-        <div class="page-title">All Companies</div>
+        <div class="page-title" data-i18n-key="view_all_title">All Companies</div>
         <div class="page-desc" id="all-desc">Loading...</div>
       </div>
       <div id="portfolio-overview"></div>
 
       <div class="companies-grid" id="companies-grid"></div>
       <div class="empty" id="all-empty" style="display:none">
-        <b>No companies yet</b>
-        Add a company and run BBOT to start mapping attack surfaces.
+        <b data-i18n-key="view_all_empty_title">No companies yet</b>
+        <span data-i18n-key="view_all_empty_desc">Add a company and run a scan to start mapping attack surfaces.</span>
       </div>
     </div>
 
@@ -157,11 +181,13 @@
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0;margin-top:2px">
           <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="openEditCompanyModal(state.currentId)" title="Edit scope">✏ Editar Escopo</button>
+                  onclick="openEditCompanyModal(state.currentId)" title="Edit scope" data-i18n-key="btn_edit_scope">✏ Editar Escopo</button>
           <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="exportHTMLReport(allCompanies().find(c=>c.id===state.currentId))" title="Export HTML report">📄 Exportar Relatório</button>
+                  onclick="exportHTMLReport(allCompanies().find(c=>c.id===state.currentId))" title="Export HTML report" data-i18n-key="btn_export_html">📄 Exportar Relatório</button>
+          <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
+                  onclick="exportPDFReport(allCompanies().find(c=>c.id===state.currentId))" title="Export PDF report" data-i18n-key="btn_export_pdf">🖨 Exportar PDF</button>
           <button id="clear-data-btn" class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px;color:var(--red)"
-                  onclick="clearReconData(state.currentId)" title="Clear all scan findings from DB">🗑 Limpar Dados</button>
+                  onclick="clearReconData(state.currentId)" title="Clear all scan findings from DB" data-i18n-key="btn_clear_data">🗑 Limpar Dados</button>
         </div>
       </div>
       <!-- Individual tab counts — read by JS, aggregated into group buttons -->
@@ -176,13 +202,14 @@
       <div class="tab-bar-wrap">
         <button class="tab-scroll-btn tab-scroll-left" id="tab-scroll-left" onclick="scrollTabBar(-1)" aria-label="Scroll tabs left" style="display:none">‹</button>
       <div class="tab-bar" id="co-tabs" role="tablist" aria-label="Company sections" onscroll="updateTabScrollBtns()">
-        <button class="tab-btn active" data-group="overview"   onclick="switchGroup('overview',this)">Overview</button>
-        <button class="tab-btn"        data-group="hosts"      onclick="switchGroup('hosts',this)">Hosts <span class="tab-count" id="gc-hosts"></span></button>
-        <button class="tab-btn"        data-group="infragroup" onclick="switchGroup('infragroup',this)">Infraestrutura</button>
-        <button class="tab-btn"        data-group="screenshots" onclick="switchGroup('screenshots',this)">Recon <span class="tab-count" id="gc-screenshots"></span></button>
-        <button class="tab-btn"        data-group="operation"  onclick="switchGroup('operation',this)">Operation <span class="tab-count" id="gc-operation"></span></button>
-        <button class="tab-btn"        data-group="logs"       onclick="switchGroup('logs',this)">Logs <span class="tab-count" id="gc-logs"></span></button>
-        <button class="tab-btn"        data-group="pipeline"   onclick="switchGroup('pipeline',this)">Pipeline</button>
+        <button class="tab-btn active" data-group="overview"   onclick="switchGroup('overview',this)"><span data-i18n-key="tab_overview">Overview</span></button>
+        <button class="tab-btn"        data-group="hosts"      onclick="switchGroup('hosts',this)"><span data-i18n-key="tab_hosts">Hosts</span> <span class="tab-count" id="gc-hosts"></span></button>
+        <button class="tab-btn"        data-group="vulns"      onclick="switchGroup('vulns',this)"><span data-i18n-key="tab_vulns">Vulnerabilidades</span> <span class="tab-count" id="gc-vulns"></span></button>
+        <button class="tab-btn"        data-group="infragroup" onclick="switchGroup('infragroup',this)"><span data-i18n-key="tab_infra">Infraestrutura</span></button>
+        <button class="tab-btn"        data-group="screenshots" onclick="switchGroup('screenshots',this)"><span data-i18n-key="tab_recon">Recon</span> <span class="tab-count" id="gc-screenshots"></span></button>
+        <button class="tab-btn"        data-group="operation"  onclick="switchGroup('operation',this)"><span data-i18n-key="tab_operation">Operation</span> <span class="tab-count" id="gc-operation"></span></button>
+        <button class="tab-btn"        data-group="logs"       onclick="switchGroup('logs',this)"><span data-i18n-key="tab_logs">Logs</span> <span class="tab-count" id="gc-logs"></span></button>
+        <button class="tab-btn"        data-group="pipeline"   onclick="switchGroup('pipeline',this)"><span data-i18n-key="tab_pipeline">Pipeline</span></button>
         </div>
         <button class="tab-scroll-btn tab-scroll-right" id="tab-scroll-right" onclick="scrollTabBar(1)" aria-label="Scroll tabs right">›</button>
       </div>
@@ -224,28 +251,48 @@
     <!-- SETTINGS VIEW -->
     <div id="view-settings" class="view">
       <div class="page-hdr">
-        <div class="page-title">⚙ Chaves de API & Configurações</div>
-        <div class="page-desc">Configure third-party intelligence APIs used by the recon modules.</div>
+        <div class="page-title" data-i18n-key="settings_title">⚙ Chaves de API & Configurações</div>
+        <div class="page-desc" data-i18n-key="settings_desc">Configure third-party intelligence APIs used by the recon modules.</div>
       </div>
       <div class="settings-grid" id="settings-grid"></div>
       <div class="settings-save-bar">
-        <div class="save-status" id="settings-save-status">Unsaved changes will be applied when you click Save.</div>
-        <button class="btn btn-secondary" onclick="loadSettings()">↺ Reload</button>
-        <button class="btn btn-primary" onclick="saveSettings()">💾 Save All Settings</button>
+        <div class="save-status" id="settings-save-status" data-i18n-key="settings_unsaved">Unsaved changes will be applied when you click Save.</div>
+        <button class="btn btn-secondary" onclick="loadSettings()" data-i18n-key="btn_reload">↺ Reload</button>
+        <button class="btn btn-primary" onclick="saveSettings()" data-i18n-key="btn_save_settings">💾 Save All Settings</button>
+      </div>
+
+      <div class="page-hdr" style="margin-top:24px;">
+        <div class="page-title" data-i18n-key="webhooks_title">🔔 Notificações / Webhooks</div>
+        <div class="page-desc" data-i18n-key="webhooks_desc">Receba alertas de fim de scan (scan_complete) e findings críticos (critical_finding) via Telegram, Discord, Slack, WhatsApp, Signal, Email ou CLI. One agent, one memory, every surface.</div>
+      </div>
+      <div id="webhooks-list" class="settings-group"></div>
+      <div class="settings-group">
+        <div class="sg-title" data-i18n-key="webhooks_add_title">➕ Adicionar Webhook</div>
+        <div class="sg-field">
+          <div class="sg-label"><span data-i18n-key="webhooks_platform">Plataforma</span></div>
+          <select class="sg-input" id="wh-new-type" onchange="renderWebhookFormFields()" style="max-width:280px;"></select>
+        </div>
+        <div id="wh-new-fields"></div>
+        <div class="sg-field">
+          <div class="sg-label"><span data-i18n-key="webhooks_events">Eventos</span></div>
+          <div id="wh-new-events"></div>
+        </div>
+        <button class="btn btn-primary" onclick="addWebhook()" data-i18n-key="btn_add_webhook">Adicionar Webhook</button>
+        <span class="save-status" id="webhooks-save-status"></span>
       </div>
     </div>
 
     <!-- RUNTIME CONFIG VIEW -->
     <div id="view-runtime" class="view">
       <div class="page-hdr">
-        <div class="page-title">⚡ Performance & Concorrência</div>
-        <div class="page-desc">Controla workers, limites de processos, watchdog e rate limiting. Requer restart do servidor para aplicar.</div>
+        <div class="page-title" data-i18n-key="runtime_title">⚡ Performance & Concorrência</div>
+        <div class="page-desc" data-i18n-key="runtime_desc">Controla workers, limites de processos, watchdog e rate limiting. Requer restart do servidor para aplicar.</div>
       </div>
       <div class="settings-grid" id="runtime-grid"></div>
       <div class="settings-save-bar">
-        <span class="save-status" id="runtime-save-status">Ready</span>
-        <button class="btn btn-secondary" onclick="loadRuntimeConfig()">↺ Reload</button>
-        <button class="btn btn-primary" onclick="saveRuntimeConfig()">💾 Save Config</button>
+        <span class="save-status" id="runtime-save-status" data-i18n-key="runtime_ready">Ready</span>
+        <button class="btn btn-secondary" onclick="loadRuntimeConfig()" data-i18n-key="btn_reload">↺ Reload</button>
+        <button class="btn btn-primary" onclick="saveRuntimeConfig()" data-i18n-key="btn_save_config">💾 Save Config</button>
       </div>
     </div>
 
@@ -253,55 +300,57 @@
     <div id="view-jobs" class="view">
       <div class="jobs-hero">
         <div>
-          <div class="section-kicker">Operação</div>
-          <div class="page-title">Fila de Jobs</div>
-          <div class="page-desc">Acompanhe o que está rodando agora, o backlog por empresa e o histórico da fila.</div>
+          <div class="section-kicker" data-i18n-key="jobs_kicker">Operação</div>
+          <div class="page-title" data-i18n-key="jobs_title">Fila de Jobs</div>
+          <div class="page-desc" data-i18n-key="jobs_desc">Acompanhe o que está rodando agora, o backlog por empresa e o histórico da fila.</div>
         </div>
         <div class="jobs-toolbar">
           <select class="fi" id="jobs-type-filter" onchange="loadJobs()" aria-label="Filtrar por tipo">
-            <option value="">Todos os Tipos</option>
+            <option value="" data-i18n-key="jobs_filter_all_types">Todos os Tipos</option>
             <option value="pipeline">Pipeline ASM</option>
             <option value="playwright_recon">Playwright Recon</option>
           </select>
           <select class="fi" id="jobs-status-filter" onchange="loadJobs()" aria-label="Filtrar por status">
-            <option value="">Todos os Status</option>
-            <option value="running">Rodando agora</option>
-            <option value="pending">Pendente</option>
-            <option value="done">Concluído</option>
-            <option value="error">Erro</option>
-            <option value="stopped">Parado</option>
-            <option value="cancelled">Cancelado</option>
+            <option value="" data-i18n-key="jobs_filter_all_status">Todos os Status</option>
+            <option value="running" data-i18n-key="jobs_status_running">Rodando agora</option>
+            <option value="pending" data-i18n-key="jobs_status_pending">Pendente</option>
+            <option value="done" data-i18n-key="jobs_status_done">Concluído</option>
+            <option value="error" data-i18n-key="jobs_status_error">Erro</option>
+            <option value="stopped" data-i18n-key="jobs_status_stopped">Parado</option>
+            <option value="cancelled" data-i18n-key="jobs_status_cancelled">Cancelado</option>
           </select>
-          <button class="btn btn-secondary" onclick="loadJobs()">Atualizar</button>
+          <button class="btn btn-secondary" onclick="loadJobs()" data-i18n-key="btn_refresh">Atualizar</button>
+          <button class="btn btn-scan" id="btn-scan-all" onclick="scanAllCompanies()" style="font-size:.75rem;padding:5px 13px">&#9654; Escanear Todos</button>
+          <button class="btn btn-danger" id="btn-cancel-all-scans" onclick="cancelAllScans()">&#9632; Cancelar Todos</button>
         </div>
       </div>
       <div id="jobs-summary" class="jobs-summary"></div>
       <div id="jobs-company-cards" class="jobs-company-cards"></div>
       <div id="jobs-drilldown"></div>
-      
+
       <div class="table-shell jobs-shell">
         <div class="table-topline">
           <div>
-            <div class="table-title">Jobs</div>
+            <div class="table-title" data-i18n-key="jobs_table_title">Jobs</div>
             <div class="table-note" id="jobs-note">Carregando jobs...</div>
           </div>
           <div class="jobs-table-actions">
-            <button type="button" class="jobs-delete-filter" id="jobs-delete-filter" onclick="deleteJobsFilter()" style="display:none">Limpar registros</button>
-            <button type="button" class="jobs-refresh-btn" id="jobs-badge" onclick="showPage('jobs'); loadJobs();">Atualizar fila</button>
+            <button type="button" class="jobs-delete-filter" id="jobs-delete-filter" onclick="deleteJobsFilter()" style="display:none" data-i18n-key="jobs_clear_filtered">Limpar registros</button>
+            <button type="button" class="jobs-refresh-btn" id="jobs-badge" onclick="showPage('jobs'); loadJobs();" data-i18n-key="jobs_refresh_queue">Atualizar fila</button>
           </div>
         </div>
         <div class="tl-wrap">
           <table class="jobs-table">
             <thead>
               <tr>
-                <th>Status</th>
-                <th>Domínio / Subdomínio</th>
-                <th>Tipo</th>
-                <th>Criado</th>
-                <th>Iniciado</th>
-                <th>Finalizado</th>
-                <th>Tentativas</th>
-                <th>Ações</th>
+                <th data-i18n-key="jobs_th_status">Status</th>
+                <th data-i18n-key="jobs_th_target">Domínio / Subdomínio</th>
+                <th data-i18n-key="jobs_th_type">Tipo</th>
+                <th data-i18n-key="jobs_th_created">Criado</th>
+                <th data-i18n-key="jobs_th_started">Iniciado</th>
+                <th data-i18n-key="jobs_th_finished">Finalizado</th>
+                <th data-i18n-key="jobs_th_attempts">Tentativas</th>
+                <th data-i18n-key="jobs_th_actions">Ações</th>
               </tr>
             </thead>
             <tbody id="jobs-tbody"></tbody>
@@ -319,12 +368,12 @@
     <div id="view-tools" class="view">
       <div class="page-hdr" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div>
-          <div class="page-title">🔧 Tool Registry</div>
-          <div class="page-desc">All recon tools — status, versions, and one-click runs.</div>
+          <div class="page-title" data-i18n-key="tools_title">🔧 Tool Registry</div>
+          <div class="page-desc" data-i18n-key="tools_desc">All recon tools — status, versions, and one-click runs.</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select class="fi" id="tools-cat-filter" onchange="filterTools()" style="min-width:140px">
-            <option value="">All Categories</option>
+            <option value="" data-i18n-key="tools_all_categories">All Categories</option>
             <option value="subdomain">Subdomain</option>
             <option value="port_scan">Port Scan</option>
             <option value="http">HTTP</option>
@@ -337,13 +386,13 @@
             <option value="util">Util</option>
           </select>
           <select class="fi" id="tools-avail-filter" onchange="filterTools()" style="min-width:130px">
-            <option value="">All Status</option>
+            <option value="" data-i18n-key="tools_all_status">All Status</option>
             <option value="available">Installed</option>
             <option value="missing">Not Installed</option>
             <option value="enabled">Enabled</option>
             <option value="disabled">Disabled</option>
           </select>
-          <button class="btn btn-secondary" onclick="loadToolsStatus()">↺ Refresh</button>
+          <button class="btn btn-secondary" onclick="loadToolsStatus()" data-i18n-key="btn_reload">↺ Refresh</button>
         </div>
       </div>
       <div id="tools-playwright-config" style="margin-bottom:18px"></div>
@@ -351,21 +400,55 @@
       <div id="tools-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px"></div>
     </div>
 
+    <!-- BUG BOUNTY HELPER VIEW -->
+    <div id="view-bbhelper" class="view">
+      <div class="page-hdr">
+        <div class="page-title" data-i18n-key="bbh_title">🎯 Bug Bounty Helper</div>
+        <div class="page-desc" data-i18n-key="bbh_desc">Google Dorks and OSINT shortcuts for a target domain — click a module to open the right search engine / service.</div>
+      </div>
+      <div class="bbh-domain-strip">
+        <input type="text" id="bbh-domain" placeholder="example.com"
+               data-i18n-placeholder="bbh_domain_placeholder"
+               oninput="bbhOnDomainInput()"
+               autocomplete="off" spellcheck="false">
+        <span class="bbh-tip" data-i18n-key="bbh_domain_tip">TIP: Add ?d=example.com to the URL to auto-load a domain</span>
+      </div>
+      <div id="bbh-cat-tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
+      <div id="bbh-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px"></div>
+    </div>
+
+    <!-- EXTERNAL TOOLS VIEW -->
+    <div id="view-exttools" class="view">
+      <div class="page-hdr">
+        <div class="page-title" data-i18n-key="ext_title">✦ External Tools</div>
+        <div class="page-desc" data-i18n-key="ext_desc">One-click shortcuts to external recon, OSINT and utility tools used during bug bounty engagements.</div>
+      </div>
+      <div id="ext-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
+    </div>
+
+    <!-- BUG BOUNTY PROGRAMS VIEW -->
+    <div id="view-bbprograms" class="view">
+    </div>
+
+    <!-- GENERATORS VIEW -->
+    <div id="view-generators" class="view">
+    </div>
+
     <!-- ADMINS VIEW -->
     <div id="view-admins" class="view">
       <div class="page-hdr" style="display:flex;align-items:flex-start;justify-content:space-between">
         <div>
-          <div class="page-title">👥 Admin Accounts</div>
-          <div class="page-desc">Manage who has access to the ASM Platform.</div>
+          <div class="page-title" data-i18n-key="admins_title">👥 Admin Accounts</div>
+          <div class="page-desc" data-i18n-key="admins_desc">Manage who has access to the ASM Platform.</div>
         </div>
-        <button class="btn btn-primary" onclick="openAdminModal()">＋ Add Admin</button>
+        <button class="btn btn-primary" onclick="openAdminModal()" data-i18n-key="btn_add_admin">＋ Add Admin</button>
       </div>
       <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:4px">
         <div class="tl-wrap">
           <table class="admin-table" id="admins-table">
             <thead><tr>
-              <th>Username</th><th>Email</th><th>Role</th>
-              <th>Created</th><th>Last Login</th><th>Actions</th>
+              <th data-i18n-key="admins_th_username">Username</th><th data-i18n-key="admins_th_email">Email</th><th data-i18n-key="admins_th_role">Role</th>
+              <th data-i18n-key="admins_th_created">Created</th><th data-i18n-key="admins_th_lastlogin">Last Login</th><th data-i18n-key="admins_th_actions">Actions</th>
             </tr></thead>
             <tbody id="admins-tbody"></tbody>
           </table>
@@ -670,12 +753,24 @@
   </div>
 </div>
 
+<!-- ── Global Search (Ctrl+K) ── -->
+<div class="modal-overlay gsearch-overlay" id="modal-global-search" onclick="if(event.target===this)closeGlobalSearch()">
+  <div class="modal gsearch-modal">
+    <input type="text" id="gsearch-input" class="gsearch-input" placeholder="Buscar empresas, hosts, dominios, findings... (Ctrl+K)" autocomplete="off" oninput="onGlobalSearchInput()" onkeydown="onGlobalSearchKeydown(event)">
+    <div id="gsearch-results" class="gsearch-results"></div>
+    <div class="gsearch-hint">↑↓ navegar · Enter abrir · Esc fechar</div>
+  </div>
+</div>
+
 <!-- ── Core modules ── -->
 <script src="js/asm.js"></script>
 <script src="js/api.js"></script>
+<script src="js/bugbounty.js?v=2"></script>
+<script src="js/bbprograms.js?v=3"></script>
+<script src="js/generators.js?v=6"></script>
 
 <!-- ── Optional: load generated data from parser ── -->
-<script src="dashboard.js?v=49"></script>
+<script src="dashboard.js?v=58"></script>
 
 </body>
 </html>

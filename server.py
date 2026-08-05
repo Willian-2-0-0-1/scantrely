@@ -245,6 +245,34 @@ app = Flask(__name__, static_folder=str(BASE))
 app.config["JSON_SORT_KEYS"] = False
 app.before_request(_enforce_company_scope)
 
+
+@app.after_request
+def _set_security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    )
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "img-src 'self' data: blob: https:; "
+        "font-src 'self' data: https://fonts.gstatic.com; "
+        "connect-src 'self' https://fonts.googleapis.com; "
+        "frame-ancestors 'none'",
+    )
+    # Suppress exact version fingerprint
+    resp.headers["Server"] = "ASM"
+    if request.is_secure:
+        resp.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return resp
+
 # Lazy import of recon module
 try:
     import core.recon as _recon
@@ -312,31 +340,114 @@ def _filter_asm_data_by_scope(data: dict) -> dict:
 
 @app.route("/")
 def index():
-    return (BASE / "static" / "index.html").read_text(), 200, {"Content-Type": "text/html; charset=utf-8"}
+    return (BASE / "static" / "index.html").read_text(encoding="utf-8"), 200, {"Content-Type": "text/html; charset=utf-8"}
 
 @app.route("/dashboard.css")
 def serve_dashboard_css():
-    return (BASE / "static" / "css" / "dashboard.css").read_text(), 200, {"Content-Type": "text/css; charset=utf-8"}
+    return (BASE / "static" / "css" / "dashboard.css").read_text(encoding="utf-8"), 200, {"Content-Type": "text/css; charset=utf-8"}
 
 @app.route("/dashboard.js")
 def serve_dashboard_js():
-    return (BASE / "static" / "js" / "dashboard.js").read_text(), 200, {"Content-Type": "application/javascript; charset=utf-8"}
+    return (BASE / "static" / "js" / "dashboard.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
 
 @app.route("/js/asm.js")
 def serve_asm_js():
-    return (BASE / "static" / "js" / "asm.js").read_text(), 200, {"Content-Type": "application/javascript; charset=utf-8"}
+    return (BASE / "static" / "js" / "asm.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
 
 @app.route("/js/api.js")
 def serve_api_js():
-    return (BASE / "static" / "js" / "api.js").read_text(), 200, {"Content-Type": "application/javascript; charset=utf-8"}
+    return (BASE / "static" / "js" / "api.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
 
 @app.route("/js/config.js")
 def serve_config_js():
-    return (BASE / "static" / "js" / "config.js").read_text(), 200, {"Content-Type": "application/javascript; charset=utf-8"}
+    return (BASE / "static" / "js" / "config.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
 
 @app.route("/js/i18n.js")
 def serve_i18n_js():
-    return (BASE / "static" / "js" / "i18n.js").read_text(), 200, {"Content-Type": "application/javascript; charset=utf-8"}
+    return (BASE / "static" / "js" / "i18n.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
+
+@app.route("/js/bugbounty.js")
+def serve_bugbounty_js():
+    return (BASE / "static" / "js" / "bugbounty.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
+
+@app.route("/js/bbprograms.js")
+def serve_bbprograms_js():
+    return (BASE / "static" / "js" / "bbprograms.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
+
+@app.route("/js/generators.js")
+def serve_generators_js():
+    return (BASE / "static" / "js" / "generators.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
+
+# ─── Bug Bounty Programs API proxy ────────────────────────────────────
+
+@app.route("/api/bbprograms/hackerone")
+@require_auth
+def bbprograms_hackerone():
+    """Proxy para a API do HackerOne. Requer hackerone_username + hackerone_token nas settings."""
+    from urllib.request import urlopen, Request as UrlRequest
+    from urllib.error import URLError, HTTPError
+    import base64
+
+    settings = _get_settings()
+    username = settings.get("hackerone_username", "").strip()
+    token    = settings.get("hackerone_token", "").strip()
+
+    if not username or not token:
+        return jsonify({"no_creds": True, "programs": [], "total_pages": 0})
+
+    page = request.args.get("page", "1")
+    q    = request.args.get("q", "")
+
+    creds = base64.b64encode(f"{username}:{token}".encode()).decode()
+    url = f"https://api.hackerone.com/v1/hackers/programs?page[number]={page}&page[size]=25"
+    if q:
+        url += f"&filter[name]={q}"
+
+    try:
+        req = UrlRequest(url, headers={
+            "Authorization": f"Basic {creds}",
+            "Accept": "application/json",
+            "User-Agent": "SCANTRELY/1.0",
+        })
+        with urlopen(req, timeout=15) as resp:
+            raw = json.loads(resp.read().decode())
+    except HTTPError as e:
+        if e.code in (401, 403):
+            return jsonify({"error": "Credenciais inválidas. Verifique seu username e API token do HackerOne.", "auth_error": True}), 200
+        return jsonify({"error": f"HackerOne API error: {e.code} {e.reason}"}), 502
+    except URLError as e:
+        return jsonify({"error": f"Erro de conexão: {e.reason}"}), 502
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+    data = raw.get("data", [])
+    programs = []
+    for item in data:
+        attrs = item.get("attributes", {})
+        programs.append({
+            "id":            item.get("id", ""),
+            "handle":        attrs.get("handle", ""),
+            "name":          attrs.get("name", ""),
+            "state":         attrs.get("state", ""),
+            "offers_bounties": attrs.get("offers_bounties", False),
+            "min_bounty_table_value": attrs.get("minimum_bounty_table_value", 0),
+            "max_bounty_table_value": attrs.get("maximum_bounty_table_value", 0),
+            "profile_picture_urls": attrs.get("profile_picture_urls", {}),
+            "statistics":    attrs.get("statistics", {}),
+            "in_scope":      attrs.get("structured_policy_data", {}).get("in_scope", []),
+            "platform":      "hackerone",
+        })
+
+    links = raw.get("links", {})
+    has_next = bool(links.get("next"))
+    return jsonify({
+        "programs":    programs,
+        "total_pages": int(page) + (1 if has_next else 0),
+    })
+
+
+
+
 
 @app.route("/favicon.ico")
 def serve_favicon():
@@ -399,52 +510,16 @@ def _load_webhooks() -> list:
 
 
 def _send_webhook(hook: dict, payload: dict):
-    url  = hook.get("url", "")
-    kind = hook.get("type", "generic")
-    if not url or not url.startswith(("https://", "http://")):
-        return
-    # Block SSRF to private/loopback addresses
-    try:
-        from urllib.parse import urlparse as _urlparse
-        import ipaddress as _ipaddress
-        _host = _urlparse(url).hostname or ""
-        try:
-            _addr = _ipaddress.ip_address(_host)
-            if _addr.is_private or _addr.is_loopback or _addr.is_link_local:
-                return
-        except ValueError:
-            if _host in ("localhost",) or _host.endswith(".local"):
-                return
-    except Exception:
-        return
-    try:
-        if kind == "slack":
-            body = {"text": payload.get("text", ""), "blocks": payload.get("blocks")}
-        elif kind == "discord":
-            body = {"content": payload.get("text", ""), "embeds": payload.get("embeds")}
-        elif kind == "telegram":
-            body = {"chat_id": hook.get("chat_id", ""), "text": payload.get("text", ""), "parse_mode": "HTML"}
-        else:
-            body = payload
-        data = json.dumps({k: v for k, v in body.items() if v is not None}).encode()
-        req = Request(url, data=data, headers={"Content-Type": "application/json",
-                                               "User-Agent": "ASM-Platform/1.0"}, method="POST")
-        urlopen(req, timeout=8)
-    except Exception:
-        pass
+    """Test/ad-hoc send for a single webhook (used by /api/webhooks/test)."""
+    from utils.notifications import dispatch_webhook
+    text = payload.get("text", "")
+    dispatch_webhook(hook, "test", {"message": text}, settings=_get_settings(), base_dir=BASE)
 
 
 def _fire_webhooks(event: str, company_name: str, company_id: str, summary: dict):
-    hooks = _load_webhooks()
-    if not hooks:
-        return
-    lines = [f"🔍 *ASM Alert* — {company_name} (`{event}`)"]
-    for k, v in summary.items():
-        lines.append(f"  • {k}: {v}")
-    text = "\n".join(lines)
-    for hook in hooks:
-        if event in hook.get("events", [event]):
-            _send_webhook(hook, {"text": text})
+    """Dispatch a scan event to every configured webhook subscribed to it."""
+    from utils.notifications import notify
+    notify(DB, _get_settings, BASE, event, {"company_name": company_name, "company_id": company_id, **summary})
 
 
 # ─── Surface diff (snapshot-based) ────────────────────────────────────────────
@@ -710,12 +785,14 @@ def _load_hosts_for_company(cid: str) -> list:
     return []
 
 _SETTINGS_KEYS = {
+    "hackerone_username", "hackerone_token",
     "shodan_key", "github_token", "hibp_key", "dehashed_key",
     "censys_api_id", "censys_api_secret", "securitytrails_key",
     "virustotal_key", "binaryedge_key", "fullhunt_key",
     "fofa_email", "fofa_key", "netlas_key", "chaos_key",
     "leakix_key", "hunter_key", "intelx_key", "nvd_key",
     "otx_key", "wpscan_token", "whoisxml_key",
+    "hermes_api_key", "hermes_base_url", "hermes_model",
     "playwright_auto_run", "playwright_safe_mode", "playwright_headless",
     "playwright_allow_external", "playwright_trace", "playwright_max_pages",
     "playwright_max_depth", "playwright_timeout", "playwright_slow_mo",
@@ -843,12 +920,20 @@ def _safe_run_playwright_recon(cid: str, co: dict, options: dict):
     try:
         from playwright_agent.asm_bridge import run_company_playwright_job
 
-        return run_company_playwright_job(
+        result = run_company_playwright_job(
             cid,
             co,
             options,
             base_dir=BASE / "data" / "playwright-jobs",
         )
+        try:
+            session_path = Path(result.get("session_path", ""))
+            if session_path.exists():
+                session = json.loads(session_path.read_text(encoding="utf-8"))
+                _runner.merge_playwright_findings(cid, session)
+        except Exception:
+            pass
+        return result
     except Exception:
         raise
 
@@ -902,13 +987,13 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     print(f"""
-  ╔═══════════════════════════════════╗
-  ║    ASM Platform — Server v1.0    ║
-  ╚═══════════════════════════════════╝
-  → http://{args.host}:{args.port}
-  → Database      : {DB_FILE}
-  → Companies file : {CO_FILE}
-  → Data output    : {DATA_JS}
+  ===================================
+    ASM Platform - Server v1.1
+  ===================================
+  -> http://{args.host}:{args.port}
+  -> Database       : {DB_FILE}
+  -> Companies file : {CO_FILE}
+  -> Data output    : {DATA_JS}
     """)
 
     app.run(host=args.host, port=args.port, debug=False, threaded=True)

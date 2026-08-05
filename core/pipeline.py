@@ -5,6 +5,7 @@ host merging, and full multi-phase pipeline orchestration.
 """
 from __future__ import annotations
 
+import fnmatch
 import importlib.util
 import inspect
 import json
@@ -248,7 +249,7 @@ PIPELINE_PHASES = [
         "modules":    [
             "subfinder", "assetfinder", "certs", "alienvault_otx",
             "urlscan_io", "rapiddns", "hackertarget", "github_subdomains",
-            "wayback", "urlfinder",
+            "wayback", "urlfinder", "theharvester", "hunterio",
         ],
         "rate_phase": "passive",
         "parallel":   True,
@@ -257,7 +258,7 @@ PIPELINE_PHASES = [
     {
         "id":         "validation",
         "label":      "Fase 2 — Validação, DNS e Escopo",
-        "modules":    ["dns", "dns_brute", "leaks", "git_leaks"],
+        "modules":    ["dns", "dns_brute", "leaks", "git_leaks", "email"],
         "rate_phase": "dns",
         "parallel":   True,
         "merge_hosts": True,
@@ -269,6 +270,7 @@ PIPELINE_PHASES = [
         "modules":    [
             "shodan", "postman_collections", "cloud", "container_registry",
             "bulk_dataset", "breach", "phishing", "dep_confusion", "s3_scanner",
+            "asn", "asnmap",
         ],
         "rate_phase": "passive",
         "parallel":   True,
@@ -868,16 +870,26 @@ class ReconRunner:
         value = value.split("@")[-1].split("/")[0].split(":")[0].strip(".")
         return value
 
-    def _host_in_scope(self, host: str, scopes: set[str]) -> bool:
-        host = self._normalize_scope_name(host)
-        if not host or not scopes:
-            return False
-        for scope in scopes:
-            if not scope:
-                continue
-            if host == scope or host.endswith("." + scope):
-                return True
-        return False
+    @staticmethod
+    def _is_wildcard_scope(value: str) -> bool:
+        return "*" in str(value or "")
+
+    @classmethod
+    def _active_scan_domains(cls, domains: list[str]) -> list[str]:
+        """Domains usable as literal -d targets for active enumeration tools
+        (subfinder, amass, etc). Wildcard scope entries (*.mil, *.defense.gov)
+        are filters, not enumeration seeds, so they're dropped here."""
+        out = [d for d in (domains or []) if d and not cls._is_wildcard_scope(d)]
+        return out
+
+    @classmethod
+    def _primary_domain(cls, domains: list[str]) -> str:
+        """First concrete (non-wildcard) domain, used where a single 'primary
+        domain' string is required (whois, email recon, fingerprint hash, …)."""
+        for d in (domains or []):
+            if d and not cls._is_wildcard_scope(d):
+                return d
+        return domains[0] if domains else ""
 
     @staticmethod
     def _bug_bounty_host_score(host: dict) -> int:
@@ -1017,7 +1029,7 @@ class ReconRunner:
         return self._stable_hash(self._host_fingerprint_seed(hosts))
 
     def _module_checkpoint_fingerprint(self, cid: str, module: str, co: dict, hosts: list[dict], options: dict) -> str:
-        domain = co["domains"][0] if co.get("domains") else ""
+        domain = self._primary_domain(co.get("domains") or [])
         domains = sorted({str(d).strip().lower() for d in co.get("domains", []) if str(d).strip()})
         js_data = co.get("js_data") or {}
         tech_index = co.get("tech_index") or {}
@@ -1466,7 +1478,7 @@ class ReconRunner:
 
     def _run_dep_confusion(self, cid: str, co: dict, options: dict) -> dict:
         token = options.get("github_token", "") or self.get_settings().get("github_token", "")
-        domains = [str(d).strip() for d in (co.get("domains") or []) if str(d).strip()]
+        domains = self._active_scan_domains(co.get("domains") or [])
         if not domains:
             return {"status": "skipped", "reason": "No domains available for dependency confusion check"}
         timeout_s = int(os.environ.get("ASM_DEP_CONFUSION_TIMEOUT", "180") or 180)
@@ -1511,8 +1523,8 @@ class ReconRunner:
 
     def _make_fn_map(self, cid: str, co: dict, options: dict, hosts: list) -> dict:
         """Build the module → callable map for the given execution context."""
-        domain = co["domains"][0] if co.get("domains") else ""
-        domains = co.get("domains", [domain])
+        domain = self._primary_domain(co.get("domains") or [])
+        domains = self._active_scan_domains(co.get("domains") or [domain]) or [domain]
         screenshots_dir = str(self.base / "scans" / cid / "screenshots")
         r = self._recon
         return {
@@ -1560,7 +1572,6 @@ class ReconRunner:
             "certstream":    lambda: self._api_retry_wrapper(
                 lambda: r.run_certstream_snapshot(domains, duration_sec=90)
             ),
-            "phishing":      lambda: r.run_phishing_monitor(domains, co.get("name", "")),
             "dep_confusion": lambda: self._run_dep_confusion(cid, co, options),
             "wappalyzer":    lambda: self._call_run_wappalyzer(cid, co, hosts, options),
             # ── New tool-registry modules ──────────────────────────────────────
@@ -1650,7 +1661,7 @@ class ReconRunner:
             return {"error": "recon module unavailable"}
 
         hosts  = hosts if hosts is not None else co.get("hosts", [])
-        domains = co.get("domains", [])
+        domains = self._active_scan_domains(co.get("domains") or [])
         screenshot_dir = str(self.base / "scans" / cid / "screenshots")
         Path(screenshot_dir).mkdir(parents=True, exist_ok=True)
 
@@ -1700,7 +1711,7 @@ class ReconRunner:
         """Run subfinder on up to 20 key domains in parallel."""
         from concurrent.futures import ThreadPoolExecutor, as_completed
         all_subdomains: set[str] = set()
-        domains = co.get("domains", [domain])
+        domains = self._active_scan_domains(co.get("domains") or [domain]) or [domain]
         any_blocked = False
         _errors: list[str] = []
 
@@ -1743,7 +1754,7 @@ class ReconRunner:
     def run_assetfinder(self, cid: str, co: dict, domain: str) -> dict:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         all_subdomains: set[str] = set()
-        domains = co.get("domains", [domain])
+        domains = self._active_scan_domains(co.get("domains") or [domain]) or [domain]
         any_blocked = False
         _errors: list[str] = []
 
@@ -1778,7 +1789,7 @@ class ReconRunner:
         all_subdomains: set[str] = set()
         all_emails: set[str] = set()
         all_ips: set[str] = set()
-        domains = co.get("domains", [domain])
+        domains = self._active_scan_domains(co.get("domains") or [domain]) or [domain]
         any_blocked = False
         _errors: list[str] = []
 
@@ -1827,7 +1838,7 @@ class ReconRunner:
         Amass is slow — we cap at 4 domains max to avoid timeouts."""
         from concurrent.futures import ThreadPoolExecutor, as_completed
         all_subdomains: set[str] = set()
-        domains = co.get("domains", [domain])
+        domains = self._active_scan_domains(co.get("domains") or [domain]) or [domain]
         # Only scan distinct apex domains (not subdomains of each other)
         apexes = []
         seen = set()
@@ -1870,7 +1881,7 @@ class ReconRunner:
         """Run bbot subdomain-enum preset for every company domain."""
         from concurrent.futures import ThreadPoolExecutor, as_completed
         all_subdomains: set[str] = set()
-        domains = co.get("domains", [domain])
+        domains = self._active_scan_domains(co.get("domains") or [domain]) or [domain]
 
         def _scan(d):
             subs = set()
@@ -2192,6 +2203,13 @@ class ReconRunner:
                         "desc":     f"{desc} at {base}{path} — HTTP {code}. Tableau confirmed: {is_tableau}",
                         "module":   "tableau",
                         "category": "exposure",
+                        "request_raw":  (
+                            f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*"
+                        ),
+                        "response_raw": (
+                            f"HTTP/1.1 {code}\r\n\r\n{body[:600]}"
+                        ),
+                        "matched":      "tableau" if is_tableau else str(code),
                     })
                     if sev in ("high", "critical"):
                         break
@@ -2253,7 +2271,8 @@ class ReconRunner:
         total_timeout = 300
         try:
             _rl.wait()
-            import select as _sel
+            import queue as _queue
+            import threading as _threading
             # nuclei is a heavy local binary (gate limit 1). Hold the gate slot
             # for the whole process lifecycle - Popen returns immediately, so
             # the gate must stay acquired until the proc exits / is killed,
@@ -2264,40 +2283,56 @@ class ReconRunner:
                      "-tags", tags_str,
                      "-severity", "medium,high,critical",
                      "-jsonl", "-silent", "-no-interactsh",
+                     "-include-rr",
                      "-timeout", "8", "-c", "10", "-retries", "1"],
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     text=True,
                 )
                 deadline = time.time() + total_timeout
-                buf = ""
+                line_q: _queue.Queue = _queue.Queue()
+
+                def _read_stdout():
+                    try:
+                        for ln in proc.stdout:
+                            line_q.put(ln)
+                    except Exception:
+                        pass
+                    finally:
+                        line_q.put(None)  # sentinel
+
+                reader = _threading.Thread(target=_read_stdout, daemon=True)
+                reader.start()
+
                 while True:
                     remaining = deadline - time.time()
                     if remaining <= 0:
                         break
-                    # Use select to avoid blocking past the deadline
-                    ready, _, _ = _sel.select([proc.stdout], [], [], min(remaining, 1.0))
-                    if ready:
-                        chunk = proc.stdout.read(4096)
-                        if not chunk:
-                            break  # pipe closed = process done
-                        buf += chunk
-                        while "\n" in buf:
-                            line, buf = buf.split("\n", 1)
-                            try:
-                                item = json.loads(line.strip())
-                                host = item.get("host", "").replace("https://", "").replace("http://", "")
-                                findings.append({
-                                    "host":     host,
-                                    "template": item.get("template-id", ""),
-                                    "name":     item.get("info", {}).get("name", ""),
-                                    "severity": item.get("info", {}).get("severity", "info"),
-                                    "url":      item.get("matched-at", ""),
-                                    "tags":     item.get("info", {}).get("tags", []),
-                                })
-                            except Exception:
-                                pass
-                    elif proc.poll() is not None:
-                        break  # process exited, nothing left to read
+                    try:
+                        ln = line_q.get(timeout=min(remaining, 1.0))
+                    except _queue.Empty:
+                        if proc.poll() is not None:
+                            break
+                        continue
+                    if ln is None:
+                        break  # pipe closed = process done
+                    try:
+                        item = json.loads(ln.strip())
+                        host = item.get("host", "").replace("https://", "").replace("http://", "")
+                        _extracted = item.get("extracted-results") or []
+                        findings.append({
+                            "host":         host,
+                            "template":     item.get("template-id", ""),
+                            "name":         item.get("info", {}).get("name", ""),
+                            "severity":     item.get("info", {}).get("severity", "info"),
+                            "url":          item.get("matched-at", ""),
+                            "tags":         item.get("info", {}).get("tags", []),
+                            "request_raw":  item.get("request", ""),
+                            "response_raw": item.get("response", ""),
+                            "matched":      item.get("matcher-name", "") or (_extracted[0] if _extracted else ""),
+                        })
+                    except Exception:
+                        pass
+
                 if proc.poll() is None:
                     proc.terminate()
                     try: proc.wait(timeout=5)
@@ -2425,7 +2460,7 @@ class ReconRunner:
 
         options = options or {}
         hosts_data = hosts if hosts is not None else self._load_hosts(cid)
-        domains    = co.get("domains", [])
+        domains    = self._active_scan_domains(co.get("domains") or [])
 
         # Prefer live hosts (have ports) to maximize tech detection yield
         live    = [h["host"] for h in hosts_data if h.get("host") and h.get("ports")]
@@ -2915,12 +2950,79 @@ class ReconRunner:
 
         return normalized
 
+    def _probe_hosts_python_fallback(self, subdomains: list[str]) -> list[dict]:
+        """Pure-Python HTTP probing when ProjectDiscovery httpx binary is unavailable."""
+        import concurrent.futures
+        import re as _re
+        try:
+            import requests as _req
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        except ImportError:
+            return []
+
+        n = len(subdomains)
+        # Scale workers and deadline the same way the binary version does:
+        # more hosts → more workers (capped at 100) and longer deadline.
+        workers = min(100, max(25, n // 100))
+        probe_timeout = max(300, min(3600, n * 2))
+        print(f"[DEBUG] _probe_hosts_python_fallback: {n} hosts, {workers} workers, {probe_timeout}s deadline")
+
+        def probe(host: str) -> dict | None:
+            for scheme, port in [("https", 443), ("http", 80)]:
+                try:
+                    r = _req.get(
+                        f"{scheme}://{host}", timeout=(5, 5), verify=False,
+                        allow_redirects=True,
+                        headers={"User-Agent": "Mozilla/5.0 (compatible; ASMScanner/1.0)"},
+                    )
+                    title = ""
+                    m = _re.search(r"<title[^>]*>([^<]{1,120})", r.text, _re.I)
+                    if m:
+                        title = m.group(1).strip()
+                    return {
+                        "host":           host,
+                        "ip":             "",
+                        "waf":            "Unknown",
+                        "technologies":   [],
+                        "ports":          [str(port)],
+                        "status_code":    r.status_code,
+                        "content_length": len(r.content),
+                        "title":          title[:120],
+                        "server":         r.headers.get("Server", ""),
+                        "scope_distance": 0,
+                        "cdn":            False,
+                        "redirect_url":   str(r.url)[:200],
+                    }
+                except Exception:
+                    continue
+            return None
+
+        results: list[dict] = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(probe, h): h for h in subdomains}
+            try:
+                for fut in concurrent.futures.as_completed(futs, timeout=probe_timeout):
+                    try:
+                        r = fut.result()
+                        if r:
+                            results.append(r)
+                    except Exception:
+                        pass
+            except concurrent.futures.TimeoutError:
+                print(f"[DEBUG] _probe_hosts_python_fallback: deadline reached, returning {len(results)} partial results")
+
+        print(f"[DEBUG] _probe_hosts_python_fallback returning {len(results)} live hosts")
+        return results
+
     def _probe_hosts_with_httpx(self, subdomains: list[str], cid: str, extra_headers: list[str] | None = None, _expand_redirects: bool = True) -> list[dict]:
         print(f"[DEBUG] _probe_hosts_with_httpx called with {len(subdomains)} subdomains for {cid}")
-        httpx_bin = str(BIN_DIR / "httpx") if (BIN_DIR / "httpx").is_file() else shutil.which("httpx")
-        if not httpx_bin or not subdomains:
-            print(f"[DEBUG] httpx_bin={httpx_bin}, subdomains={len(subdomains) if subdomains else 0}")
+        httpx_bin = str(BIN_DIR / "httpx") if (BIN_DIR / "httpx").is_file() else None
+        if not subdomains:
             return []
+        if not httpx_bin:
+            print(f"[DEBUG] ProjectDiscovery httpx binary not found in bin/ — using Python fallback")
+            return self._probe_hosts_python_fallback(subdomains)
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
             tf.write("\n".join(subdomains))
@@ -3050,10 +3152,23 @@ class ReconRunner:
             return ""
         return str(final_url).split("://")[-1].split("/")[0].split(":")[0].strip().lower()
 
-    def _host_in_scope(self, host: str, domains: list[str]) -> bool:
-        """True if host equals or is a subdomain of any company scope domain."""
-        h = (host or "").lower()
-        return any(h == d or h.endswith("." + d) for d in (domains or []) if d)
+    def _host_in_scope(self, host: str, domains) -> bool:
+        """True if host equals or is a subdomain of any company scope domain.
+        Scope entries containing '*' (e.g. *.mil, *.defense.gov) are matched
+        as glob patterns against the host."""
+        h = self._normalize_scope_name(host)
+        if not h:
+            return False
+        for d in (domains or []):
+            d = self._normalize_scope_name(d)
+            if not d:
+                continue
+            if self._is_wildcard_scope(d):
+                if fnmatch.fnmatchcase(h, d):
+                    return True
+            elif h == d or h.endswith("." + d):
+                return True
+        return False
 
     def _company_domains(self, cid: str) -> list[str]:
         """Full scope domain list for a company (used for redirect scope checks)."""
@@ -3321,7 +3436,7 @@ class ReconRunner:
 
         # ── 2. Subdomain history ──────────────────────────────────────────────
         try:
-            domain = co["domains"][0] if co.get("domains") else ""
+            domain = self._primary_domain(co.get("domains") or [])
             for h in hosts[:200]:
                 hostname = h.get("host", "")
                 if not hostname:
@@ -3436,12 +3551,6 @@ class ReconRunner:
                 or breach_data.get("credentials")):
             co_data["breach_data"] = breach_data
             log(f"  ↳ Breach: {breach_data.get('total_findings', 0)} findings persistidos")
-
-        # Phishing monitor findings (data saved, findings promoted below)
-        phishing_data = _result("phishing")
-        if phishing_data.get("findings"):
-            co_data["phishing_data"] = phishing_data
-            log(f"  ↳ Phishing: {len(phishing_data.get('findings',[]))} potenciais detectados, {phishing_data.get('total_threats',0)} ameaças")
 
         # DNS findings
         dns_data = _result("dns")
@@ -3865,6 +3974,13 @@ class ReconRunner:
             log(f"  ↳ Screenshots disco: erro ignorado ({e})")
         log(f"  ↳ [persist] Salvando no banco...")
 
+        # ── Cloud storage bucket exposure (S3/Azure Blob/GCS) ─────────────────────
+        cloud_data = _result("cloud")
+        if cloud_data.get("findings"):
+            co_data["cloud_buckets"] = cloud_data
+            pub = cloud_data.get("public_count", 0)
+            log(f"  ↳ Cloud buckets: {len(cloud_data['findings'])} encontrados · {pub} públicos")
+
         # ── Favicon hash / Shodan icon matching ───────────────────────────────────
         fav_data = _result("favicon_hunt")
         if fav_data.get("matches") or fav_data.get("findings"):
@@ -4116,6 +4232,49 @@ class ReconRunner:
                     })
                     existing_keys.add(key)
 
+        # ── Email security findings (SPF / DMARC / DKIM) ──────────────────────────
+        _email_sec = co_data.get("email_security", {})
+        _spf = _email_sec.get("spf", {})
+        _spf_score = (_spf.get("score") or "").lower()
+        if _spf_score in ("missing", "critical", "high", "medium", "incomplete"):
+            _spf_sev = {"missing": "high", "critical": "critical", "high": "high",
+                        "medium": "medium", "incomplete": "medium"}.get(_spf_score, "medium")
+            _spf_key = f"spf-{primary_domain}"
+            if _spf_key not in existing_keys:
+                _spf_issues = "; ".join(_spf.get("issues", [])) or "SPF record ausente ou insuficiente"
+                all_findings.append({
+                    "key":      _spf_key,
+                    "type":     "email_security",
+                    "title":    f"SPF {'ausente' if _spf_score == 'missing' else 'fraco'}: {primary_domain}",
+                    "severity": _spf_sev,
+                    "category": "email",
+                    "desc":     _spf_issues + (f" | Record: {_spf['record']}" if _spf.get("record") else ""),
+                    "host":     primary_domain,
+                    "value":    _spf.get("record", ""),
+                    "module":   "email",
+                })
+                existing_keys.add(_spf_key)
+
+        _dmarc = _email_sec.get("dmarc", {})
+        _dmarc_score = (_dmarc.get("score") or "").lower()
+        if _dmarc_score in ("missing", "high", "medium"):
+            _dmarc_sev = {"missing": "high", "high": "high", "medium": "medium"}.get(_dmarc_score, "medium")
+            _dmarc_key = f"dmarc-{primary_domain}"
+            if _dmarc_key not in existing_keys:
+                _dmarc_issues = "; ".join(_dmarc.get("issues", [])) or "DMARC record ausente ou com política fraca"
+                all_findings.append({
+                    "key":      _dmarc_key,
+                    "type":     "email_security",
+                    "title":    f"DMARC {'ausente' if _dmarc_score == 'missing' else 'fraco (p=' + str(_dmarc.get('policy','?')) + ')'}: {primary_domain}",
+                    "severity": _dmarc_sev,
+                    "category": "email",
+                    "desc":     _dmarc_issues + (f" | Record: {_dmarc['record']}" if _dmarc.get("record") else ""),
+                    "host":     primary_domain,
+                    "value":    _dmarc.get("record", ""),
+                    "module":   "email",
+                })
+                existing_keys.add(_dmarc_key)
+
         # CORS misconfigurations
         for f in _result("cors_scan").get("findings", []):
             key = f"cors-{f.get('host','')}-{f.get('test','')}"
@@ -4126,6 +4285,9 @@ class ReconRunner:
                     "severity": f.get("severity", "high"), "category": "cors",
                     "desc": f"Origin: {f.get('origin_sent','')} → ACAO: {f.get('acao','')} ACAC: {f.get('acac','')}",
                     "host": f.get("host",""), "value": f.get("url",""), "url": f.get("url",""), "module": "cors_scan",
+                    "request_raw":  f.get("request_raw", ""),
+                    "response_raw": f.get("response_raw", ""),
+                    "matched":      f.get("matched", ""),
                 })
                 existing_keys.add(key)
 
@@ -4164,6 +4326,9 @@ class ReconRunner:
                     "severity": f.get("severity","medium"), "category": "nuclei",
                     "desc": f"Template: {f.get('template','')}",
                     "host": f.get("host",""), "value": f.get("url",""), "url": f.get("url",""), "module": "api_panels",
+                    "request_raw":  f.get("request_raw", ""),
+                    "response_raw": f.get("response_raw", ""),
+                    "matched":      f.get("matched", ""),
                 })
                 existing_keys.add(key)
 
@@ -4280,49 +4445,31 @@ class ReconRunner:
                     })
                     existing_keys.add(key)
 
-        # Phishing findings (promoted from phishing monitor)
-        phishing_data = co_data.get("phishing_data", {})
-        for pf in phishing_data.get("findings", []):
-            if pf.get("severity") in ("critical", "high", "medium"):
-                key = f"phishing-{pf.get('url','')}"
-                if key and key not in existing_keys:
-                    all_findings.append({
-                        "key":      key,
-                        "type":     "phishing",
-                        "title":    f"Potential Phishing: {pf.get('url','')}",
-                        "severity": pf.get("severity", "high"),
-                        "category": "phishing",
-                        "desc":     f"Risk score: {pf.get('risk_score',0)}/100. Indicators: {', '.join(pf.get('indicators',[]))}. Title: {pf.get('title','')}",
-                        "host":     pf.get("url", "").replace("https://", "").replace("http://", ""),
-                        "value":    pf.get("url", ""),
-                        "url":      pf.get("url", ""),
-                        "module":   "phishing_monitor",
-                    })
-                    existing_keys.add(key)
-
         # ── JS Secrets → main findings ─────────────────────────────────────────────
         for sf in co_data.get("secrets_findings", []):
             sev = sf.get("severity", "high")
             if sev not in ("critical", "high", "medium"):
                 continue
-            key = f"secret-{sf.get('type','')}-{sf.get('value','')[:40]}-{sf.get('host','')}"
+            secret_type = (sf.get("metadata") or {}).get("secret_type") or sf.get("type", "unknown")
+            source_url  = sf.get("file") or (sf.get("metadata") or {}).get("source_url") or sf.get("url", "")
+            key = f"secret-{secret_type}-{sf.get('value','')[:40]}-{sf.get('host','')}"
             if key not in existing_keys:
                 all_findings.append({
                     "key":      key,
                     "type":     "secret",
-                    "title":    f"Secret exposto: {sf.get('type','unknown')} em {sf.get('host','')}",
+                    "title":    f"Secret exposto: {secret_type} em {sf.get('host','')}",
                     "severity": sev,
                     "category": "secrets",
-                    "desc":     sf.get("desc") or f"Tipo: {sf.get('type','')} · Arquivo: {sf.get('file','')} · Valor parcial: {str(sf.get('value',''))[:60]}",
+                    "desc":     sf.get("desc") or f"Tipo: {secret_type} · Arquivo: {source_url} · Valor parcial: {str(sf.get('value',''))[:60]}",
                     "host":     sf.get("host", primary_domain),
                     "value":    str(sf.get("value", ""))[:120],
-                    "url":      sf.get("file") or sf.get("url", ""),
+                    "url":      source_url,
                     "module":   "js_secrets",
                     "metadata": {
                         "type":        sf.get("type"),
                         "note":        sf.get("note", ""),
-                        "secret_type": (sf.get("metadata") or {}).get("secret_type", sf.get("type", "")),
-                        "source_url":  sf.get("file") or sf.get("url", ""),
+                        "secret_type": secret_type,
+                        "source_url":  source_url,
                         "context":     (sf.get("metadata") or {}).get("context", ""),
                     },
                 })
@@ -4344,6 +4491,9 @@ class ReconRunner:
                     "url":      f.get("url", ""),
                     "module":   "infra_exposure",
                     "metadata": {"port": f.get("port"), "ip": f.get("ip"), "open_paths": f.get("open_paths", [])},
+                    "request_raw":  f.get("request_raw", ""),
+                    "response_raw": f.get("response_raw", ""),
+                    "matched":      f.get("matched", ""),
                 })
                 existing_keys.add(key)
 
@@ -4544,6 +4694,9 @@ class ReconRunner:
                     "url":      f.get("url",""),
                     "module":   "host_header_injection",
                     "metadata": f.get("metadata",{}),
+                    "request_raw":  f.get("request_raw", ""),
+                    "response_raw": f.get("response_raw", ""),
+                    "matched":      f.get("matched", ""),
                 })
                 existing_keys.add(key)
 
@@ -4570,6 +4723,9 @@ class ReconRunner:
                     "value":    f.get("url",""),
                     "url":      f.get("url",""),
                     "module":   "open_redirect",
+                    "request_raw":  f.get("request_raw", ""),
+                    "response_raw": f.get("response_raw", ""),
+                    "matched":      f.get("matched", ""),
                 })
                 existing_keys.add(key)
 
@@ -4592,6 +4748,9 @@ class ReconRunner:
                     "value":    f.get("url", ""),
                     "url":      f.get("url", ""),
                     "module":   "tableau",
+                    "request_raw":  f.get("request_raw", ""),
+                    "response_raw": f.get("response_raw", ""),
+                    "matched":      f.get("matched", ""),
                 })
                 existing_keys.add(key)
 
@@ -4763,7 +4922,7 @@ class ReconRunner:
         # Rebuild stats with all frontend-required fields
         def _count_sev(sev): return sum(1 for f in all_findings if f.get("severity") == sev)
         co_data.setdefault("stats", {}).update({
-            "live_hosts":        len(co_data.get("hosts", [])),
+            "live_hosts":        len([h for h in co_data.get("hosts", []) if _is_responsive(h)]),
             "subdomains":        len(co_data.get("hosts", [])),
             "findings_critical": _count_sev("critical"),
             "findings_high":     _count_sev("high"),
@@ -4865,7 +5024,7 @@ class ReconRunner:
     def run_pipeline(self, cid: str, co: dict, options: dict):
         """Execute full recon pipeline in ordered phases. Blocking — run in thread."""
         options      = self._resolve_pipeline_profile(options)
-        domain       = co["domains"][0] if co.get("domains") else ""
+        domain       = self._primary_domain(co.get("domains") or [])
         mode         = options.get("mode", _rl.DEFAULT_MODE)
         total_phases = len(PIPELINE_PHASES)
         cf_detected  = False
@@ -4889,7 +5048,7 @@ class ReconRunner:
                     "hackertarget", "alienvault_otx", "hunterio", "riddler", "urlscan_io",
                     "rapiddns", "github_subdomains", "dns", "email", "certs",
                     "asn", "asnmap", "related", "reverse_whois", "typosquat", "zone_transfer",
-                    "shodan", "breach", "certstream", "phishing", "postman_collections",
+                    "shodan", "breach", "certstream", "postman_collections",
                     "apk_recon", "dep_confusion", "cloud",
                     "dns_brute", "leaks", "headers", "waf", "wappalyzer", "whatweb", "vendor_fp",
                     "js", "js_endpoints", "js_secrets", "wayback", "urlfinder", "screenshot",
@@ -5263,8 +5422,12 @@ class ReconRunner:
             self.pipeline_state[cid]["phase_idx"] = phase_idx
             self.pipeline_state[cid]["phase_id"] = phase_id
             self._save_pipeline_state(cid)
-            # Persist deferred to end of pipeline — avoids DB lock contention
-            # between persist thread and pipeline gate checks
+            # Persist results so far — if the process is killed mid-scan, findings
+            # and hosts collected up to this phase are not lost.
+            try:
+                self._persist_pipeline_results(cid, _log, _options=options, _co=co)
+            except Exception as e:
+                _log(f"  ⚠ Falha ao persistir progresso parcial: {e}")
 
             # ── Cloudflare detection & mode adjustment (após Fase 4 profiling) ──
             if phase_id == "fingerprint" and not cf_detected:
@@ -5430,6 +5593,51 @@ class ReconRunner:
         except Exception as e:
             _log(f"  ⚠ Tech change detection failed: {e}")
 
+        # ── Notifications (Telegram, Discord, Slack, WhatsApp, Signal, Email, CLI) ──
+        try:
+            self._notify_scan_complete(cid, co, _log)
+        except Exception as e:
+            _log(f"  ⚠ Notification dispatch failed: {e}")
+
+    def _notify_scan_complete(self, cid: str, co: dict, _log):
+        """Fire scan_complete (and critical_finding, if any) webhook events."""
+        from utils.notifications import notify
+
+        try:
+            data = self.db.load_asm_data()
+            co_data = next((c for c in data.get("companies", []) if c.get("id") == cid), {})
+        except Exception:
+            co_data = {}
+
+        findings = co_data.get("findings", []) or []
+        sev_counts: dict[str, int] = {}
+        for f in findings:
+            sev = str((f or {}).get("severity", "info")).lower()
+            sev_counts[sev] = sev_counts.get(sev, 0) + 1
+
+        state = self.pipeline_state.get(cid, {})
+        summary = {
+            "company_name": co.get("name", cid),
+            "company_id":   cid,
+            "status":       state.get("status", "done"),
+            "host_count":   len(co_data.get("hosts", []) or []),
+            "findings_total": len(findings),
+            "critical":     sev_counts.get("critical", 0),
+            "high":         sev_counts.get("high", 0),
+            "medium":       sev_counts.get("medium", 0),
+            "low":          sev_counts.get("low", 0),
+        }
+        notify(self.db, self.get_settings, self.base, "scan_complete", summary)
+
+        critical_findings = [f for f in findings if str((f or {}).get("severity", "")).lower() == "critical"]
+        if critical_findings:
+            notify(self.db, self.get_settings, self.base, "critical_finding", {
+                "company_name": co.get("name", cid),
+                "company_id":   cid,
+                "count":        len(critical_findings),
+                "titles":       [f.get("title", "") for f in critical_findings[:10]],
+            })
+
     def _detect_tech_changes(self, cid: str, co: dict, _log):
         """Compare current tech stack with previous scan and generate alerts for changes."""
         data = self.db.load_asm_data()
@@ -5480,6 +5688,89 @@ class ReconRunner:
 
         # Save updated baseline
         self.db.save_snapshot(cid, {"ts": datetime.now().isoformat(timespec="seconds"), "tech_summary": current_tech, "hosts": co_data.get("hosts", [])}, slot="tech_baseline")
+
+    # ── Playwright XSS/IDOR findings merge ──────────────────────────────────────
+
+    def merge_playwright_findings(self, cid: str, session: dict) -> int:
+        """Merge execution-confirmed XSS and potential IDOR results from a Playwright
+        session into co_data["findings"] so they show up in the Vulnerabilities tab
+        (filterable, triageable) instead of being stuck in the Operation tab only.
+
+        Returns the number of new findings added.
+        """
+        try:
+            from validators import dedup_findings
+        except Exception:
+            dedup_findings = lambda x, _k="general": x
+
+        try:
+            data = self.db.load_asm_data()
+        except Exception:
+            return 0
+        co_data = next((c for c in data.get("companies", []) if c.get("id") == cid), None)
+        if co_data is None:
+            return 0
+
+        all_findings = list(co_data.get("findings") or [])
+        existing_keys = {f.get("key") or f.get("title") or "" for f in all_findings}
+        added = 0
+
+        for x in session.get("xss") or []:
+            if x.get("status") not in ("confirmed_xss", "confirmed_dom_xss"):
+                continue
+            url = x.get("url", "")
+            param = x.get("parameter", "")
+            key = f"playwright-xss-{url[:80]}-{param}"
+            if key in existing_keys:
+                continue
+            all_findings.append({
+                "key":      key,
+                "type":     "xss",
+                "title":    f"Cross-Site Scripting (XSS)" + (f" via ?{param}" if param else ""),
+                "severity": x.get("severity", "high"),
+                "category": "injection",
+                "desc":     f"Execution-confirmed XSS — payload executed in browser context ({x.get('context','')}).",
+                "host":     urlparse(url).hostname or "",
+                "value":    url,
+                "url":      url,
+                "module":   "playwright_xss",
+                "metadata": {"parameter": param, "context": x.get("context", ""), "marker": x.get("marker", "")},
+            })
+            existing_keys.add(key)
+            added += 1
+
+        for i in session.get("idor") or []:
+            if i.get("status") != "potential_idor":
+                continue
+            url = i.get("url", "")
+            param = i.get("parameter", "")
+            key = f"playwright-idor-{url[:80]}-{param}"
+            if key in existing_keys:
+                continue
+            all_findings.append({
+                "key":      key,
+                "type":     "idor",
+                "title":    "Possible IDOR" + (f" via ?{param}" if param else ""),
+                "severity": i.get("severity", "medium"),
+                "category": "access_control",
+                "desc":     "; ".join(i.get("notes") or []) or "Cross-session access difference detected.",
+                "host":     urlparse(url).hostname or "",
+                "value":    url,
+                "url":      url,
+                "module":   "playwright_idor",
+                "metadata": {"parameter": param, "candidate_kind": i.get("candidate_kind", "")},
+            })
+            existing_keys.add(key)
+            added += 1
+
+        if added:
+            all_findings = dedup_findings(all_findings, "general")
+            co_data["findings"] = all_findings
+            try:
+                self.db.save_asm_data(data)
+            except Exception:
+                return 0
+        return added
 
     # ── opensquat daily monitor ────────────────────────────────────────────────
 

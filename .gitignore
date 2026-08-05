@@ -48,6 +48,7 @@ node_modules/
 # Sensitive
 config/admins.json
 config/settings.json
+config/settings.backup.json
 wordlists/
 bin/
 fotoscomplemento_guest_pii_leak.txt

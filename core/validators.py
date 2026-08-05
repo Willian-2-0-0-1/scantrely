@@ -30,7 +30,7 @@ def filter_subdomain(sub: str, root_domain: str) -> str | None:
         if fnmatch.fnmatchcase(sub, root):
             return sub
         return None
-    if not sub.endswith(root):
+    if not (sub == root or sub.endswith("." + root)):
         return None
     
     # Remove trailing dot (FQDN notation)

@@ -143,12 +143,24 @@ class ASMDatabase:
                 CREATE TABLE IF NOT EXISTS alert_rules (
                     id TEXT PRIMARY KEY,
                     company_id TEXT NOT NULL,
+                    name TEXT NOT NULL DEFAULT '',
                     rule_type TEXT NOT NULL,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     channels_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_alert_rules_company ON alert_rules(company_id);
+
+                CREATE TABLE IF NOT EXISTS finding_triage (
+                    company_id TEXT NOT NULL,
+                    finding_key TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    note TEXT NOT NULL DEFAULT '',
+                    updated_by TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (company_id, finding_key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_finding_triage_company ON finding_triage(company_id);
 
                 CREATE TABLE IF NOT EXISTS alerts (
                     id TEXT PRIMARY KEY,
@@ -254,6 +266,11 @@ class ASMDatabase:
                 conn.execute("ALTER TABLE admins ADD COLUMN scoped_companies TEXT NOT NULL DEFAULT '[]'")
             except Exception:
                 pass  # column already exists
+            # Migration v3 → v4: add name to alert_rules
+            try:
+                conn.execute("ALTER TABLE alert_rules ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+            except Exception:
+                pass  # column already exists
             conn.commit()
 
     def migrate_from_legacy(self) -> None:
@@ -279,7 +296,7 @@ class ASMDatabase:
         "settings", "admins", "companies", "schedules", "webhooks",
         "whitelist_entries", "audit_log", "asm_data_state", "snapshots",
         "subdomain_history", "scan_stats_history", "alert_rules", "alerts",
-        "tool_runs", "jobs",
+        "tool_runs", "jobs", "finding_triage",
     })
 
     def _table_count(self, table: str) -> int:
@@ -353,6 +370,14 @@ class ASMDatabase:
 
     def _migrate_settings(self) -> None:
         data = self._read_json_file(self.settings_file, {})
+        if not isinstance(data, dict) or not data:
+            # Primary settings file missing/empty (e.g. accidental delete) —
+            # recover from the redundant backup copy if present.
+            if self.settings_file:
+                backup = self.settings_file.with_name(self.settings_file.stem + ".backup.json")
+                backup_data = self._read_json_file(backup, {})
+                if isinstance(backup_data, dict):
+                    data = backup_data
         if not isinstance(data, dict):
             return
         existing = self.get_settings()
@@ -1243,6 +1268,23 @@ class ASMDatabase:
             conn.commit()
         return int(cur.rowcount or 0)
 
+    def cancel_all_pending_jobs(self) -> int:
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE jobs
+                SET status = 'cancelled',
+                    error = ?,
+                    finished_at = ?,
+                    updated_at = ?
+                WHERE status IN ('pending', 'running')
+                """,
+                ("cancelled by user (cancel all)", now, now),
+            )
+            conn.commit()
+        return int(cur.rowcount or 0)
+
     def safety_hold_jobs(
         self,
         *,
@@ -1615,7 +1657,7 @@ class ASMDatabase:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, company_id, rule_type, enabled, channels_json
+                SELECT id, company_id, name, rule_type, enabled, channels_json
                 FROM alert_rules
                 WHERE (company_id = ? OR company_id = '*') AND enabled = 1
                 """,
@@ -1625,12 +1667,87 @@ class ASMDatabase:
             {
                 "id": row["id"],
                 "company_id": row["company_id"],
+                "name": row["name"],
                 "rule_type": row["rule_type"],
                 "enabled": bool(row["enabled"]),
                 "channels": self._json_loads(row["channels_json"], []),
             }
             for row in rows
         ]
+
+    def get_all_alert_rules(self, company_id: str) -> list[dict]:
+        """All rules for a company (including disabled), for management UI."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, company_id, name, rule_type, enabled, channels_json, created_at
+                FROM alert_rules
+                WHERE company_id = ? OR company_id = '*'
+                ORDER BY created_at DESC
+                """,
+                (company_id,),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "company_id": row["company_id"],
+                "name": row["name"],
+                "rule_type": row["rule_type"],
+                "enabled": bool(row["enabled"]),
+                "channels": self._json_loads(row["channels_json"], []),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def create_alert_rule(self, company_id: str, name: str, rule_type: str,
+                          channels: list[str], enabled: bool = True) -> str:
+        rule_id = uuid.uuid4().hex[:12]
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO alert_rules (id, company_id, name, rule_type, enabled, channels_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (rule_id, company_id, name, rule_type, 1 if enabled else 0,
+                 self._json_dumps(channels), self._now()),
+            )
+            conn.commit()
+        return rule_id
+
+    def update_alert_rule(self, company_id: str, rule_id: str, **fields) -> bool:
+        """Update one or more of: name, rule_type, enabled, channels."""
+        columns = {"name": "name", "rule_type": "rule_type", "enabled": "enabled", "channels": "channels_json"}
+        sets, params = [], []
+        for key, column in columns.items():
+            if key not in fields:
+                continue
+            value = fields[key]
+            if key == "enabled":
+                value = 1 if value else 0
+            elif key == "channels":
+                value = self._json_dumps(value)
+            sets.append(f"{column} = ?")
+            params.append(value)
+        if not sets:
+            return False
+        params.extend([company_id, rule_id])
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                f"UPDATE alert_rules SET {', '.join(sets)} WHERE company_id = ? AND id = ?",
+                params,
+            )
+            conn.commit()
+        return cur.rowcount > 0
+
+    def delete_alert_rule(self, company_id: str, rule_id: str) -> bool:
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM alert_rules WHERE company_id = ? AND id = ?",
+                (company_id, rule_id),
+            )
+            conn.commit()
+        return cur.rowcount > 0
 
     def create_alert(self, company_id: str, rule_type: str, title: str,
                      description: str, severity: str, data: dict) -> str:
@@ -1657,6 +1774,42 @@ class ASMDatabase:
             conn.commit()
         return alert_id
 
+    # ─── Finding triage ─────────────────────────────────────────────────────────
+
+    def get_finding_triage(self, company_id: str) -> dict[str, dict]:
+        """Return {finding_key: {status, note, updated_by, updated_at}} for a company."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT finding_key, status, note, updated_by, updated_at FROM finding_triage WHERE company_id = ?",
+                (company_id,),
+            ).fetchall()
+        return {
+            row["finding_key"]: {
+                "status": row["status"],
+                "note": row["note"],
+                "updated_by": row["updated_by"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        }
+
+    def set_finding_triage(self, company_id: str, finding_key: str, status: str,
+                           note: str = "", updated_by: str = "") -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO finding_triage (company_id, finding_key, status, note, updated_by, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(company_id, finding_key) DO UPDATE SET
+                    status = excluded.status,
+                    note = excluded.note,
+                    updated_by = excluded.updated_by,
+                    updated_at = excluded.updated_at
+                """,
+                (company_id, finding_key, status, note, updated_by, self._now()),
+            )
+            conn.commit()
+
     def sync_legacy_files(self) -> None:
         self._sync_settings_file()
         self._sync_admins_file()
@@ -1670,7 +1823,15 @@ class ASMDatabase:
 
     def _sync_settings_file(self) -> None:
         if self.settings_file:
-            self.settings_file.write_text(json.dumps(self.get_settings(), indent=2, ensure_ascii=False))
+            payload = json.dumps(self.get_settings(), indent=2, ensure_ascii=False)
+            self.settings_file.write_text(payload)
+            # Redundant backup copy — survives accidental deletion/overwrite of
+            # the primary settings file (e.g. manual cleanup, half-finished gitpull).
+            backup = self.settings_file.with_name(self.settings_file.stem + ".backup.json")
+            try:
+                backup.write_text(payload)
+            except Exception:
+                pass
 
     def _sync_admins_file(self) -> None:
         if self.admins_file:

@@ -6,7 +6,10 @@
 ![Módulos](https://img.shields.io/badge/modulos-50+-green)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow)
 ![Playwright](https://img.shields.io/badge/playwright-headless-purple)
+![Versão](https://img.shields.io/badge/versão-1.1.0-orange)
 ![Licença](https://img.shields.io/badge/license-MIT-lightgrey)
+
+> Veja o [CHANGELOG.md](CHANGELOG.md) para a lista completa de novidades e correções de cada versão.
 
 ---
 
@@ -94,6 +97,14 @@
 - **Race mapper** — endpoints paralelizáveis, race conditions
 - **GraphQL** — introspection, queries, mutations
 - **Token analyzer** — JWT, API keys, session tokens
+
+### Gestão e relatórios
+- **Triagem de findings** — status persistido (aberto/em progresso/corrigido/risco aceito) por finding
+- **Alertas configuráveis** — CRUD completo de regras (tipo, canais, ativar/desativar) por empresa
+- **Busca global (Ctrl+K)** — pesquisa empresas, domínios, hosts, pessoas e findings
+- **Exportação de relatórios** — HTML e PDF (via impressão do navegador)
+- **Pivot de e-mails/funcionários** — contatos com links para LinkedIn, HaveIBeenPwned e Google
+- **Cloud exposure** — checagem de buckets S3/Azure Blob/GCS com probe de ACL pública e amostragem de objetos
 
 ---
 

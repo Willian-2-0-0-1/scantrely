@@ -193,6 +193,11 @@ def create_recon_blueprint(
             "hunter_key":    _opt("hunter_key", "HUNTER_KEY"),
             "intelx_key":    _opt("intelx_key", "INTELX_KEY"),
             "whoisxml_key":  _opt("whoisxml_key", "WHOISXML_KEY"),
+            # Censys API — stored as censys_api_id/censys_api_secret, read by pipeline as censys_id/censys_secret
+            "censys_id":     _opt("censys_api_id", "CENSYS_API_ID"),
+            "censys_secret": _opt("censys_api_secret", "CENSYS_API_SECRET"),
+            # Scan mode from settings (stealth/balanced/fast) — used by dns_brute and other modules
+            "scan_mode":     _opt("asm_scan_mode", "ASM_SCAN_MODE") or body.get("mode", "balanced"),
             "mode": body.get("mode", "balanced"),
             "queue_domains": queue_domains,
             "profile": "bug_bounty",
@@ -345,6 +350,109 @@ def create_recon_blueprint(
     def api_cancel_pipeline(cid: str):
         """Alias for frontend stopScan() — delegates to DELETE /pipeline handler"""
         return api_stop_pipeline(cid)
+
+    @bp.route("/api/recon/cancel-all", methods=["POST"])
+    @require_auth
+    def api_cancel_all_pipelines():
+        now = datetime.now().isoformat(timespec="seconds")
+        cancelled_cids = []
+        for cid, ps in list(pipeline_state.items()):
+            if ps.get("status") in {"queued", "running"}:
+                ps["status"] = "stopped"
+                ps["finished_at"] = now
+                ps.setdefault("log", []).append({
+                    "ts": now,
+                    "msg": "⏹ Pipeline parado pelo usuário (cancelar todos)",
+                })
+                cancelled_cids.append(cid)
+        db_cancelled = 0
+        if db is not None:
+            try:
+                db_cancelled = db.cancel_all_pending_jobs()
+            except Exception:
+                pass
+        return jsonify({"ok": True, "stopped": len(cancelled_cids), "db_cancelled": db_cancelled, "cids": cancelled_cids})
+
+    @bp.route("/api/recon/scan-all", methods=["POST"])
+    @require_auth
+    def api_scan_all_pipelines():
+        if not recon_available:
+            return jsonify({"error": "recon module not available"}), 500
+        companies = load_companies()
+        if not companies:
+            return jsonify({"ok": True, "started": 0, "skipped": 0, "cids": []})
+        body = request.get_json(force=True) or {}
+        settings = get_settings()
+        def _opt(key, env=""):
+            return body.get(key) or settings.get(key, "") or os.environ.get(env or key.upper(), "")
+        options_base = {
+            "github_token":  _opt("github_token", "GITHUB_TOKEN"),
+            "shodan_key":    _opt("shodan_key", "SHODAN_API_KEY"),
+            "hibp_key":      _opt("hibp_key", "HIBP_API_KEY"),
+            "dehashed_key":  _opt("dehashed_key", "DEHASHED_API_KEY"),
+            "nvd_key":       _opt("nvd_key", "NVD_API_KEY"),
+            "otx_key":       _opt("otx_key", "OTX_KEY"),
+            "wpscan_token":  _opt("wpscan_token", "WPSCAN_TOKEN"),
+            "hunter_key":    _opt("hunter_key", "HUNTER_KEY"),
+            "intelx_key":    _opt("intelx_key", "INTELX_KEY"),
+            "whoisxml_key":  _opt("whoisxml_key", "WHOISXML_KEY"),
+            "mode": body.get("mode", "balanced"),
+            "profile": "bug_bounty",
+            "pipeline_profile": "bug_bounty",
+            "active": True,
+        }
+        sess = getattr(g, "session", {}) or {}
+        started_cids = []
+        skipped = 0
+        now = datetime.now().isoformat(timespec="seconds")
+        for company in companies:
+            cid = company.get("id")
+            if not cid:
+                continue
+            if pipeline_state.get(cid, {}).get("status") in {"queued", "running"}:
+                skipped += 1
+                continue
+            domains = list(dict.fromkeys(
+                str(d).strip() for d in (company.get("domains") or []) if str(d).strip()
+            ))
+            if not domains:
+                skipped += 1
+                continue
+            queue_domains = len(domains) > 1
+            options = {**options_base, "domains": domains, "queue_domains": queue_domains}
+            pipeline_state[cid] = {
+                "status": "queued" if job_scheduler else "running",
+                "phase_idx": 0, "phase_id": "", "phase_label": "",
+                "host_count": 0, "started_at": now, "finished_at": None, "log": [],
+                "queue_mode": "per_domain" if queue_domains else "single_job",
+                "queue_total": len(domains) if queue_domains else 1,
+            }
+            try:
+                if job_scheduler:
+                    if queue_domains:
+                        jobs = job_scheduler.enqueue_pipeline_queue(
+                            cid, domains, options=options, created_by=sess.get("username", ""))
+                        if jobs:
+                            pipeline_state[cid]["job_id"] = jobs[0]["id"]
+                            started_cids.append(cid)
+                        else:
+                            pipeline_state[cid]["status"] = "idle"
+                            skipped += 1
+                    else:
+                        job = job_scheduler.enqueue_pipeline(
+                            cid, options=options, created_by=sess.get("username", ""),
+                            target=domains[0])
+                        pipeline_state[cid]["job_id"] = job["id"]
+                        started_cids.append(cid)
+                else:
+                    threading.Thread(
+                        target=run_pipeline_handler, args=(cid, company, options), daemon=True
+                    ).start()
+                    started_cids.append(cid)
+            except Exception:
+                pipeline_state[cid]["status"] = "idle"
+                skipped += 1
+        return jsonify({"ok": True, "started": len(started_cids), "skipped": skipped, "cids": started_cids})
 
     @bp.route("/api/recon/<cid>/pipeline", methods=["GET"])
     @require_auth

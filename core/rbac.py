@@ -28,7 +28,16 @@ ROLES = {
 # ── JWT helpers ─────────────────────────────────────────────────────────────────
 
 def _jwt_secret() -> str:
-    return os.environ.get("JWT_SECRET", "asm-secret-change-me-in-production")
+    secret = os.environ.get("JWT_SECRET", "asm-secret-change-me-in-production")
+    if secret == "asm-secret-change-me-in-production":
+        import sys
+        print(
+            "[SECURITY WARNING] JWT_SECRET is using the default insecure value. "
+            "Set the JWT_SECRET environment variable to a strong random string "
+            "before exposing this service on a network.",
+            file=sys.stderr,
+        )
+    return secret
 
 
 def create_session_token(username: str, role: str, company_ids: list[str] | None = None) -> str:

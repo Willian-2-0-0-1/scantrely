@@ -71,14 +71,6 @@
     createCompany: async function (name, domains) {
       var r = await fetch('/api/companies', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', '_auth': '' },
-        body: JSON.stringify({ name: name, domains: domains })
-      });
-      // Add auth header manually since we used _auth placeholder
-      Object.assign(r, { headers: new Headers(Object.assign({}, _authHeaders(), { 'Content-Type': 'application/json' })) });
-      // Actually, let's just do it properly:
-      r = await fetch('/api/companies', {
-        method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, _authHeaders()),
         body: JSON.stringify({ name: name, domains: domains })
       });
@@ -140,8 +132,8 @@
       if (!r.ok) throw new Error(await r.text());
     },
 
-    /** DNSDumpster comparison */
-    dnsDumpsterCompare:,
+    /** DNSDumpster comparison (stub — diff is fetched directly via /api/diff/:cid) */
+    dnsDumpsterCompare: null,
 
     /** Validate domains */
     validateDomains: async function (domains) {

@@ -132,7 +132,8 @@ def create_core_blueprint(
             "role": admin["role"],
             "scoped_companies": scoped_companies,
         })
-        resp.set_cookie("asm_token", token, max_age=session_ttl, httponly=True, samesite="Lax")
+        resp.set_cookie("asm_token", token, max_age=session_ttl, httponly=True,
+                        samesite="Lax", secure=request.is_secure)
         return resp
 
     @bp.route("/api/auth/logout", methods=["POST"])
@@ -272,6 +273,62 @@ def create_core_blueprint(
         """Return which API keys are configured (bool), without revealing values."""
         raw = get_settings()
         return jsonify({k: bool(v) for k, v in raw.items()})
+
+    @bp.route("/api/ai/enrich-finding", methods=["POST"])
+    @require_auth
+    def api_ai_enrich_finding():
+        """Use Hermes Agent / any OpenRouter-compatible chat completions API to
+        refine CVSS, CWE, mitigation guidance and a PoC writeup for a finding."""
+        import requests as _requests
+
+        cfg = get_settings()
+        base_url = (cfg.get("hermes_base_url") or "http://127.0.0.1:8642/v1").rstrip("/")
+        api_key = cfg.get("hermes_api_key", "")
+        model = cfg.get("hermes_model") or "hermes-agent"
+
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        body = request.get_json(force=True) or {}
+        finding = body.get("finding") or {}
+
+        prompt = (
+            "You are a senior application security researcher writing a bug bounty report. "
+            "Given the finding below, respond with a concise markdown writeup containing exactly these sections: "
+            "'## CVSS' (give a CVSS 3.1 base score, severity label and vector string, with one-line justification), "
+            "'## CWE' (the most specific applicable CWE id and name), "
+            "'## Mitigation' (3-5 actionable bullet points), and "
+            "'## Proof of Concept' (a ready-to-paste PoC description suitable for a HackerOne or Bugcrowd report, "
+            "including steps to reproduce and impact). Be specific to the finding's host/URL/category when possible.\n\n"
+            f"Finding:\n{json.dumps(finding, indent=2)}"
+        )
+
+        try:
+            resp = _requests.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": 800,
+                },
+                timeout=60,
+            )
+        except Exception as e:
+            return jsonify({"error": f"Failed to reach Hermes Agent at {base_url}: {e}"}), 502
+
+        if not resp.ok:
+            return jsonify({"error": f"Hermes API error {resp.status_code}: {resp.text[:300]}"}), 502
+
+        try:
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"]
+        except Exception:
+            return jsonify({"error": "Unexpected response format from Hermes API"}), 502
+
+        return jsonify({"text": text})
 
     @bp.route("/api/settings", methods=["POST", "PUT"])
     @require_auth
