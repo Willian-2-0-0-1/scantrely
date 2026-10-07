@@ -135,15 +135,20 @@ class BaseTool:
             opts = {}
         return opts.get("settings", {}).get(key_name) or opts.get(key_name) or ""
 
-    def _resolve_binary(self, name: str) -> str | None:
-        """Resolve a tool binary from PATH or common Go/Python install locations."""
-        path = shutil.which(name)
-        if path:
-            return path
+    def _http_open(self, url: str, *, headers: dict | None = None, timeout: int = 15,
+                   name: str | None = None):
+        """GET via ``guarded_urlopen`` (per-host circuit breaker + timeout)."""
+        from urllib.request import Request
+        from utils.circuit_breaker import guarded_urlopen
+        req = Request(url, headers=headers or {"User-Agent": "ASM-Platform/1.0"})
+        return guarded_urlopen(req, timeout=timeout, name=name)
 
+    def _resolve_binary(self, name: str) -> str | None:
+        """Resolve a tool binary from project bin/, PATH, or common Go/Python install locations."""
         gopath = os.environ.get("GOPATH") or str(Path.home() / "go")
         gobin = os.environ.get("GOBIN")
-        candidates = []
+        project_bin = Path(__file__).resolve().parent.parent / "bin"
+        candidates = [project_bin / name]
         if gobin:
             candidates.append(Path(gobin) / name)
         candidates.append(Path(gopath) / "bin" / name)
@@ -153,7 +158,7 @@ class BaseTool:
         for candidate in candidates:
             if candidate.exists() and os.access(candidate, os.X_OK):
                 return str(candidate)
-        return None
+        return shutil.which(name)
 
     def run(self, target: str, opts: dict | None = None) -> ToolResult:
         raise NotImplementedError
@@ -269,21 +274,53 @@ class ApiTool(BaseTool):
         opts = opts or {}
         result = ToolResult(tool=self.name, target=target)
         t0 = time.time()
+        if self.requires_key:
+            key = self._get_key(self.requires_key, opts)
+            if not key:
+                result.status = "skipped"
+                result.reason = f"{self.requires_key} not configured"
+                result.error = result.reason
+                result.duration = 0.0
+                result.metrics = {"findings": 0}
+                return result
+        from utils.circuit_breaker import CircuitOpen, breaker_for
+        br = breaker_for(f"api:{self.name}")
+        if not br.allow():
+            result.status = "error"
+            result.reason = f"circuit open ({self.name})"
+            result.error = result.reason
+            result.duration = 0.0
+            result.metrics = {"findings": 0}
+            return result
         for attempt in range(3):
+            if attempt and not br.allow():
+                result.status = "error"
+                result.reason = f"circuit open ({self.name})"
+                result.error = result.reason
+                break
             try:
                 result.findings = self.run_api(target, opts)
                 result.status = "done"
                 result.reason = ""
+                br.success()
+                break
+            except CircuitOpen as e:
+                result.status = "error"
+                result.reason = str(e)
+                result.error = result.reason
                 break
             except Exception as e:
                 err_str = str(e).lower()
                 if "429" in err_str or "rate limit" in err_str or "too many" in err_str:
+                    br.failure()
                     wait = 2 ** attempt + 1
                     time.sleep(wait)
                     continue
                 if attempt < 2 and ("timeout" in err_str or "connection" in err_str or "temporary" in err_str):
+                    br.failure()
                     time.sleep(2 ** attempt + 1)
                     continue
+                br.failure()
                 result.error = str(e)[:300]
                 result.reason = result.error
                 if "timeout" in err_str or "connection" in err_str or "temporary" in err_str:
@@ -788,7 +825,6 @@ class NvdTool(ApiTool):
         return "NVD API v2" if self._get_key("nvd_key", {}) else "NVD API v2 (no key — rate limited)"
 
     def run_api(self, target: str, opts: dict) -> list[Finding]:
-        from urllib.request import urlopen, Request
         from urllib.parse import urlencode
         key = self._get_key("nvd_key", opts)
         headers = {"User-Agent": "ASM-Platform/1.0"}
@@ -796,8 +832,7 @@ class NvdTool(ApiTool):
             headers["apiKey"] = key
         params = {"keywordSearch": target, "resultsPerPage": "20"}
         url = "https://services.nvd.nist.gov/rest/json/cves/2.0?" + urlencode(params)
-        req = Request(url, headers=headers)
-        with urlopen(req, timeout=15) as r:
+        with self._http_open(url, headers=headers, timeout=15) as r:
             data = json.loads(r.read())
         _sev_map = {"critical": Severity.CRITICAL, "high": Severity.HIGH,
                     "medium": Severity.MEDIUM, "low": Severity.LOW}
@@ -1076,11 +1111,17 @@ class CrtShTool(BaseTool):
         return name == target or name.endswith(f".{target}")
 
     def _fetch(self, query: str) -> list[dict]:
+        from utils.circuit_breaker import CircuitOpen, breaker_for
         url = f"https://crt.sh/?{query}&output=json&deduplicate=Y"
-        req = urllib.request.Request(url, headers={"User-Agent": "ASM-Platform/1.0"})
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            raw = resp.read()
+        try:
+            with self._http_open(url, timeout=20, name="crt.sh") as resp:
+                raw = resp.read()
+        except CircuitOpen:
+            return []
+        except Exception:
+            return []
         if not raw or raw[:1] == b"<":
+            breaker_for("crt.sh").failure()
             return []
         data = json.loads(raw)
         return data if isinstance(data, list) else []
@@ -1254,10 +1295,20 @@ class CloudlistTool(CommandTool):
         return f"cloudlist_{{version}}_linux_{arch}.zip"
 
     def _latest_release(self) -> dict | None:
+        from utils.circuit_breaker import CircuitOpen
         url = "https://api.github.com/repos/projectdiscovery/cloudlist/releases/latest"
-        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "asm-tool-bootstrap"})
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            payload = json.load(resp)
+        try:
+            with self._http_open(
+                url,
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "asm-tool-bootstrap"},
+                timeout=20,
+                name="api.github.com",
+            ) as resp:
+                payload = json.load(resp)
+        except CircuitOpen:
+            return None
+        except Exception:
+            return None
         if not isinstance(payload, dict):
             return None
         return payload
@@ -1288,7 +1339,8 @@ class CloudlistTool(CommandTool):
             with tempfile.TemporaryDirectory(prefix="cloudlist-bootstrap-") as tmpdir:
                 zip_path = Path(tmpdir) / asset_name
                 req = urllib.request.Request(download_url, headers={"User-Agent": "asm-tool-bootstrap"})
-                with urllib.request.urlopen(req, timeout=60) as resp, open(zip_path, "wb") as fp:
+                from utils.circuit_breaker import guarded_urlopen
+                with guarded_urlopen(req, timeout=60) as resp, open(zip_path, "wb") as fp:
                     shutil.copyfileobj(resp, fp)
                 with zipfile.ZipFile(zip_path) as zf:
                     member = next((n for n in zf.namelist() if n.endswith("/cloudlist") or n == "cloudlist"), None)
@@ -1446,6 +1498,24 @@ class CloudEnumTool(CommandTool):
     install_cmd = "git clone https://github.com/initstring/cloud_enum.git"
     timeout     = 300
 
+    def available(self) -> bool:
+        binary = self._resolve_binary(self.name)
+        if not binary:
+            return False
+        enum_dir = Path(binary).resolve().parent / "enum_tools"
+        if enum_dir.is_dir():
+            return True
+        try:
+            proc = _subprocess_real.run(
+                [binary, "--help"], capture_output=True, text=True, timeout=8,
+            )
+            blob = (proc.stderr or "") + (proc.stdout or "")
+            if "No module named" in blob or "ModuleNotFoundError" in blob:
+                return False
+            return True
+        except Exception:
+            return False
+
     def command(self, target: str, opts: dict) -> list[str]:
         # Ensure we run cloud_enum directly (it has a shebang) so bash resolves PATH
         return ["cloud_enum", "-k", target, "-qs", "-t", "5"]
@@ -1492,18 +1562,22 @@ class FaviconHashTool(ApiTool):
             raise RuntimeError("Shodan API key not configured")
 
         findings = []
-        from urllib.request import urlopen, Request
         from urllib.parse import quote
+        from utils.circuit_breaker import CircuitOpen
 
         favicon_data = None
         for scheme in ("https", "http"):
             try:
-                req = Request(f"{scheme}://{domain}/favicon.ico",
-                              headers={"User-Agent": "Mozilla/5.0"})
-                with urlopen(req, timeout=10) as r:
+                with self._http_open(
+                    f"{scheme}://{domain}/favicon.ico",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=10,
+                ) as r:
                     if r.status == 200:
                         favicon_data = r.read()
                         break
+            except CircuitOpen:
+                break
             except Exception:
                 continue
 
@@ -1523,9 +1597,10 @@ class FaviconHashTool(ApiTool):
         try:
             query = f"http.favicon.hash:{favicon_hash}"
             url = f"https://api.shodan.io/shodan/host/search?key={shodan_key}&query={quote(query)}"
-            req = Request(url, headers={"User-Agent": "ASM-Platform/1.0"})
-            with urlopen(req, timeout=15) as r:
+            with self._http_open(url, timeout=15) as r:
                 data = json.loads(r.read())
+        except CircuitOpen:
+            raise
         except Exception as e:
             raise RuntimeError(f"Shodan API error: {e}")
 
@@ -1622,14 +1697,12 @@ class HunterIOTool(ApiTool):
     requires_key = "hunter_key"
 
     def run_api(self, target: str, opts: dict) -> list[Finding]:
-        from urllib.request import urlopen, Request
         key = self._get_key("hunter_key", opts)
         if not key:
             return []
         findings = []
         url = f"https://api.hunter.io/v2/domain-search?domain={target}&api_key={key}&limit=100"
-        req = Request(url, headers={"User-Agent": "ASM-Platform/1.0"})
-        with urlopen(req, timeout=20) as r:
+        with self._http_open(url, timeout=20) as r:
             data = json.loads(r.read())
         for entry in data.get("data", {}).get("emails", []):
             findings.append(Finding(
@@ -1656,11 +1729,9 @@ class HackerTargetTool(ApiTool):
     install_cmd = "API only — free, no key required"
 
     def run_api(self, target: str, opts: dict) -> list[Finding]:
-        from urllib.request import urlopen, Request
         findings = []
         url = f"https://api.hackertarget.com/hostsearch/?q={target}"
-        req = Request(url, headers={"User-Agent": "ASM-Platform/1.0"})
-        with urlopen(req, timeout=20) as r:
+        with self._http_open(url, timeout=20) as r:
             text = r.read().decode(errors="replace")
         for line in text.strip().splitlines():
             parts = line.split(",")
@@ -1680,11 +1751,13 @@ class AlienvaultOtxTool(ApiTool):
     install_cmd = "API only — free key at otx.alienvault.com"
 
     def run_api(self, target: str, opts: dict) -> list[Finding]:
-        from urllib.request import urlopen, Request
         findings = []
         url = f"https://otx.alienvault.com/api/v1/indicators/domain/{target}/passive_dns"
-        req = Request(url, headers={"User-Agent": "ASM-Platform/1.0", "X-OTX-API-KEY": opts.get("otx_key", "")})
-        with urlopen(req, timeout=20) as r:
+        with self._http_open(
+            url,
+            headers={"User-Agent": "ASM-Platform/1.0", "X-OTX-API-KEY": opts.get("otx_key", "")},
+            timeout=20,
+        ) as r:
             data = json.loads(r.read())
         seen = set()
         for entry in data.get("passive_dns", []):

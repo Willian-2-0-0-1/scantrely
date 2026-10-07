@@ -12,7 +12,9 @@ venv/
 *.db
 *.db-wal
 *.db-shm
+asm_data.json
 data/asm_data.js
+data/asm_data.json
 data/snapshots/
 
 # Logs
@@ -33,6 +35,9 @@ CLAUDE.md
 .reversa/
 _reversa_sdd/
 .gopath/
+
+# Third-party clones (recreated by install_tools.sh)
+vendor/
 
 # Scans (user data)
 scans/*/

@@ -218,15 +218,16 @@ def get_google_oauth_url(redirect_uri: str) -> str:
 
 def exchange_google_code(code: str, redirect_uri: str) -> dict | None:
     """Exchange authorization code for user info. Returns {email, name, sub} or None."""
-    import urllib.request as ur
+    from urllib.request import Request
+    from utils.circuit_breaker import CircuitOpen, guarded_urlopen
+
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
     if not client_id or not client_secret:
         return None
 
-    # Exchange code for token
-    token_data = ur.urlopen(
-        ur.Request(
+    try:
+        req = Request(
             "https://oauth2.googleapis.com/token",
             data=json.dumps({
                 "code": code,
@@ -236,17 +237,19 @@ def exchange_google_code(code: str, redirect_uri: str) -> dict | None:
                 "grant_type": "authorization_code",
             }).encode(),
             headers={"Content-Type": "application/json"},
+            method="POST",
         )
-    ).read()
-    token = json.loads(token_data).get("access_token")
-    if not token:
-        return None
-
-    # Get user info
-    user_data = ur.urlopen(
-        ur.Request(
+        with guarded_urlopen(req, timeout=15, name="oauth2.googleapis.com") as resp:
+            token = json.loads(resp.read()).get("access_token")
+        if not token:
+            return None
+        req = Request(
             "https://www.googleapis.com/oauth2/v3/userinfo",
             headers={"Authorization": f"Bearer {token}"},
         )
-    ).read()
-    return json.loads(user_data)
+        with guarded_urlopen(req, timeout=15, name="www.googleapis.com") as resp:
+            return json.loads(resp.read())
+    except CircuitOpen:
+        return None
+    except Exception:
+        return None

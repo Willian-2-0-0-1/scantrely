@@ -27,7 +27,9 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from utils.circuit_breaker import CircuitOpen, guarded_urlopen
 
 SEVERITY_EMOJI = {
     "critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵", "info": "⚪",
@@ -42,6 +44,9 @@ EVENT_TITLES = {
     "new_tech":        "🔧 Tech stack change",
     "status_change":   "📡 Status change",
     "waf_change":      "🛡 WAF change",
+    "cert_expiring":   "📜 Certificate expiring",
+    "cve_critical":    "💥 Critical CVE",
+    "supply_chain_critical": "📦 Supply chain CVE",
 }
 
 
@@ -72,8 +77,10 @@ def _post_json(url: str, body: dict, *, headers: dict | None = None, timeout: in
         method="POST",
     )
     try:
-        urlopen(req, timeout=timeout)
+        guarded_urlopen(req, timeout=timeout)
         return True
+    except CircuitOpen:
+        return False
     except (URLError, Exception):
         return False
 
@@ -88,8 +95,10 @@ def _post_form(url: str, fields: dict, *, headers: dict | None = None, timeout: 
         method="POST",
     )
     try:
-        urlopen(req, timeout=timeout)
+        guarded_urlopen(req, timeout=timeout)
         return True
+    except CircuitOpen:
+        return False
     except (URLError, Exception):
         return False
 

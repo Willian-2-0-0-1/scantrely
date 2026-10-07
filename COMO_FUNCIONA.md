@@ -2,7 +2,7 @@
 
 > Documento gerado em 2026-06-03 após limpeza do projeto.
 > Plataforma de **Attack Surface Management / OSINT / recon** construída em **Flask + SQLite**,
-> orquestrando 35+ ferramentas externas num pipeline de 14 fases.
+> orquestrando 35+ ferramentas externas num pipeline de 11 fases.
 
 ---
 
@@ -22,7 +22,7 @@ backend Flask.
                     (routes/)      (core/jobs)    (core/database → asm.db)
                           │           │
                           └────►  ReconRunner (core/pipeline.py)
-                                      │  executa 14 fases
+                                      │  executa 11 fases
                                       ▼
                             44 módulos run_* (core/recon.py)
                                       │  invocam binários em bin/
@@ -66,7 +66,7 @@ asm/
 │
 ├── core/                  # Núcleo de domínio
 │   ├── database.py        # ASMDatabase — toda a camada SQLite (asm.db)
-│   ├── pipeline.py        # ReconRunner + PIPELINE_PHASES (14 fases)
+│   ├── pipeline.py        # ReconRunner + PIPELINE_PHASES (11 fases)
 │   ├── recon.py           # 44 módulos run_* (a lógica de cada ferramenta)
 │   ├── jobs.py            # JobScheduler — fila de jobs com prioridade/retry
 │   ├── targets.py         # Seleção/normalização de domínios-alvo
@@ -119,13 +119,14 @@ asm/
 ## 4. Backend — `server.py`
 
 - Cria o app Flask, instancia `ASMDatabase` (→ `data/asm.db`) e o `JobScheduler`.
-- **Autenticação:** login retorna um **Bearer token**; sessões são guardadas em memória
-  com **fallback no banco** (tabela `sessions`). Senhas com **PBKDF2-SHA256, 260.000 iterações**
-  (compatível com OWASP).
+- **Autenticação:** `POST /api/auth/login` devolve `{token}`; as APIs autenticadas usam o
+  header **`X-Auth-Token`**. Sessões ficam em memória com **fallback no banco** (tabela `sessions`).
+  Senhas com **PBKDF2-SHA256, 260.000 iterações** (compatível com OWASP).
 - **RBAC:** dois papéis — `super_admin` (acesso total) e `analyst` (escopo por empresa).
 - **Rate limit de login:** 10 falhas por IP → bloqueio de 15 min (compartilhado entre usuários do mesmo IP).
 - **Registro de blueprints** (linhas ~643–746): `core`, `ops`, `reporting`, `assets`, `scans`, `recon`.
 - Serve a SPA em `/` (por isso `/login` "não existe" como rota — é a própria SPA).
+- **Health:** `GET /health` e `GET /api/health` (sem login) devolvem SQLite, disco, `bin/`, watchdog, pipelines e circuit breakers. HTTP 503 só se o banco ou o disco falharem.
 
 ### Endpoints principais (prefixo `/api`)
 | Caminho | Função |
@@ -140,26 +141,26 @@ asm/
 
 ## 5. O pipeline de recon (`core/pipeline.py`)
 
-`ReconRunner` executa **`PIPELINE_PHASES`** — uma lista declarativa de 14 fases. Cada fase tem:
+`ReconRunner` executa **`PIPELINE_PHASES`** — uma lista declarativa de **11 fases**. Cada fase tem:
 `modules` (quais run_* rodar), `parallel` (concorrência), `rate_phase` (perfil de rate limit),
-`gate` (pré-condição, ex.: `has_live_hosts`, `has_open_ports`) e flags como `recursive`/`merge_hosts`.
+`gate` (pré-condição, ex.: `has_live_hosts`) e flags como `recursive`/`merge_hosts`.
+O catálogo canônico também sai em `GET /api/recon/pipeline/phases` (HUD e API usam a mesma lista).
+Cada execução grava `phase_catalog` + `module_status` em `scans/<cid>/pipeline_state.json`,
+então o HUD reconstitui o status depois de um restart.
 
 | # | Fase (`id`) | O que faz | Módulos (exemplos) |
 |---|---|---|---|
-| 1 | `passive` | Discovery passivo de subdomínios + atribuição de ativos | subfinder, assetfinder, amass, theharvester, crt.sh, otx, urlscan, **github_subdomains**, **reverse_whois**… |
-| 1b | `intel` | Intel & OSINT + mobile | shodan, breach, certstream, phishing, postman, **apk_recon** |
-| 1c | `supply_chain` | Supply chain & cloud | dep_confusion, cloud |
-| 2 | `cleanup` | Limpeza automática (interno) | — |
-| 3 | `validation` | Validação + brute DNS (recursivo) | dns_brute, leaks |
-| 4 | `profiling` | Perfil do alvo | headers, waf, wappalyzer, whatweb, vendor_fp |
-| 4b | `js_tech` | Descoberta de JS | js |
-| 4c | `js_analysis` | Endpoints & secrets em JS | js_endpoints, js_secrets |
-| 5 | `crawl` | Crawl & screenshots | wayback, urlfinder, gowitness, favicon_hunt, **browser_crawl** |
-| 6 | `enum_active` | Enumeração ativa | vhost, param_mine, **origin_discovery** |
-| 7 | `portscan` | Port scan | portscan (naabu), cloudlist |
-| 7b | `services` | Serviços & CMS | services, cms_scan |
-| 9 | `vulnscan` | Vuln scan | takeover, subjack, cve, cors_scan, default_creds, graphql, open_redirect… |
-| 10 | `nuclei` | Scan com Nuclei | api_panels |
+| 1 | `discovery` | Discovery passivo de superfície | subfinder, assetfinder, amass, certs, certstream, surface_intel, otx, urlscan… |
+| 2 | `validation` | DNS, zona, leaks (recursivo) | dns, dns_brute, zone_transfer, leaks, git_leaks, email |
+| 3 | `intel` | Intel útil para bug bounty | shodan, cloud, phishing, related, reverse_whois, apk_recon, origin_discovery… |
+| 4 | `cleanup` | Limpeza e priorização (interno) | cleanup |
+| 5 | `fingerprint` | Fingerprint web | headers, waf, wappalyzer, vhost, screenshot, gowitness… |
+| 6 | `js_discovery` | JS em hosts vivos | js |
+| 7 | `api_mapping` | APIs, endpoints e secrets | js_endpoints, js_secrets, param_mine, graphql, jwt_analysis |
+| 8 | `browser` | Evidência Playwright | browser_crawl, browser_recon |
+| 9 | `bug_checks` | Checks leves de bug bounty | takeover, cors, open_redirect, cloud_enum, xss_scan… |
+| 10 | `ports_services` | Portas e serviços | portscan, udp_portscan, smtp_probe, snmp_probe, cms_scan… |
+| 11 | `nuclei` | Templates curados | cve, api_panels, screenshot_diff |
 
 - **Gates** evitam trabalho inútil: fases ativas só rodam se houver hosts vivos / portas abertas.
 - **`SELF_CONTAINED_MODULES`**: módulos que não dependem de descoberta prévia.

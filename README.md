@@ -6,7 +6,7 @@
 ![Módulos](https://img.shields.io/badge/modulos-50+-green)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow)
 ![Playwright](https://img.shields.io/badge/playwright-headless-purple)
-![Versão](https://img.shields.io/badge/versão-1.1.0-orange)
+![Versão](https://img.shields.io/badge/versão-1.2.0-orange)
 ![Licença](https://img.shields.io/badge/license-MIT-lightgrey)
 
 > Veja o [CHANGELOG.md](CHANGELOG.md) para a lista completa de novidades e correções de cada versão.

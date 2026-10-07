@@ -96,8 +96,21 @@ class PlaywrightPentestPipeline:
         headers = {"User-Agent": self.config.user_agent or "Mozilla/5.0 ASM-Playwright"}
 
         def _probe(host: str) -> dict:
+            from utils.circuit_breaker import CircuitOpen, guard_host
             target_urls = [f"https://{host}", f"http://{host}"]
             last_err = ""
+            try:
+                br = guard_host(target_urls[0], name=host)
+            except CircuitOpen:
+                return {
+                    "host": host,
+                    "status_code": None,
+                    "content_type": "",
+                    "title": "",
+                    "server": "",
+                    "final_url": f"https://{host}",
+                    "error": "circuit open",
+                }
             with httpx.Client(
                 timeout=timeout,
                 verify=False,
@@ -108,6 +121,10 @@ class PlaywrightPentestPipeline:
                     for method in ("HEAD", "GET"):
                         try:
                             resp = client.request(method, target)
+                            if resp.status_code >= 500:
+                                br.failure()
+                            else:
+                                br.success()
                             if resp.status_code == 405 and method == "HEAD":
                                 continue
                             ctype = resp.headers.get("content-type", "")
@@ -129,6 +146,7 @@ class PlaywrightPentestPipeline:
                                 "error": "",
                             }
                         except Exception as exc:
+                            br.failure()
                             last_err = str(exc)[:180]
                             continue
             return {

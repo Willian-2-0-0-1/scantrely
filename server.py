@@ -8,6 +8,7 @@ Usage:
 import json, sys, os, threading, uuid, time, re, subprocess
 import hashlib, secrets, base64, hmac
 import faulthandler, signal
+import logging
 # Dump all thread stacks to stderr (→ logs/server.log) on `kill -USR1 <pid>`.
 # Lets the supervisor diagnose a hung pipeline worker without py-spy.
 try:
@@ -17,8 +18,6 @@ except Exception:
 from functools import wraps
 from pathlib import Path
 from datetime import datetime, timedelta
-from urllib.request import urlopen, Request
-from urllib.error import URLError
 
 from core.database import ASMDatabase
 from routes.core import create_core_blueprint
@@ -27,6 +26,7 @@ from routes.reporting import create_reporting_blueprint
 from routes.assets import create_asset_blueprint
 from routes.scans import create_scan_blueprint
 from routes.recon import create_recon_blueprint
+from routes.extras import create_extras_blueprint
 from core.jobs import JobScheduler
 from core.pipeline import ReconRunner, PIPELINE_PHASES, SELF_CONTAINED_MODULES
 
@@ -35,6 +35,42 @@ try:
 except ImportError:
     print("[!] Flask not installed. Run: pip install flask")
     sys.exit(1)
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+def _configure_logging() -> None:
+    from utils.trace import install_log_filter
+    level_name = os.environ.get("ASM_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s rid=%(request_id)s tid=%(trace_id)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    install_log_filter()
+
+_configure_logging()
+
+
+def _install_signal_handlers() -> None:
+    def _on_term(signum, _frame):
+        from utils.lifecycle import begin_drain
+        timeout = float(os.environ.get("ASM_DRAIN_TIMEOUT", "8") or 8)
+        logging.getLogger("scantrely").warning(
+            "signal %s — draining for %.1fs then exit", signum, timeout
+        )
+        begin_drain()
+
+        def _die():
+            time.sleep(max(0.5, timeout))
+            os._exit(0)
+
+        threading.Thread(target=_die, name="drain-exit", daemon=True).start()
+
+    try:
+        signal.signal(signal.SIGTERM, _on_term)
+        signal.signal(signal.SIGINT, _on_term)
+    except Exception:
+        pass
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 BASE          = Path(__file__).parent.resolve()
@@ -244,6 +280,8 @@ def require_super_admin(f):
 app = Flask(__name__, static_folder=str(BASE))
 app.config["JSON_SORT_KEYS"] = False
 app.before_request(_enforce_company_scope)
+from utils.trace import register_trace
+register_trace(app)
 
 
 @app.after_request
@@ -378,14 +416,40 @@ def serve_bbprograms_js():
 def serve_generators_js():
     return (BASE / "static" / "js" / "generators.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
 
+@app.route("/js/<name>.js")
+def serve_extra_js(name: str):
+    allowed = {"theme", "asset-graph", "extras", "icons"}
+    if name not in allowed:
+        abort(404)
+    path = BASE / "static" / "js" / f"{name}.js"
+    if not path.is_file():
+        abort(404)
+    return path.read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
+
+
+def _register_health_endpoint():
+    from utils.health import register_health_routes
+    register_health_routes(
+        app,
+        db=DB,
+        bin_dir=_BIN_DIR,
+        scans_dir=BASE / "scans",
+        data_dir=BASE / "data",
+        job_scheduler=JOB_SCHEDULER,
+        pipeline_state=_runner.pipeline_state,
+        playwright_path=Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or str(Path.home() / ".asm-playwright")),
+    )
+
+
 # ─── Bug Bounty Programs API proxy ────────────────────────────────────
 
 @app.route("/api/bbprograms/hackerone")
 @require_auth
 def bbprograms_hackerone():
     """Proxy para a API do HackerOne. Requer hackerone_username + hackerone_token nas settings."""
-    from urllib.request import urlopen, Request as UrlRequest
+    from urllib.request import Request as UrlRequest
     from urllib.error import URLError, HTTPError
+    from utils.circuit_breaker import CircuitOpen, guarded_urlopen
     import base64
 
     settings = _get_settings()
@@ -409,8 +473,10 @@ def bbprograms_hackerone():
             "Accept": "application/json",
             "User-Agent": "SCANTRELY/1.0",
         })
-        with urlopen(req, timeout=15) as resp:
+        with guarded_urlopen(req, timeout=15, name="api.hackerone.com") as resp:
             raw = json.loads(resp.read().decode())
+    except CircuitOpen:
+        return jsonify({"error": "HackerOne indisponível (circuit open)", "circuit": "open"}), 503
     except HTTPError as e:
         if e.code in (401, 403):
             return jsonify({"error": "Credenciais inválidas. Verifique seu username e API token do HackerOne.", "auth_error": True}), 200
@@ -724,6 +790,8 @@ if os.environ.get("ASM_ENABLE_SCHEDULED_SCANS", "0") == "1":
 RECON_MODULES = {
     "email":     ("Email Security (SPF/DMARC/DKIM)",  "~10s"),
     "certs":     ("Certificate Transparency + SSL",    "~20s"),
+    "surface_intel": ("Surface Intel DNS/CDN/CSP (sem VirusTotal)", "~25s"),
+    "origin_discovery": ("Origin IP behind CDN/WAF", "~1m"),
     "headers":   ("Security Headers",                  "~30s"),
     "typosquat": ("Typosquatting Detection",           "~2m"),
     "cloud":     ("Cloud Asset Discovery (S3/Azure/GCP)", "~3m"),
@@ -769,6 +837,17 @@ RECON_MODULES = {
     # ── Browser deep recon ─────────────────────────────────────────────────────
     "browser_recon":("Deep Browser Recon — APIs, Secrets, Shadow IT (Chromium)","~45s"),
     "supply_chain":  ("JS Supply Chain Scan — Client-side lib CVEs (NVD)","~2m"),
+    "phishing":      ("Lookalike / typosquat brand surface", "~2m"),
+    "git_leaks":     ("Exposed .git + gitleaks", "~2m"),
+    "s3_scanner":    ("Open S3 bucket names", "~1m"),
+    "jwt_analysis":  ("JWT tokens in JS", "~1m"),
+    "xss_scan":      ("Reflected XSS (dalfox if installed)", "~3m"),
+    "amass":         ("Amass passive subdomain enum", "~5m"),
+    "zone_transfer": ("DNS zone transfer check", "~20s"),
+    "reverse_whois": ("Reverse WHOIS", "~1m"),
+    "smtp_probe":    ("SMTP service probe", "~1m"),
+    "snmp_probe":    ("SNMP service probe", "~1m"),
+    "udp_portscan":  ("UDP port scan", "~3m"),
 }
 
 def _load_hosts_for_company(cid: str) -> list:
@@ -802,6 +881,13 @@ _SETTINGS_KEYS = {
     "asm_job_workers", "asm_global_proc_limit", "asm_domain_fanout",
     "asm_gate_default", "asm_rate_mode", "asm_scan_mode",
     "asm_watchdog_max_load", "asm_watchdog_min_mem_mb", "asm_watchdog_max_procs",
+    # Notifications / ticketing (utils/alerting.py)
+    "smtp_host", "smtp_port", "smtp_user", "smtp_pass", "alert_email",
+    "jira_url", "jira_token", "jira_project", "jira_user",
+    "linear_token", "linear_team_id",
+    "slack_webhook_url", "discord_webhook_url", "alert_webhook_url",
+    "defectdojo_url", "defectdojo_token", "defectdojo_product",
+    "slash_token", "vapid_public_key", "vapid_private_key",
 }
 
 _PUBLIC_SETTINGS_KEYS = {
@@ -863,6 +949,7 @@ app.register_blueprint(create_reporting_blueprint(
     load_whitelist=_load_whitelist,
     load_asm_data=_load_asm_data,
     audit=_audit,
+    base_dir=BASE,
 ))
 
 app.register_blueprint(create_asset_blueprint(
@@ -949,6 +1036,7 @@ JOB_SCHEDULER = JobScheduler(
     max_workers=int(os.environ.get("ASM_JOB_WORKERS", "1") or "1"),
 )
 JOB_SCHEDULER.start()
+_register_health_endpoint()
 
 
 app.register_blueprint(create_recon_blueprint(
@@ -977,6 +1065,29 @@ app.register_blueprint(create_recon_blueprint(
     db=DB,
 ))
 
+app.register_blueprint(create_extras_blueprint(
+    require_auth=require_auth,
+    require_super_admin=require_super_admin,
+    get_session=_get_session,
+    load_admins=load_admins,
+    save_admins=save_admins,
+    hash_pw=_hash_pw,
+    get_settings=_get_settings,
+    check_pw=_check_pw,
+    save_settings=DB.set_settings,
+    settings_keys=_SETTINGS_KEYS,
+    db=DB,
+    base_dir=BASE,
+    load_companies=load_companies,
+    job_scheduler=JOB_SCHEDULER,
+    pipeline_state=_runner.pipeline_state,
+    pipeline_phases=PIPELINE_PHASES,
+    audit=_audit,
+    get_company_data=_get_company_data,
+    sessions=_sessions,
+    session_ttl=_SESSION_TTL,
+))
+
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -988,7 +1099,7 @@ if __name__ == "__main__":
 
     print(f"""
   ===================================
-    ASM Platform - Server v1.1
+    ASM Platform - Server v1.2.0
   ===================================
   -> http://{args.host}:{args.port}
   -> Database       : {DB_FILE}
@@ -996,4 +1107,5 @@ if __name__ == "__main__":
   -> Data output    : {DATA_JS}
     """)
 
+    _install_signal_handlers()
     app.run(host=args.host, port=args.port, debug=False, threaded=True)

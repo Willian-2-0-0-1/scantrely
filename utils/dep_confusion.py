@@ -30,6 +30,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 # ─── Well-known public packages to skip (reduce false-positive noise) ─────────
 
 _SKIP_NPM = {
@@ -96,10 +100,19 @@ _SKIP_RUBY = {
 def _http_get(url: str, headers: dict | None = None, timeout: int = 10) -> tuple[int, bytes]:
     req = urllib.request.Request(url, headers=headers or {})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        from utils.circuit_breaker import CircuitOpen, guarded_urlopen
+    except ImportError:
+        CircuitOpen = ()  # type: ignore
+        guarded_urlopen = None
+    try:
+        opener = guarded_urlopen or urllib.request.urlopen
+        kwargs = {"timeout": timeout}
+        with opener(req, **kwargs) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, b""
+    except CircuitOpen:
+        return 0, b""
     except Exception:
         return 0, b""
 

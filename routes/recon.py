@@ -12,8 +12,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import time
-
 from flask import Blueprint, Response, abort, g, jsonify, request, send_file, stream_with_context
 
 from playwright_agent.asm_bridge import build_playwright_job_options
@@ -102,16 +100,24 @@ def create_recon_blueprint(
     @bp.route("/api/recon/pipeline/profiles", methods=["GET"])
     @require_auth
     def api_pipeline_profiles():
+        from core.pipeline import PIPELINE_PHASES, OPTIONAL_ON_DEMAND, pipeline_definition
         return jsonify({
             "bug_bounty": {
                 "description": "Bug bounty pipeline: discovery, validation, prioritization, browser evidence, checks and reporting.",
                 "active": True,
-                "phases": [
-                    "discovery", "validation", "intel", "cleanup", "fingerprint",
-                    "js_discovery", "api_mapping", "browser", "bug_checks",
-                    "ports_services", "nuclei",
-                ],
+                "phases": [p["id"] for p in PIPELINE_PHASES],
             },
+            "definition": pipeline_definition(),
+            "optional_on_demand": sorted(OPTIONAL_ON_DEMAND),
+        })
+
+    @bp.route("/api/recon/pipeline/phases", methods=["GET"])
+    @require_auth
+    def api_pipeline_phases():
+        from core.pipeline import OPTIONAL_ON_DEMAND, pipeline_definition
+        return jsonify({
+            "phases": pipeline_definition(),
+            "optional_on_demand": sorted(OPTIONAL_ON_DEMAND),
         })
 
     @bp.route("/api/recon/<cid>/<module>", methods=["POST"])
@@ -203,11 +209,16 @@ def create_recon_blueprint(
             "profile": "bug_bounty",
             "pipeline_profile": "bug_bounty",
             "active": True,
+            "incremental": bool(body.get("incremental")),
         }
         if profile not in _PIPELINE_PROFILES:
             return jsonify({"error": f"Invalid profile: {profile}", "profiles": sorted(_PIPELINE_PROFILES)}), 400
         if domains:
             options["domains"] = domains
+        from core.pipeline import pipeline_definition
+        from utils.trace import current_trace_id, new_id
+        tid = current_trace_id() or new_id()
+        options["trace_id"] = tid
         pipeline_state[cid] = {
             "status": "queued" if job_scheduler else "running",
             "phase_idx": 0,
@@ -219,6 +230,11 @@ def create_recon_blueprint(
             "log": [],
             "queue_mode": "per_domain" if queue_domains else "single_job",
             "queue_total": len(domains) if queue_domains else 1,
+            "skip_modules": [],
+            "module_events": [],
+            "module_status": {},
+            "phase_catalog": pipeline_definition(),
+            "trace_id": tid,
         }
 
         if job_scheduler:
@@ -247,6 +263,7 @@ def create_recon_blueprint(
                     "queue_mode": "per_domain",
                     "status": "queued",
                     "phases": len(pipeline_phases),
+                    "trace_id": tid,
                 }), 202
 
             job = job_scheduler.enqueue_pipeline(
@@ -267,10 +284,11 @@ def create_recon_blueprint(
                 "deduped": bool(job.get("deduped")),
                 "status": job["status"],
                 "phases": len(pipeline_phases),
+                "trace_id": tid,
             }), 202
 
         run_pipeline_handler(cid, company, options)
-        return jsonify({"ok": True, "company_id": cid, "phases": len(pipeline_phases)}), 202
+        return jsonify({"ok": True, "company_id": cid, "phases": len(pipeline_phases), "trace_id": tid}), 202
 
     @bp.route("/api/recon/<cid>/playwright", methods=["POST"])
     @require_auth
@@ -321,6 +339,8 @@ def create_recon_blueprint(
     @bp.route("/api/recon/<cid>/pipeline", methods=["DELETE"])
     @require_auth
     def api_stop_pipeline(cid: str):
+        from core.pipeline import finalize_in_flight_modules, persist_pipeline_state_file
+
         state = pipeline_state.get(cid)
         if state is None:
             state = {}
@@ -331,6 +351,16 @@ def create_recon_blueprint(
             "ts": datetime.now().isoformat(timespec="seconds"),
             "msg": "⏹ Pipeline stopped by user"
         })
+        try:
+            finalize_in_flight_modules(
+                cid,
+                results=recon_results,
+                state=state,
+                status="cancelled",
+                reason="pipeline stopped",
+            )
+        except Exception:
+            pass
         if db is not None:
             try:
                 cancelled = db.cancel_pending_jobs(company_id=cid, job_type="pipeline")
@@ -343,7 +373,51 @@ def create_recon_blueprint(
                     })
             except Exception:
                 pass
+        if base_dir:
+            try:
+                persist_pipeline_state_file(base_dir, cid, state)
+            except Exception:
+                pass
         return jsonify({"ok": True, "company_id": cid})
+
+    @bp.route("/api/recon/<cid>/pipeline/<module>", methods=["DELETE"])
+    @require_auth
+    def api_cancel_pipeline_module(cid: str, module: str):
+        module = (module or "").strip()
+        if not module or "/" in module or module in {"stream", "cancel"}:
+            return jsonify({"error": "invalid module"}), 400
+        state = pipeline_state.get(cid)
+        if state is None:
+            state = {}
+            pipeline_state[cid] = state
+        skip = [str(x) for x in (state.get("skip_modules") or [])]
+        if module not in skip:
+            skip.append(module)
+        state["skip_modules"] = skip
+        job_key = f"{cid}:{module}"
+        current = recon_results.get(job_key) or {}
+        if current.get("status") in (None, "", "running", "not_run"):
+            recon_results[job_key] = {
+                **current,
+                "status": "cancelled",
+                "reason": "cancelled by user",
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        state.setdefault("log", []).append({
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "msg": f"⏹ Módulo {module} cancelado pelo usuário",
+            "phase": state.get("phase_id", ""),
+            "module": module,
+            "status": "cancelled",
+        })
+        events = state.setdefault("module_events", [])
+        events.append({
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "phase": state.get("phase_id", ""),
+            "module": module,
+            "status": "cancelled",
+        })
+        return jsonify({"ok": True, "company_id": cid, "module": module, "skip_modules": skip})
 
     @bp.route("/api/recon/<cid>/pipeline/cancel", methods=["POST"])
     @require_auth
@@ -354,6 +428,8 @@ def create_recon_blueprint(
     @bp.route("/api/recon/cancel-all", methods=["POST"])
     @require_auth
     def api_cancel_all_pipelines():
+        from core.pipeline import finalize_in_flight_modules, persist_pipeline_state_file
+
         now = datetime.now().isoformat(timespec="seconds")
         cancelled_cids = []
         for cid, ps in list(pipeline_state.items()):
@@ -364,6 +440,21 @@ def create_recon_blueprint(
                     "ts": now,
                     "msg": "⏹ Pipeline parado pelo usuário (cancelar todos)",
                 })
+                try:
+                    finalize_in_flight_modules(
+                        cid,
+                        results=recon_results,
+                        state=ps,
+                        status="cancelled",
+                        reason="pipeline stopped",
+                    )
+                except Exception:
+                    pass
+                if base_dir:
+                    try:
+                        persist_pipeline_state_file(base_dir, cid, ps)
+                    except Exception:
+                        pass
                 cancelled_cids.append(cid)
         db_cancelled = 0
         if db is not None:
@@ -459,39 +550,42 @@ def create_recon_blueprint(
     def api_pipeline_status(cid: str):
         state = pipeline_state.get(cid)
         if not state and load_pipeline_state:
-            state = load_pipeline_state(cid)
+            loaded = load_pipeline_state(cid)
+            if loaded:
+                pipeline_state[cid] = loaded
+                state = loaded
         if not state or not isinstance(state, dict):
             return jsonify({"status": "not_run"})
 
-        state_not_done = {
-            item.get("module"): item
-            for item in (state.get("not_done", []) or [])
-            if isinstance(item, dict) and item.get("module")
-        }
-        state_skipped = {
-            item.get("module"): item
-            for item in (state.get("skipped_modules", []) or [])
-            if isinstance(item, dict) and item.get("module")
+        from core.pipeline import module_status_index
+        persisted = module_status_index(state)
+        catalog = state.get("phase_catalog") or pipeline_phases
+        finished = str(state.get("status") or "").lower() in {
+            "done", "error", "cancelled", "stopped", "done_with_issues",
         }
 
         phases_status = []
-        for phase in pipeline_phases:
+        for phase in catalog:
             modules = []
-            for module in phase["modules"]:
-                result = recon_results.get(f"{cid}:{module}", {})
-                fallback = state_not_done.get(module) or state_skipped.get(module) or {}
+            for module in phase.get("modules") or []:
+                result = recon_results.get(f"{cid}:{module}", {}) or {}
+                fallback = persisted.get(module) or {}
                 status = result.get("status") or fallback.get("status") or "not_run"
+                reason = result.get("reason") or result.get("error") or fallback.get("reason", "")
+                if finished and status == "running":
+                    status = "error"
+                    reason = reason or "interrupted"
                 modules.append({
                     "module": module,
                     "status": status,
-                    "reason": result.get("reason") or result.get("error") or fallback.get("reason", ""),
+                    "reason": reason,
                     "finished_at": result.get("finished_at") or fallback.get("finished_at"),
                 })
             phases_status.append({
                 "id": phase["id"],
                 "label": phase["label"],
                 "modules": modules,
-                "done": all(mod["status"] in ("done", "error", "timeout", "skipped") for mod in modules),
+                "done": all(mod["status"] in ("done", "error", "timeout", "skipped", "cancelled", "stopped") for mod in modules),
             })
 
         return jsonify({
@@ -510,6 +604,8 @@ def create_recon_blueprint(
             "log": state.get("log", [])[-30:],
             "mullvad_ip": state.get("mullvad_ip", ""),
             "phases": phases_status,
+            "module_events": (state.get("module_events") or [])[-80:],
+            "skip_modules": state.get("skip_modules") or [],
         })
 
     @bp.route("/api/jobs", methods=["GET"])
@@ -706,7 +802,7 @@ def create_recon_blueprint(
                 for entry in log[sent:]:
                     yield f"data: {json.dumps(entry)}\n\n"
                 sent = len(log)
-                if state.get("status") in ("done", "error"):
+                if state.get("status") in ("done", "error", "cancelled", "stopped"):
                     yield 'data: {"done": true}\n\n'
                     break
                 time.sleep(1)

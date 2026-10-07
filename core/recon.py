@@ -24,6 +24,7 @@ Usage as CLI:
 """
 import subprocess as _subprocess_real
 import socket, ssl, json, re, time, sys, os
+import shutil, tempfile, base64
 import gzip, random, threading, urllib.request, urllib.error
 from utils import cmd_trace as _ct
 from utils import rate_limiter as _rl
@@ -304,17 +305,23 @@ def http_get(url: str, timeout: int = 10, retries: int = 3,
     Robust HTTP GET with:
     - Per-domain rate limiting + jitter
     - UA rotation + full browser headers
-    - Retry with exponential backoff on 429/5xx
+    - Retry with exponential backoff on 429/5xx (retries=0 still does one try)
+    - Circuit breaker per host (fail-fast when the dependency is open)
     - WAF block detection and domain-level backoff
     - curl_cffi TLS fingerprint when available (impersonates real browser JA3)
     Returns (status_code, body_bytes, response_headers).
     """
     from urllib.parse import urlparse
+    from utils.circuit_breaker import breaker_for
     domain = urlparse(url).netloc.split(":")[0]
     headers = _make_headers(extra_headers)
     last_exc = None
+    br = breaker_for(domain or "http")
+    attempts = max(1, int(retries or 1))
 
-    for attempt in range(retries):
+    for attempt in range(attempts):
+        if not br.allow():
+            return 0, b"", {"X-Circuit-Breaker": "open"}
         _rate_wait(domain)
         try:
             if _CFFI_AVAILABLE:
@@ -335,17 +342,20 @@ def http_get(url: str, timeout: int = 10, retries: int = 3,
 
             body_preview = body[:1000].decode("utf-8", "ignore")
             if status in (502, 503):
+                br.failure()
                 wait = 2 ** attempt + random.uniform(0, 1)
                 time.sleep(wait)
                 continue
 
             if _is_block_response(status, body_preview):
+                br.failure()
                 _record_block(domain, status)
                 wait = 2 ** attempt + random.uniform(0, 1)
                 time.sleep(wait)
                 headers = _make_headers(extra_headers)  # rotate UA on retry
                 continue
 
+            br.success()
             _record_success(domain)
             _rl.signal(status)
             # Auto-decompress gzip (curl_cffi doesn't always do this with custom headers)
@@ -362,22 +372,42 @@ def http_get(url: str, timeout: int = 10, retries: int = 3,
             body   = b""
             resp_h = dict(e.headers) if e.headers else {}
             if status == 429:
+                br.failure()
                 _record_block(domain, status)
                 wait = 2 ** attempt + random.uniform(0, 2)
                 time.sleep(wait)
                 continue
             if status in (502, 503):
-                # Transient server error Ã¢â‚¬â€ retry with simple backoff, no block record
+                br.failure()
                 wait = 2 ** attempt + random.uniform(0, 1)
                 time.sleep(wait)
                 continue
+            if status >= 500:
+                br.failure()
+            else:
+                br.success()
             return status, body, resp_h
         except Exception as exc:
+            br.failure()
             last_exc = exc
             wait = 2 ** attempt + random.uniform(0, 1)
             time.sleep(wait)
 
     return 0, b"", {}
+
+
+def _http_get_json(url: str, timeout: int = 15, extra_headers: dict | None = None,
+                   retries: int = 0):
+    """GET JSON through ``http_get`` (timeout + per-host circuit breaker)."""
+    status, body, _hdrs = http_get(
+        url, timeout=timeout, retries=retries, extra_headers=extra_headers,
+    )
+    if status not in (200, 201) or not body:
+        return None
+    try:
+        return json.loads(body)
+    except Exception:
+        return None
 
 
 # Legacy alias kept for backward compat Ã¢â‚¬â€ modules call UA directly
@@ -583,7 +613,6 @@ def run_supply_chain_scan(hosts: list, nvd_key: str = "") -> dict:
        "libraries_scanned":[str], "scanned_at":str}
     """
     import time as _time
-    from urllib.request import urlopen, Request
     from urllib.parse import urlencode
     import re as _re
 
@@ -651,9 +680,9 @@ def run_supply_chain_scan(hosts: list, nvd_key: str = "") -> dict:
         try:
             params = {"keywordSearch": keyword, "resultsPerPage": "15"}
             url = "https://services.nvd.nist.gov/rest/json/cves/2.0?" + urlencode(params)
-            req = Request(url, headers=headers)
-            with urlopen(req, timeout=15) as r:
-                data = json.loads(r.read())
+            data = _http_get_json(url, timeout=15, extra_headers=headers)
+            if not isinstance(data, dict):
+                continue
 
             for item in data.get("vulnerabilities", []):
                 cve = item.get("cve", {})
@@ -2846,21 +2875,17 @@ def run_github_repos(domains: list, token: str = "") -> dict:
     Uses GitHub Search + Org API to find all repos, then scans each for
     secrets and sensitive filenames.
     """
-    import urllib.request as _ur
     import urllib.parse as _up
-    import json as _j
 
     headers = {"User-Agent": "ASM-Platform/1.0", "Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
     def _gh_get(url: str) -> dict | list | None:
-        try:
-            req = _ur.Request(url, headers=headers)
-            with _ur.urlopen(req, timeout=10) as r:
-                return _j.loads(r.read())
-        except Exception:
-            return None
+        data = _http_get_json(url, timeout=10, extra_headers=headers)
+        if isinstance(data, (dict, list)):
+            return data
+        return None
 
     # Derive candidate org names from domains
     orgs: set[str] = set()
@@ -3359,6 +3384,8 @@ def run_reverse_whois(domain: str, whoisxml_key: str = "") -> dict:
     seed_apex  = domain.lower().lstrip(".")
     discovered = {}   # apex -> field that matched
     errors     = []
+    from utils.circuit_breaker import breaker_for as _br_for
+    br = _br_for("reverse-whois.whoisxmlapi.com")
 
     for field, value in terms:
         payload = json.dumps({
@@ -3367,6 +3394,9 @@ def run_reverse_whois(domain: str, whoisxml_key: str = "") -> dict:
             "searchType": "current",
             "basicSearchTerms": {"include": [value]},
         }).encode()
+        if not br.allow():
+            errors.append(f"{field}: circuit open")
+            continue
         try:
             req = urllib.request.Request(
                 "https://reverse-whois.whoisxmlapi.com/api/v2",
@@ -3376,11 +3406,13 @@ def run_reverse_whois(domain: str, whoisxml_key: str = "") -> dict:
             )
             with urllib.request.urlopen(req, timeout=25) as resp:
                 rdata = json.loads(resp.read())
+            br.success()
             for d in rdata.get("domainsList", []) or []:
                 d = str(d).lower().strip().strip(".")
                 if d and d != seed_apex:
                     discovered.setdefault(d, field)
         except Exception as exc:
+            br.failure()
             errors.append(f"{field}: {exc}")
 
     items = list(discovered.items())
@@ -4286,14 +4318,10 @@ def _check_trufflehog_github(domain: str) -> list:
 
 def _check_hudsonrock(domain: str) -> dict:
     """Query HudsonRock Cavalier API for infostealer credential leaks (free, no auth)."""
-    from urllib.request import urlopen, Request
-    try:
-        url = f"https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-domain?domain={domain}"
-        req = Request(url, headers={"User-Agent": "ASM-Platform/1.0"})
-        with urlopen(req, timeout=20) as r:
-            data = json.loads(r.read())
-    except Exception as e:
-        return {"error": str(e)}
+    url = f"https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-domain?domain={domain}"
+    data = _http_get_json(url, timeout=20)
+    if not isinstance(data, dict):
+        return {"error": "hudsonrock unavailable"}
 
     employees = data.get("employees", 0)
     users = data.get("users", 0)
@@ -6028,39 +6056,67 @@ def run_certstream_snapshot(domains: list, duration_sec: int = 60) -> dict:
     new_certs = []
     errors    = []
 
-    # Build match patterns
+    # Match the company domains themselves (portoseguro.com.br stays
+    # portoseguro.com.br — not the public suffix .com.br).
     base_domains = set()
-    for d in domains:
-        parts = d.split(".")
-        if len(parts) >= 2:
-            base_domains.add(f".{'.'.join(parts[-2:])}")
+    for d in domains or []:
+        d = str(d or "").strip().lower().lstrip(".")
+        if d:
+            base_domains.add(d)
 
     def _matches(cn: str) -> bool:
         if not cn:
             return False
         cn = cn.lower().lstrip("*.")
-        return any(cn.endswith(bd) or cn == bd.lstrip(".") for bd in base_domains)
+        return any(cn == b or cn.endswith("." + b) for b in base_domains)
 
-    # Try certstream first
+    def _from_crtsh() -> None:
+        for d in list(base_domains)[:3]:
+            try:
+                url = f"https://crt.sh/?q=%25.{d}&output=json"
+                status, body, _ = http_get(url, timeout=15)
+                if status != 200 or not body:
+                    continue
+                data = json.loads(body)
+                if not isinstance(data, list):
+                    continue
+                for entry in data[:50]:
+                    if not isinstance(entry, dict):
+                        continue
+                    name = entry.get("name_value", "").replace("*.", "").strip()
+                    if name and _matches(name.split()[0] if name else ""):
+                        new_certs.append({
+                            "domain":     name.split()[0],
+                            "cn":         entry.get("common_name", ""),
+                            "issuer":     str(entry.get("issuer_name", ""))[:60],
+                            "not_before": entry.get("not_before", ""),
+                            "not_after":  entry.get("not_after", ""),
+                            "source":     "crt.sh",
+                        })
+            except Exception as e:
+                errors.append(str(e))
+
     try:
         import certstream
         found = []
-        done_event = threading.Event()
 
         def _cb(msg, ctx):
             try:
-                leaf = msg.get("data",{}).get("leaf_cert",{})
-                cn   = leaf.get("subject",{}).get("CN","")
-                sans = leaf.get("all_domains",[])
-                for name in ([cn] + sans):
+                leaf = msg.get("data", {}).get("leaf_cert", {})
+                subject = leaf.get("subject") or {}
+                cn = subject.get("CN", "") if isinstance(subject, dict) else ""
+                issuer = leaf.get("issuer") or {}
+                issuer_o = issuer.get("O", "") if isinstance(issuer, dict) else ""
+                sans = leaf.get("all_domains") or []
+                for name in ([cn] + list(sans)):
                     if _matches(name):
                         found.append({
-                            "domain":  name.lstrip("*."),
-                            "cn":      cn,
-                            "issuer":  leaf.get("issuer",{}).get("O",""),
-                            "not_before": leaf.get("not_before",""),
-                            "not_after":  leaf.get("not_after",""),
-                            "source":  "certstream",
+                            "domain":     str(name).lstrip("*."),
+                            "cn":         cn,
+                            "issuer":     issuer_o,
+                            "not_before": leaf.get("not_before", ""),
+                            "not_after":  leaf.get("not_after", ""),
+                            "source":     "certstream",
                         })
             except Exception:
                 pass
@@ -6074,30 +6130,14 @@ def run_certstream_snapshot(domains: list, duration_sec: int = 60) -> dict:
         t.start()
         t.join(timeout=duration_sec)
         new_certs = found
+        if not new_certs:
+            _from_crtsh()
 
     except ImportError:
-        # Fallback: crt.sh recent certs (last 24h)
-        for d in domains[:3]:
-            try:
-                url = f"https://crt.sh/?q=%25.{d}&output=json"
-                status, body, _ = http_get(url, timeout=15)
-                if status != 200 or not body:
-                    continue
-                data = json.loads(body)
-                for entry in data[:50]:
-                    name = entry.get("name_value","").replace("*.",""
-                                                             ).strip()
-                    if name and _matches(f".{name.split('.',1)[-1]}" if "." in name else name):
-                        new_certs.append({
-                            "domain":    name,
-                            "cn":        entry.get("common_name",""),
-                            "issuer":    entry.get("issuer_name","")[:60],
-                            "not_before": entry.get("not_before",""),
-                            "not_after":  entry.get("not_after",""),
-                            "source":    "crt.sh",
-                        })
-            except Exception as e:
-                errors.append(str(e))
+        _from_crtsh()
+    except Exception as e:
+        errors.append(f"certstream: {e}")
+        _from_crtsh()
 
     # Deduplicate by domain
     seen = set()
@@ -6442,20 +6482,15 @@ def _load_kev() -> None:
     global _KEV_LOADED
     if _KEV_LOADED:
         return
-    from urllib.request import urlopen, Request as _Req
-    try:
-        req = _Req(
-            "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-            headers={"User-Agent": "ASM-Platform/1.0"},
-        )
-        with urlopen(req, timeout=20) as r:
-            kev_data = json.loads(r.read())
+    kev_data = _http_get_json(
+        "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+        timeout=20,
+    )
+    if isinstance(kev_data, dict):
         for vuln in kev_data.get("vulnerabilities", []):
             cve_id = vuln.get("cveID", "")
             if cve_id:
                 _KEV_CACHE[cve_id] = True
-    except Exception:
-        pass
     _KEV_LOADED = True
 
 
@@ -6463,16 +6498,15 @@ def _fetch_epss(cve_ids: list[str]) -> dict[str, float]:
     """Batch fetch EPSS exploit-probability scores from FIRST.org API."""
     if not cve_ids:
         return {}
-    from urllib.request import urlopen, Request as _Req
     scores: dict[str, float] = {}
     for i in range(0, len(cve_ids), 100):
         batch = cve_ids[i:i + 100]
         params = "&".join(f"cve_id={c}" for c in batch)
         url = f"https://api.first.org/data/1.0/epss?{params}"
         try:
-            req = _Req(url, headers={"User-Agent": "ASM-Platform/1.0"})
-            with urlopen(req, timeout=15) as r:
-                data = json.loads(r.read())
+            data = _http_get_json(url, timeout=15)
+            if not isinstance(data, dict):
+                continue
             for entry in data.get("data", []):
                 cid = entry.get("cve", "")
                 try:
@@ -6497,7 +6531,6 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
     4. Enrich all results with EPSS scores (FIRST.org) and CISA KEV flags.
     5. Sort: KEV-listed first, then EPSSÃƒâ€”CVSS descending.
     """
-    from urllib.request import urlopen, Request
     from urllib.parse import urlencode
     import time as _time
 
@@ -6600,9 +6633,9 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
         params = {"virtualMatchString": vms, "resultsPerPage": "20"}
         url = "https://services.nvd.nist.gov/rest/json/cves/2.0?" + urlencode(params)
         try:
-            req = Request(url, headers=headers)
-            with urlopen(req, timeout=20) as r:
-                data = json.loads(r.read())
+            data = _http_get_json(url, timeout=20, extra_headers=headers)
+            if not isinstance(data, dict):
+                return []
             return [p for item in data.get("vulnerabilities", [])
                     if (p := _parse_cve_item(item, product)) is not None]
         except Exception:
@@ -6618,9 +6651,9 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
             params["noRejected"] = ""
         url = "https://services.nvd.nist.gov/rest/json/cves/2.0?" + urlencode(params)
         try:
-            req = Request(url, headers=headers)
-            with urlopen(req, timeout=20) as r:
-                data = json.loads(r.read())
+            data = _http_get_json(url, timeout=20, extra_headers=headers)
+            if not isinstance(data, dict):
+                return []
             results = []
             for item in data.get("vulnerabilities", []):
                 parsed = _parse_cve_item(item, product)
@@ -6767,8 +6800,6 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
 
 def run_cors_scan(hosts: list) -> dict:
     """Test CORS misconfigurations: origin reflection, null origin, prefix/suffix bypasses."""
-    import urllib.request as _urlr
-    import urllib.error as _urle
 
     SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings: list[dict] = []
@@ -6804,20 +6835,16 @@ def run_cors_scan(hosts: list) -> dict:
         for test_name, origin, base_sev in test_cases:
             tested += 1
             try:
-                req = _urlr.Request(
+                status, body, hdrs = http_get(
                     base_url,
-                    headers={"Origin": origin, "User-Agent": _random_ua(), "Accept": "*/*"},
+                    timeout=8,
+                    retries=0,
+                    extra_headers={"Origin": origin, "Accept": "*/*"},
                 )
-                try:
-                    resp = _urlr.urlopen(req, timeout=8)
-                    hdrs = dict(resp.headers)
-                    body_snip = resp.read(2048).decode("utf-8", "ignore")
-                except _urle.HTTPError as e:
-                    hdrs = dict(e.headers) if hasattr(e, "headers") else {}
-                    try:
-                        body_snip = e.read(2048).decode("utf-8", "ignore")
-                    except Exception:
-                        body_snip = ""
+                if status == 0:
+                    continue
+                hdrs = hdrs or {}
+                body_snip = (body or b"")[:2048].decode("utf-8", "ignore")
 
                 acao = hdrs.get("access-control-allow-origin", "") or hdrs.get("Access-Control-Allow-Origin", "")
                 acac = (hdrs.get("access-control-allow-credentials", "") or hdrs.get("Access-Control-Allow-Credentials", "")).lower()
@@ -7572,10 +7599,16 @@ def run_open_redirect_check(hosts: list, urls: list | None = None) -> dict:
             try:
                 import urllib.request as _ur
                 from urllib.error import HTTPError
+                from utils.circuit_breaker import breaker_for as _br_for
+                from urllib.parse import urlparse as _uparse
+
+                host_for_br = _uparse(url).netloc.split(":")[0] or "http"
+                br = _br_for(host_for_br)
+                if not br.allow():
+                    continue
 
                 req = _ur.Request(url, headers={"User-Agent": _random_ua()})
-                # Don't follow redirects Ã¢â‚¬â€ we want the raw Location header
-                opener = _ur.build_opener(_ur.HTTPRedirectHandler())
+                # Don't follow redirects — we want the raw Location header
                 class _NoRedirect(_ur.HTTPRedirectHandler):
                     def redirect_request(self, *a, **kw): return None
                 opener2 = _ur.build_opener(_NoRedirect())
@@ -7583,9 +7616,14 @@ def run_open_redirect_check(hosts: list, urls: list | None = None) -> dict:
                     with opener2.open(req, timeout=6) as resp:
                         status = resp.status
                         loc = resp.headers.get("Location","")
+                    br.success()
                 except HTTPError as e:
                     status = e.code
                     loc = e.headers.get("Location","") if e.headers else ""
+                    if status >= 500:
+                        br.failure()
+                    else:
+                        br.success()
 
                 if loc and _REDIRECT_DOMAIN in loc:
                     host_name = url.split("/")[2].split("?")[0]
@@ -7610,6 +7648,10 @@ def run_open_redirect_check(hosts: list, urls: list | None = None) -> dict:
                     })
                     break  # one finding per URL template is enough
             except Exception:
+                try:
+                    br.failure()
+                except Exception:
+                    pass
                 continue
 
     return {
@@ -7667,26 +7709,32 @@ def run_s3_write_check(cloud_findings: list) -> dict:
                 )
                 delete_ok = True
         else:
-            # Raw HTTP PUT
+            # Raw HTTP PUT — 4xx (403) is peer answered, write refused.
+            import urllib.request as _ur
+            from utils.circuit_breaker import CircuitOpen, guarded_urlopen
+            host = f"{bucket}.s3.amazonaws.com"
             try:
-                import urllib.request as _ur
                 req = _ur.Request(
-                    f"https://{bucket}.s3.amazonaws.com/{probe_key}",
+                    f"https://{host}/{probe_key}",
                     data=probe_content, method="PUT",
                     headers={"Content-Type": "text/plain"},
                 )
-                with _ur.urlopen(req, timeout=10) as r:
+                with guarded_urlopen(req, timeout=10, name=host) as r:
                     write_ok = r.status in (200, 204)
                 if write_ok:
                     del_req = _ur.Request(
-                        f"https://{bucket}.s3.amazonaws.com/{probe_key}",
+                        f"https://{host}/{probe_key}",
                         method="DELETE",
                     )
                     try:
-                        _ur.urlopen(del_req, timeout=10)
-                        delete_ok = True
+                        with guarded_urlopen(del_req, timeout=10, name=host):
+                            delete_ok = True
                     except Exception:
                         pass
+            except CircuitOpen:
+                pass
+            except HTTPError:
+                pass
             except Exception:
                 pass
 
@@ -9843,11 +9891,12 @@ def _run_kiterunner_on_hosts(hosts: list, workers: int = 5) -> list:
 
 def run_api_discovery_extra(hosts: list, domains: list) -> dict:
     findings = _run_kiterunner_on_hosts(hosts)
+    used_kr = any(f.get("source") == "kiterunner" for f in findings)
     return {
         "findings": findings,
         "total": len(findings),
         "hosts_probed": len(set(h.get("host", "") for h in hosts[:50] if h.get("host"))),
-        "sources_used": ["swagger_probe"] + (["kiterunner"] if has_kr else []),
+        "sources_used": ["swagger_probe"] + (["kiterunner"] if used_kr else []),
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
     }
 

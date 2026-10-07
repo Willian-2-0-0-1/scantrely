@@ -64,8 +64,6 @@ def run_client_trust(
     user_agent: str = "",
     max_endpoints: int = 15,
 ) -> list[dict]:
-    import httpx
-
     candidates = set(_privileged_urls(endpoints, js_artifacts, max_endpoints))
 
     # ── Move 1: privilege flip (best-effort) to surface client-gated API calls ──
@@ -103,12 +101,15 @@ def run_client_trust(
             if out:
                 import time as _time
                 _time.sleep(0.8)
-            with httpx.Client(timeout=timeout, verify=False, follow_redirects=False, headers=hdrs) as anon:
-                a_s = anon.get(u).status_code
+            from utils.circuit_breaker import guarded_httpx
+            a_s = guarded_httpx(
+                "GET", u, timeout=timeout, verify=False, follow_redirects=False, headers=hdrs,
+            ).status_code
             if cookies:
-                with httpx.Client(timeout=timeout, verify=False, follow_redirects=False,
-                                  headers=hdrs, cookies=cookies) as authed:
-                    b_s = authed.get(u).status_code
+                b_s = guarded_httpx(
+                    "GET", u, timeout=timeout, verify=False, follow_redirects=False,
+                    headers=hdrs, cookies=cookies,
+                ).status_code
         except Exception as exc:
             out.append({"url": u, "verdict": "error", "detail": str(exc)[:80], "severity": "info"})
             continue

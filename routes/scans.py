@@ -191,6 +191,11 @@ def create_scan_blueprint(
 
         url = f"https://services.nvd.nist.gov/rest/json/cves/2.0/?pubStartDate={start_str}&pubEndDate={end_str}&resultsPerPage=50"
 
+        from utils.circuit_breaker import breaker_for
+        br = breaker_for("services.nvd.nist.gov")
+        if not br.allow():
+            return jsonify({"error": "NVD circuit open", "items": [], "circuit": "open"}), 503
+
         try:
             headers = {"User-Agent": "ASM-Platform/1.0", "Accept": "application/json"}
             if nvd_key:
@@ -227,12 +232,15 @@ def create_scan_blueprint(
             # Sort critical first
             sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
             items.sort(key=lambda x: (sev_order.get(x["severity"], 4), -(x.get("score", 0) or 0)))
+            br.success()
             return jsonify(items)
         except _r.exceptions.RequestException as e:
+            br.failure()
             msg = str(getattr(e, "response", None) or e)[:300]
             print(f"[cve-feed] ERROR: {msg}", flush=True)
             return jsonify({"error": f"NVD API unreachable: {msg}"}), 502
         except Exception as e:
+            br.failure()
             print(f"[cve-feed] ERROR: {e}", flush=True)
             return jsonify({"error": str(e)}), 500
 
@@ -452,6 +460,7 @@ def create_scan_blueprint(
             rid = db.create_alert_rule(
                 cid, body.get("name", ""), rule_type,
                 body.get("channels", []), bool(body.get("enabled", True)),
+                min_severity=body.get("min_severity") or "info",
             )
             return jsonify({"id": rid, "ok": True})
         except Exception as e:
@@ -472,6 +481,8 @@ def create_scan_blueprint(
             fields["enabled"] = bool(body["enabled"])
         if "channels" in body:
             fields["channels"] = body["channels"]
+        if "min_severity" in body:
+            fields["min_severity"] = body["min_severity"] or "info"
         try:
             ok = db.update_alert_rule(cid, rid, **fields)
             if not ok:

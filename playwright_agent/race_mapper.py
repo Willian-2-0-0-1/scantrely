@@ -110,6 +110,7 @@ def probe_candidates(
     destructive candidates — those stay manual leads.
     """
     import httpx
+    from utils.circuit_breaker import CircuitOpen, guard_host
 
     cookies = _cookies_from_state(auth_state)
     headers = {"User-Agent": user_agent} if user_agent else {}
@@ -126,6 +127,7 @@ def probe_candidates(
             continue
         tested += 1
         try:
+            br = guard_host(cand.url)
             with httpx.Client(timeout=timeout, follow_redirects=True, verify=False,
                               cookies=cookies, headers=headers) as client:
                 def _fire(_):
@@ -133,7 +135,19 @@ def probe_candidates(
                     return (r.status_code, len(r.content))
                 with ThreadPoolExecutor(max_workers=max_parallel) as pool:
                     results = list(pool.map(_fire, range(max_parallel)))
+            if any(status >= 500 for status, _ in results):
+                br.failure()
+            else:
+                br.success()
+        except CircuitOpen:
+            cand.probe_status = "not_tested"
+            cand.probe_detail = "circuit open"
+            continue
         except Exception as exc:
+            try:
+                br.failure()
+            except Exception:
+                pass
             cand.probe_status = "not_tested"
             cand.probe_detail = f"probe error: {exc}"
             continue

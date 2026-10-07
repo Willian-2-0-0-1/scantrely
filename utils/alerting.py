@@ -12,12 +12,44 @@ import threading
 from datetime import datetime
 from email.mime.text import MIMEText
 from pathlib import Path
-from urllib.request import Request, urlopen
-from urllib.error import URLError
+from urllib.request import Request
 
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+_SEV_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+_SEV_THRESHOLD = {
+    "info": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "critical": 4,
+    "medium_and_above": 2,
+    "high_and_above": 3,
+    "critical_only": 4,
+}
+
+
+def _severity_meets(severity: str, threshold: str) -> bool:
+    rank = _SEV_RANK.get((severity or "info").lower(), 0)
+    need = _SEV_THRESHOLD.get((threshold or "info").lower(), 0)
+    return rank >= need
+
+
+def _outbound_post(url: str, payload: dict, *, headers: dict | None = None, timeout: int = 10) -> None:
+    """JSON POST with per-host circuit breaker. CircuitOpen is swallowed."""
+    from utils.circuit_breaker import CircuitOpen, guarded_urlopen
+
+    hdrs = {"Content-Type": "application/json"}
+    if headers:
+        hdrs.update(headers)
+    req = Request(url, data=json.dumps(payload).encode(), headers=hdrs, method="POST")
+    try:
+        guarded_urlopen(req, timeout=timeout)
+    except CircuitOpen:
+        return
 
 
 class AlertEngine:
@@ -102,6 +134,11 @@ class AlertEngine:
                 severity = "medium"
             elif rule_type in ("new_tech",):
                 severity = "low"
+            elif rule_type in ("cve_critical", "supply_chain_critical"):
+                severity = "critical"
+
+            if not _severity_meets(severity, rule.get("min_severity") or "info"):
+                continue
 
             alert_id = self.db.create_alert(company_id, rule_type, title, description, severity, data)
             alerts_created.append({
@@ -201,9 +238,7 @@ class AlertEngine:
                 "ts": int(datetime.now().timestamp()),
             }]
         }
-        req = Request(url, data=json.dumps(payload).encode(),
-                      headers={"Content-Type": "application/json"})
-        urlopen(req, timeout=10)
+        _outbound_post(url, payload)
 
     def _send_discord(self, settings: dict, title: str, body: str, severity: str):
         url = settings.get("discord_webhook_url", "")
@@ -220,9 +255,7 @@ class AlertEngine:
                 "timestamp": datetime.now().isoformat(),
             }]
         }
-        req = Request(url, data=json.dumps(payload).encode(),
-                      headers={"Content-Type": "application/json"})
-        urlopen(req, timeout=10)
+        _outbound_post(url, payload)
 
     def _send_email(self, settings: dict, title: str, body: str):
         smtp_host = settings.get("smtp_host", "")
@@ -246,9 +279,7 @@ class AlertEngine:
 
     def _send_webhook(self, url: str, title: str, body: str, severity: str):
         payload = {"title": title, "body": body, "severity": severity, "ts": _now()}
-        req = Request(url, data=json.dumps(payload).encode(),
-                      headers={"Content-Type": "application/json"})
-        urlopen(req, timeout=10)
+        _outbound_post(url, payload)
 
     def _send_jira(self, settings: dict, title: str, body: str, severity: str):
         import base64
@@ -274,14 +305,11 @@ class AlertEngine:
             }
         }
         creds = base64.b64encode(f"{user}:{token}".encode()).decode()
-        req = Request(
+        _outbound_post(
             f"{jira_url}/rest/api/3/issue",
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Basic {creds}"},
-            method="POST",
+            payload,
+            headers={"Authorization": f"Basic {creds}"},
         )
-        urlopen(req, timeout=10)
 
     def _send_linear(self, settings: dict, title: str, body: str, severity: str):
         token   = settings.get("linear_token", "")
@@ -303,11 +331,8 @@ class AlertEngine:
                 "priority":    priority_map.get(severity, 3),
             },
         }
-        req = Request(
+        _outbound_post(
             "https://api.linear.app/graphql",
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json",
-                     "Authorization": token},
-            method="POST",
+            payload,
+            headers={"Authorization": token},
         )
-        urlopen(req, timeout=10)

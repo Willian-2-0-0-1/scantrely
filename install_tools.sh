@@ -187,6 +187,14 @@ gh_release "trufflesecurity/trufflehog" \
   "trufflehog_[0-9._]+_${OS}_${GOARCH}\\.tar\\.gz" \
   "trufflehog" "trufflehog"
 
+# gitleaks (git_leaks module)
+if [[ "$GOARCH" == "amd64" ]]; then
+  GITLEAKS_PAT="gitleaks_[0-9._]+_linux_x64\\.tar\\.gz"
+else
+  GITLEAKS_PAT="gitleaks_[0-9._]+_linux_${GOARCH}\\.tar\\.gz"
+fi
+gh_release "gitleaks/gitleaks" "$GITLEAKS_PAT" "gitleaks" "gitleaks"
+
 # gowitness
 gh_release "sensepost/gowitness" \
   "gowitness-[0-9.]+-${OS}-${GOARCH}$" \
@@ -225,6 +233,34 @@ go_install "github.com/003random/getJS/v2@latest" "getJS"
 # subjack (subdomain takeover)
 go_install "github.com/haccer/subjack@latest" "subjack"
 
+# assetfinder (passive subdomain enum)
+go_install "github.com/tomnomnom/assetfinder@latest" "assetfinder"
+
+# whatweb (tech fingerprint) — clone upstream; o pacote apt 0.6.3 quebra require_relative
+if need_install "whatweb"; then
+  if ! command -v ruby &>/dev/null; then
+    if command -v apt-get &>/dev/null; then
+      log "Instalando ruby (dependência do whatweb)..."
+      $APT_CMD install -y -q ruby >/dev/null 2>&1 || warn "ruby: apt install falhou"
+    fi
+  fi
+  VENDOR_DIR="${VENDOR_DIR:-$SCRIPT_DIR/vendor}"
+  mkdir -p "$VENDOR_DIR"
+  log "Instalando whatweb (git)..."
+  rm -rf "$VENDOR_DIR/whatweb"
+  if git clone --depth 1 -q https://github.com/urbanadventurer/WhatWeb.git "$VENDOR_DIR/whatweb" 2>/dev/null; then
+    cat > "$BIN_DIR/whatweb" << 'WW'
+#!/usr/bin/env bash
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec ruby "$ROOT/vendor/whatweb/whatweb" "$@"
+WW
+    chmod +x "$BIN_DIR/whatweb"
+    echo "  ✓ whatweb"
+  else
+    warn "whatweb: git clone falhou — instale: git clone https://github.com/urbanadventurer/WhatWeb vendor/whatweb"
+  fi
+fi
+
 
 # ── Python tools (venv local) ─────────────────────────────────────────────────
 
@@ -259,13 +295,15 @@ fi
 if [[ ! -x "$VENV_DIR/bin/dnsgen" ]] || [[ "$FORCE" == "--force" ]]; then
   log "Instalando dnsgen..."
   "$PIP" install -q --upgrade dnsgen && echo "  ✓ dnsgen"
+else
+  skip "dnsgen"
+fi
+if [[ -x "$VENV_DIR/bin/dnsgen" ]]; then
   cat > "$BIN_DIR/dnsgen" << EOF
 #!/usr/bin/env bash
 exec "$VENV_DIR/bin/dnsgen" "\$@"
 EOF
   chmod +x "$BIN_DIR/dnsgen"
-else
-  skip "dnsgen"
 fi
 
 # graphqlmap
@@ -316,6 +354,42 @@ WRAPPER
   fi
 }
 
+# theHarvester — o pacote PyPI 0.0.1 é stub; instalar do GitHub
+if [[ ! -x "$VENV_DIR/bin/theHarvester" ]] || [[ "$FORCE" == "--force" ]]; then
+  log "Instalando theHarvester (git)..."
+  if "$PIP" install -q "git+https://github.com/laramies/theHarvester.git"; then
+    # theHarvester pina playwright antigo; manter o Playwright do ASM
+    "$PIP" install -q 'playwright==1.63.0' >/dev/null 2>&1 || true
+    cat > "$BIN_DIR/theHarvester" << WRAPPER
+#!/usr/bin/env bash
+exec "$VENV_DIR/bin/theHarvester" "\$@"
+WRAPPER
+    chmod +x "$BIN_DIR/theHarvester"
+    ln -sfn theHarvester "$BIN_DIR/theharvester"
+    echo "  ✓ theHarvester"
+  else
+    err "theHarvester: pip install do GitHub falhou"
+  fi
+else
+  skip "theHarvester"
+  [[ -x "$BIN_DIR/theHarvester" ]] || {
+    cat > "$BIN_DIR/theHarvester" << WRAPPER
+#!/usr/bin/env bash
+exec "$VENV_DIR/bin/theHarvester" "\$@"
+WRAPPER
+    chmod +x "$BIN_DIR/theHarvester"
+  }
+  ln -sfn theHarvester "$BIN_DIR/theharvester"
+fi
+
+# certstream (python import — crt.sh fallback if missing)
+if ! "$VENV_DIR/bin/python3" -c "import certstream" 2>/dev/null; then
+  log "Instalando certstream (pip)..."
+  "$PIP" install -q certstream && echo "  ✓ certstream (python)" || warn "certstream: pip install falhou (crt.sh continua como fallback)"
+else
+  skip "certstream"
+fi
+
 # cloud_enum
 if [[ ! -x "$BIN_DIR/cloud_enum" ]] || [[ "$FORCE" == "--force" ]]; then
   log "Instalando cloud_enum (git)..."
@@ -324,6 +398,9 @@ if [[ ! -x "$BIN_DIR/cloud_enum" ]] || [[ "$FORCE" == "--force" ]]; then
     "$PIP" install -q -r "$tmp_ce/cloud_enum/requirements.txt" 2>/dev/null || true
     cp "$tmp_ce/cloud_enum/cloud_enum.py" "$BIN_DIR/cloud_enum"
     chmod +x "$BIN_DIR/cloud_enum"
+    # enum_tools is imported as a sibling package; copy it next to the script.
+    rm -rf "$BIN_DIR/enum_tools"
+    cp -R "$tmp_ce/cloud_enum/enum_tools" "$BIN_DIR/enum_tools"
     # ensure shebang points to venv python
     sed -i "1s|.*|#!$VENV_DIR/bin/python3|" "$BIN_DIR/cloud_enum"
     echo "  ✓ cloud_enum"
@@ -338,42 +415,43 @@ fi
 # arjun (HTTP parameter discovery)
 pip_tool "arjun" "arjun"
 
-# linkfinder (JS endpoint extractor)
-if [[ ! -x "$BIN_DIR/linkfinder" ]] || [[ "$FORCE" == "--force" ]]; then
+VENDOR_DIR="$SCRIPT_DIR/vendor"
+mkdir -p "$VENDOR_DIR"
+
+# linkfinder (JS endpoint extractor) — persist in vendor/, never /tmp
+if [[ ! -x "$BIN_DIR/linkfinder" || ! -f "$VENDOR_DIR/linkfinder/linkfinder.py" ]] || [[ "$FORCE" == "--force" ]]; then
   log "Instalando linkfinder (git)..."
-  tmp_lf=$(mktemp -d)
-  if git clone -q https://github.com/GerbenJavado/LinkFinder "$tmp_lf/LinkFinder" 2>/dev/null; then
-    "$PIP" install -q -r "$tmp_lf/LinkFinder/requirements.txt" 2>/dev/null || true
+  rm -rf "$VENDOR_DIR/linkfinder"
+  if git clone -q https://github.com/GerbenJavado/LinkFinder "$VENDOR_DIR/linkfinder" 2>/dev/null; then
+    "$PIP" install -q -r "$VENDOR_DIR/linkfinder/requirements.txt" 2>/dev/null || true
     cat > "$BIN_DIR/linkfinder" << LF_WRAPPER
 #!/usr/bin/env bash
-exec "$VENV_DIR/bin/python3" "$tmp_lf/LinkFinder/linkfinder.py" "\$@"
+exec "$VENV_DIR/bin/python3" "$VENDOR_DIR/linkfinder/linkfinder.py" "\$@"
 LF_WRAPPER
     chmod +x "$BIN_DIR/linkfinder"
     echo "  ✓ linkfinder"
   else
     warn "linkfinder: git clone falhou"
   fi
-  # NOTE: tmp_lf NOT removed — linkfinder.py lives there
 else
   skip "linkfinder"
 fi
 
-# secretfinder (JS secret detector)
-if [[ ! -x "$BIN_DIR/secretfinder" ]] || [[ "$FORCE" == "--force" ]]; then
+# secretfinder (JS secret detector) — persist in vendor/, never /tmp
+if [[ ! -x "$BIN_DIR/secretfinder" || ! -f "$VENDOR_DIR/secretfinder/SecretFinder.py" ]] || [[ "$FORCE" == "--force" ]]; then
   log "Instalando secretfinder (git)..."
-  tmp_sf=$(mktemp -d)
-  if git clone -q https://github.com/m4ll0k/SecretFinder "$tmp_sf/SecretFinder" 2>/dev/null; then
-    "$PIP" install -q -r "$tmp_sf/SecretFinder/requirements.txt" 2>/dev/null || true
+  rm -rf "$VENDOR_DIR/secretfinder"
+  if git clone -q https://github.com/m4ll0k/SecretFinder "$VENDOR_DIR/secretfinder" 2>/dev/null; then
+    "$PIP" install -q -r "$VENDOR_DIR/secretfinder/requirements.txt" 2>/dev/null || true
     cat > "$BIN_DIR/secretfinder" << SF_WRAPPER
 #!/usr/bin/env bash
-exec "$VENV_DIR/bin/python3" "$tmp_sf/SecretFinder/SecretFinder.py" "\$@"
+exec "$VENV_DIR/bin/python3" "$VENDOR_DIR/secretfinder/SecretFinder.py" "\$@"
 SF_WRAPPER
     chmod +x "$BIN_DIR/secretfinder"
     echo "  ✓ secretfinder"
   else
     warn "secretfinder: git clone falhou"
   fi
-  # NOTE: tmp_sf NOT removed — SecretFinder.py lives there
 else
   skip "secretfinder"
 fi
@@ -421,14 +499,15 @@ echo "════════════════════════�
 
 INSTALLED=0; MISSING=0
 for tool in httpx naabu subfinder nuclei dnsx katana shuffledns ffuf gobuster \
-            gau trufflehog gowitness puredns amass waybackurls subjs subjack \
+            gau trufflehog gitleaks gowitness puredns amass waybackurls subjs subjack \
+            assetfinder whatweb theHarvester \
             bbot dnsgen alterx graphqlmap cloud_enum arjun linkfinder secretfinder wpscan apkleaks; do
   if [[ -x "$BIN_DIR/$tool" ]]; then
     echo "  ✓ $tool"
-    ((INSTALLED++))
+    INSTALLED=$((INSTALLED + 1))
   else
     echo "  ✗ $tool  ← não instalado"
-    ((MISSING++))
+    MISSING=$((MISSING + 1))
   fi
 done
 

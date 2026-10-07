@@ -96,6 +96,18 @@ def create_core_blueprint(
             time.sleep(0.5)
             return jsonify({"error": "Invalid credentials"}), 401
 
+        if admin.get("totp_enabled") and admin.get("totp_secret"):
+            code = (body.get("totp_code") or body.get("otp") or "").strip()
+            if not code:
+                return jsonify({"error": "Two-factor code required", "need_2fa": True}), 401
+            try:
+                import pyotp
+            except ImportError:
+                return jsonify({"error": "pyotp not installed"}), 500
+            if not pyotp.TOTP(admin["totp_secret"]).verify(code, valid_window=1):
+                _record_login_failure(ip)
+                return jsonify({"error": "Invalid two-factor code", "need_2fa": True}), 401
+
         _clear_login_failures(ip)
         token = secrets.token_urlsafe(32)
         
@@ -131,6 +143,7 @@ def create_core_blueprint(
             "username": admin["username"],
             "role": admin["role"],
             "scoped_companies": scoped_companies,
+            "totp_enabled": bool(admin.get("totp_enabled")),
         })
         resp.set_cookie("asm_token", token, max_age=session_ttl, httponly=True,
                         samesite="Lax", secure=request.is_secure)
@@ -279,8 +292,6 @@ def create_core_blueprint(
     def api_ai_enrich_finding():
         """Use Hermes Agent / any OpenRouter-compatible chat completions API to
         refine CVSS, CWE, mitigation guidance and a PoC writeup for a finding."""
-        import requests as _requests
-
         cfg = get_settings()
         base_url = (cfg.get("hermes_base_url") or "http://127.0.0.1:8642/v1").rstrip("/")
         api_key = cfg.get("hermes_api_key", "")
@@ -304,6 +315,18 @@ def create_core_blueprint(
             f"Finding:\n{json.dumps(finding, indent=2)}"
         )
 
+        from urllib.parse import urlparse as _urlparse
+        from utils.circuit_breaker import breaker_for, _note_status
+
+        host = (_urlparse(base_url).netloc.split(":")[0] or "hermes").strip().lower() or "hermes"
+        br = breaker_for(host)
+        if not br.allow():
+            return jsonify({
+                "error": f"circuit open: {host}",
+                "retry_after": round(br.retry_after(), 2),
+            }), 503
+
+        import requests as _requests
         try:
             resp = _requests.post(
                 f"{base_url}/chat/completions",
@@ -317,8 +340,10 @@ def create_core_blueprint(
                 timeout=60,
             )
         except Exception as e:
+            br.failure()
             return jsonify({"error": f"Failed to reach Hermes Agent at {base_url}: {e}"}), 502
 
+        _note_status(br, int(getattr(resp, "status_code", 0) or 0))
         if not resp.ok:
             return jsonify({"error": f"Hermes API error {resp.status_code}: {resp.text[:300]}"}), 502
 

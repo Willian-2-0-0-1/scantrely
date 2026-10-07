@@ -6,18 +6,20 @@
     <title>SCANTRELY — Monitoramento de Superfície de Ataque Externa</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" crossorigin="anonymous">
-  <link rel="stylesheet" href="dashboard.css?v=24">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
+  <link rel="stylesheet" href="dashboard.css?v=28">
   <script src="js/config.js?v=1"></script>
-<script src="js/i18n.js?v=6"></script>
+<script src="js/i18n.js?v=9"></script>
+<script src="js/icons.js?v=2"></script>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Pular para o conteúdo</a>
 
 <div id="mobile-nav-backdrop" class="mobile-nav-backdrop" data-action="closeMobileNav"></div>
 
 <!-- ═══════════════════════ SCREENSHOT LIGHTBOX ══ -->
 <div id="ss-lightbox" role="dialog" aria-modal="true" aria-label="Screenshot preview" tabindex="-1" onclick="ssLightboxClose()">
-  <button id="ss-lightbox-close" type="button" aria-label="Close screenshot preview" onclick="ssLightboxClose()">✕</button>
+  <button id="ss-lightbox-close" type="button" aria-label="Fechar prévia do screenshot" onclick="ssLightboxClose()"><span data-ico="x" data-ico-size="16" aria-hidden="true"></span></button>
   <img id="ss-lightbox-img" src="" alt="" onclick="event.stopPropagation()">
   <div id="ss-lightbox-url"></div>
   <div id="ss-lightbox-nav" onclick="event.stopPropagation()">
@@ -30,25 +32,30 @@
 <div id="login-screen">
   <div class="login-box">
     <div class="login-logo">
-      <div class="login-logo-mark">⬡</div>
+      <div class="login-logo-mark" data-ico="shield" data-ico-size="22" aria-hidden="true"></div>
       <div>
       <div class="login-logo-text">Scantrely</div>
-      <div class="login-logo-sub">External Attack Surface Monitoring</div>
+      <div class="login-logo-sub">Monitoramento de Superfície de Ataque</div>
       </div>
     </div>
-    <div class="login-title">Sign in</div>
-    <div class="login-sub">Enter your admin credentials to access the platform</div>
+    <div class="login-title" data-i18n-key="login_title">Entrar</div>
+    <div class="login-sub" data-i18n-key="login_sub">Use as credenciais de admin para acessar a plataforma</div>
     <div class="login-field">
-      <label class="login-label">Username</label>
+      <label class="login-label" for="login-user" data-i18n-key="login_user">Usuário</label>
       <input class="login-input" id="login-user" type="text" placeholder="admin" autocomplete="username"
              onkeydown="if(event.key==='Enter') doLogin()">
     </div>
     <div class="login-field">
-      <label class="login-label">Password</label>
+      <label class="login-label" for="login-pass" data-i18n-key="login_pass">Senha</label>
       <input class="login-input" id="login-pass" type="password" placeholder="••••••••" autocomplete="current-password"
              onkeydown="if(event.key==='Enter') doLogin()">
     </div>
-    <button class="login-btn" id="login-btn" onclick="doLogin()">Sign In</button>
+    <div class="login-field" id="login-totp-field" style="display:none">
+      <label class="login-label" for="login-totp">Código 2FA</label>
+      <input class="login-input" id="login-totp" type="text" inputmode="numeric" placeholder="000000" autocomplete="one-time-code"
+             onkeydown="if(event.key==='Enter') doLogin()">
+    </div>
+    <button class="login-btn" id="login-btn" onclick="doLogin()" data-i18n-key="login_btn">Entrar</button>
     <div class="login-err" id="login-err"></div>
   </div>
 </div>
@@ -64,7 +71,7 @@
 <!-- ═══════════════════════════ SIDEBAR ══ -->
 <aside class="sidebar" id="app-sidebar" aria-label="Primary navigation">
   <div class="sidebar-logo">
-    <div class="logo-mark">⬡</div>
+    <div class="logo-mark" data-ico="shield" data-ico-size="20" aria-hidden="true"></div>
     <div>
       <div class="logo-text">Scantrely</div>
       <div class="logo-sub">Attack Surface Intel</div>
@@ -73,40 +80,43 @@
   <nav class="sidebar-nav">
     <div class="nav-section" data-i18n-key="nav_workspace">Workspace</div>
     <button class="nav-item active" id="nav-all" onclick="showPage('companies')">
-      <span class="nav-icon">◈</span> <span data-i18n-key="nav_all">All Companies</span>
+      <span class="nav-icon" data-ico="buildings" aria-hidden="true"></span> <span data-i18n-key="nav_all">All Companies</span>
     </button>
     <button class="nav-item" id="nav-jobs" onclick="showPage('jobs')">
-      <span class="nav-icon">▣</span> <span data-i18n-key="nav_jobs">Job Queue</span>
+      <span class="nav-icon" data-ico="queue" aria-hidden="true"></span> <span data-i18n-key="nav_jobs">Job Queue</span>
       <span class="nav-badge" id="nav-jobs-badge" style="display:none"></span>
       <span class="nav-badge" id="nav-playwright-badge" style="display:none;background:var(--orange);color:#050a14">PW</span>
     </button>
     <div class="nav-section" data-i18n-key="nav_companies">Empresas</div>
     <div id="company-nav-items"></div>
-    <button class="nav-add" onclick="openAddCompany()" data-i18n-key="add_company_button">＋ Add Company</button>
+    <button class="nav-add" onclick="openAddCompany()">
+      <span class="nav-icon" data-ico="plus" aria-hidden="true"></span>
+      <span data-i18n-key="add_company_button">Adicionar Empresa</span>
+    </button>
     <div class="nav-section" id="nav-admin-section" style="display:none" data-i18n-key="nav_admin">Admin</div>
     <button class="nav-item" id="nav-admins" style="display:none" onclick="showPage('admins')">
-      <span class="nav-icon">👥</span> <span data-i18n-key="nav_admins">Manage Admins</span>
+      <span class="nav-icon" data-ico="users" aria-hidden="true"></span> <span data-i18n-key="nav_admins">Manage Admins</span>
     </button>
     <button class="nav-item" id="nav-tools" onclick="showPage('tools')">
-      <span class="nav-icon">🔧</span> <span data-i18n-key="nav_tools">Tools</span>
+      <span class="nav-icon" data-ico="wrench" aria-hidden="true"></span> <span data-i18n-key="nav_tools">Tools</span>
     </button>
     <button class="nav-item" id="nav-bbhelper" onclick="showPage('bbhelper')">
-      <span class="nav-icon">🎯</span> <span data-i18n-key="nav_bbhelper">Bug Bounty Helper</span>
+      <span class="nav-icon" data-ico="target" aria-hidden="true"></span> <span data-i18n-key="nav_bbhelper">Bug Bounty Helper</span>
     </button>
     <button class="nav-item" id="nav-exttools" onclick="showPage('exttools')">
-      <span class="nav-icon">✦</span> <span data-i18n-key="nav_exttools">External Tools</span>
+      <span class="nav-icon" data-ico="sparkle" aria-hidden="true"></span> <span data-i18n-key="nav_exttools">External Tools</span>
     </button>
     <button class="nav-item" id="nav-bbprograms" onclick="showPage('bbprograms')">
-      <span class="nav-icon">🏆</span> <span data-i18n-key="nav_bbprograms">Bug Bounty Programs</span>
+      <span class="nav-icon" data-ico="trophy" aria-hidden="true"></span> <span data-i18n-key="nav_bbprograms">Bug Bounty Programs</span>
     </button>
     <button class="nav-item" id="nav-generators" onclick="showPage('generators')">
-      <span class="nav-icon">⚙️</span> <span data-i18n-key="nav_generators">Geradores</span>
+      <span class="nav-icon" data-ico="gear" aria-hidden="true"></span> <span data-i18n-key="nav_generators">Geradores</span>
     </button>
-    <button class="nav-item" onclick="showPage('settings')">
-      <span class="nav-icon">⚙</span> <span data-i18n-key="nav_settings">API Keys</span>
+    <button class="nav-item" id="nav-settings" onclick="showPage('settings')">
+      <span class="nav-icon" data-ico="sliders" aria-hidden="true"></span> <span data-i18n-key="nav_settings">API Keys</span>
     </button>
     <button class="nav-item" id="nav-runtime" onclick="showPage('runtime')">
-      <span class="nav-icon">⚡</span> <span data-i18n-key="nav_runtime">Performance</span>
+      <span class="nav-icon" data-ico="bolt" aria-hidden="true"></span> <span data-i18n-key="nav_runtime">Performance</span>
     </button>
   </nav>
   <div class="nav-user" id="nav-user">
@@ -123,9 +133,9 @@
 </aside>
 
 <!-- ═══════════════════════════ MAIN ══ -->
-<div class="main">
+<div class="main" id="main-content">
   <header class="topbar">
-    <button class="mobile-nav-toggle" id="mobile-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="app-sidebar" onclick="toggleMobileNav()">☰</button>
+    <button class="mobile-nav-toggle" id="mobile-nav-toggle" type="button" aria-label="Abrir navegação" aria-expanded="false" aria-controls="app-sidebar" onclick="toggleMobileNav()"><span data-ico="menu" data-ico-size="18" aria-hidden="true"></span></button>
     <span class="topbar-brand" data-i18n-key="app_name">SCANTRELY</span>
 <select id="lang-select" class="fi" style="margin-left:8px;" onchange="setLanguage(this.value)">
   <option value="en">English</option>
@@ -139,16 +149,19 @@
       <span class="sep" id="crumb-sep" style="display:none">/</span>
       <span class="current" id="crumb-current"></span>
     </div>
-    <button class="topbar-search-btn" onclick="openGlobalSearch()" title="Busca global (Ctrl+K)">
-      🔍 <span class="topbar-search-label" data-i18n-key="search_label">Buscar...</span><span class="topbar-search-kbd">Ctrl+K</span>
+    <button class="topbar-search-btn" onclick="openGlobalSearch()" title="Busca global (Ctrl+K)" aria-label="Busca global">
+      <span data-ico="search" data-ico-size="16" aria-hidden="true"></span>
+      <span class="topbar-search-label" data-i18n-key="search_label">Buscar...</span><span class="topbar-search-kbd">Ctrl+K</span>
     </button>
     <div id="topbar-scan-progress" class="topbar-scan-progress" style="display:none" onclick="_goToScanProgress()" title="Ir para o scan em execução"></div>
     <div class="topbar-space"></div>
     <div id="topbar-pill"></div>
+    <button type="button" class="btn btn-secondary btn-sm icon-btn" id="theme-toggle-btn" onclick="toggleAsmTheme()" title="Tema claro/escuro" aria-label="Alternar tema" aria-pressed="false"><span data-ico="sun" data-ico-size="16" aria-hidden="true"></span></button>
+    <button type="button" class="btn btn-secondary btn-sm icon-btn" id="push-enable-btn" onclick="enableWebPush()" title="Notificações do browser" aria-label="Ativar notificações"><span data-ico="bell" data-ico-size="16" aria-hidden="true"></span></button>
     
-    <button id="monitor-now-btn" class="btn btn-secondary btn-sm" style="display:none;font-size:.68rem" onclick="monitorNow(state.currentId)">🔍 Monitor Now</button>
-    <button id="enable-schedule-btn" class="btn btn-secondary btn-sm" style="display:none;font-size:.68rem" onclick="toggleSchedule(state.currentId)">⏱ Schedule</button>
-    <button id="stop-pipeline-btn" class="btn btn-sm" style="display:none;font-size:.68rem;background:var(--red-dim);color:#fb7185;border:1px solid rgba(244,63,94,0.3)" onclick="stopScan()">■ STOP</button>
+    <button id="monitor-now-btn" class="btn btn-secondary btn-sm" style="display:none;font-size:.68rem" onclick="monitorNow(state.currentId)"><span data-ico="search" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_monitor_now">Monitorar agora</span></button>
+    <button id="enable-schedule-btn" class="btn btn-secondary btn-sm" style="display:none;font-size:.68rem" onclick="toggleSchedule(state.currentId)"><span data-ico="clock" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_schedule">Agenda</span></button>
+    <button id="stop-pipeline-btn" class="btn btn-sm" style="display:none;font-size:.68rem;background:var(--red-dim);color:#fb7185;border:1px solid rgba(244,63,94,0.3)" onclick="stopScan()"><span data-ico="stop" data-ico-size="14" aria-hidden="true"></span> STOP</button>
     <button class="btn-scan btn-scan-sm" id="topbar-scan-btn" style="display:none" onclick="openScanModal(state.currentId)">
       <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 2l10 6-10 6V2z"/></svg>
       <span data-i18n-key="new_scan_btn">New Scan</span>
@@ -181,13 +194,19 @@
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0;margin-top:2px">
           <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="openEditCompanyModal(state.currentId)" title="Edit scope" data-i18n-key="btn_edit_scope">✏ Editar Escopo</button>
+                  onclick="openEditCompanyModal(state.currentId)" title="Edit scope"><span data-ico="pencil" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_edit_scope">Editar Escopo</span></button>
           <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="exportHTMLReport(allCompanies().find(c=>c.id===state.currentId))" title="Export HTML report" data-i18n-key="btn_export_html">📄 Exportar Relatório</button>
+                  onclick="exportHTMLReport(allCompanies().find(c=>c.id===state.currentId))" title="Export HTML report"><span data-ico="file" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_export_html">Exportar Relatório</span></button>
           <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="exportPDFReport(allCompanies().find(c=>c.id===state.currentId))" title="Export PDF report" data-i18n-key="btn_export_pdf">🖨 Exportar PDF</button>
+                  onclick="exportPDFReport(allCompanies().find(c=>c.id===state.currentId))" title="Export PDF report"><span data-ico="printer" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_export_pdf">Exportar PDF</span></button>
+          <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
+                  onclick="exportServerPdf(state.currentId)" title="PDF gerado no servidor">PDF servidor</button>
+          <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
+                  onclick="exportSarif(state.currentId)" title="Export SARIF">SARIF</button>
+          <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
+                  onclick="pushDefectDojo(state.currentId)" title="Enviar ao DefectDojo">DefectDojo</button>
           <button id="clear-data-btn" class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px;color:var(--red)"
-                  onclick="clearReconData(state.currentId)" title="Clear all scan findings from DB" data-i18n-key="btn_clear_data">🗑 Limpar Dados</button>
+                  onclick="clearReconData(state.currentId)" title="Clear all scan findings from DB"><span data-ico="trash" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_clear_data">Limpar Dados</span></button>
         </div>
       </div>
       <!-- Individual tab counts — read by JS, aggregated into group buttons -->
@@ -210,6 +229,7 @@
         <button class="tab-btn"        data-group="operation"  onclick="switchGroup('operation',this)"><span data-i18n-key="tab_operation">Operation</span> <span class="tab-count" id="gc-operation"></span></button>
         <button class="tab-btn"        data-group="logs"       onclick="switchGroup('logs',this)"><span data-i18n-key="tab_logs">Logs</span> <span class="tab-count" id="gc-logs"></span></button>
         <button class="tab-btn"        data-group="pipeline"   onclick="switchGroup('pipeline',this)"><span data-i18n-key="tab_pipeline">Pipeline</span></button>
+        <button class="tab-btn"        data-group="graph"      onclick="switchGroup('graph',this)"><span data-i18n-key="tab_graph">Grafo</span></button>
         </div>
         <button class="tab-scroll-btn tab-scroll-right" id="tab-scroll-right" onclick="scrollTabBar(1)" aria-label="Scroll tabs right">›</button>
       </div>
@@ -234,6 +254,7 @@
        <div id="tab-operation"   class="tab-content"></div>
         <div id="tab-suppressed"  class="tab-content"></div>
         <div id="tab-typosquat"  class="tab-content"></div>
+        <div id="tab-graph"      class="tab-content"></div>
         <!-- Host Detail Drawer -->
         <div id="host-drawer-overlay" class="host-drawer-overlay" onclick="closeHostDrawer()"></div>
         <div id="host-drawer" class="host-drawer">
@@ -242,7 +263,7 @@
               <span class="hd-status" id="hd-status"></span>
               <span class="hd-title" id="hd-title"></span>
             </div>
-            <button class="hd-close" onclick="closeHostDrawer()">✕</button>
+            <button class="hd-close" onclick="closeHostDrawer()" aria-label="Fechar"><span data-ico="x" data-ico-size="16" aria-hidden="true"></span></button>
           </div>
           <div class="hd-body" id="hd-body"></div>
         </div>
@@ -251,23 +272,23 @@
     <!-- SETTINGS VIEW -->
     <div id="view-settings" class="view">
       <div class="page-hdr">
-        <div class="page-title" data-i18n-key="settings_title">⚙ Chaves de API & Configurações</div>
+        <div class="page-title"><span data-ico="sliders" aria-hidden="true"></span> <span data-i18n-key="settings_title">Chaves de API & Configurações</span></div>
         <div class="page-desc" data-i18n-key="settings_desc">Configure third-party intelligence APIs used by the recon modules.</div>
       </div>
       <div class="settings-grid" id="settings-grid"></div>
       <div class="settings-save-bar">
         <div class="save-status" id="settings-save-status" data-i18n-key="settings_unsaved">Unsaved changes will be applied when you click Save.</div>
-        <button class="btn btn-secondary" onclick="loadSettings()" data-i18n-key="btn_reload">↺ Reload</button>
-        <button class="btn btn-primary" onclick="saveSettings()" data-i18n-key="btn_save_settings">💾 Save All Settings</button>
+        <button class="btn btn-secondary" onclick="loadSettings()"><span data-ico="reload" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_reload">Recarregar</span></button>
+        <button class="btn btn-primary" onclick="saveSettings()"><span data-ico="floppy" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_save_settings">Salvar Configurações</span></button>
       </div>
 
       <div class="page-hdr" style="margin-top:24px;">
-        <div class="page-title" data-i18n-key="webhooks_title">🔔 Notificações / Webhooks</div>
+        <div class="page-title"><span data-ico="bell" aria-hidden="true"></span> <span data-i18n-key="webhooks_title">Notificações / Webhooks</span></div>
         <div class="page-desc" data-i18n-key="webhooks_desc">Receba alertas de fim de scan (scan_complete) e findings críticos (critical_finding) via Telegram, Discord, Slack, WhatsApp, Signal, Email ou CLI. One agent, one memory, every surface.</div>
       </div>
       <div id="webhooks-list" class="settings-group"></div>
       <div class="settings-group">
-        <div class="sg-title" data-i18n-key="webhooks_add_title">➕ Adicionar Webhook</div>
+        <div class="sg-title"><span data-ico="plus" aria-hidden="true"></span> <span data-i18n-key="webhooks_add_title">Adicionar Webhook</span></div>
         <div class="sg-field">
           <div class="sg-label"><span data-i18n-key="webhooks_platform">Plataforma</span></div>
           <select class="sg-input" id="wh-new-type" onchange="renderWebhookFormFields()" style="max-width:280px;"></select>
@@ -285,14 +306,14 @@
     <!-- RUNTIME CONFIG VIEW -->
     <div id="view-runtime" class="view">
       <div class="page-hdr">
-        <div class="page-title" data-i18n-key="runtime_title">⚡ Performance & Concorrência</div>
+        <div class="page-title"><span data-ico="bolt" aria-hidden="true"></span> <span data-i18n-key="runtime_title">Performance & Concorrência</span></div>
         <div class="page-desc" data-i18n-key="runtime_desc">Controla workers, limites de processos, watchdog e rate limiting. Requer restart do servidor para aplicar.</div>
       </div>
       <div class="settings-grid" id="runtime-grid"></div>
       <div class="settings-save-bar">
         <span class="save-status" id="runtime-save-status" data-i18n-key="runtime_ready">Ready</span>
-        <button class="btn btn-secondary" onclick="loadRuntimeConfig()" data-i18n-key="btn_reload">↺ Reload</button>
-        <button class="btn btn-primary" onclick="saveRuntimeConfig()" data-i18n-key="btn_save_config">💾 Save Config</button>
+        <button class="btn btn-secondary" onclick="loadRuntimeConfig()"><span data-ico="reload" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_reload">Recarregar</span></button>
+        <button class="btn btn-primary" onclick="saveRuntimeConfig()"><span data-ico="floppy" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_save_config">Salvar Config</span></button>
       </div>
     </div>
 
@@ -368,7 +389,7 @@
     <div id="view-tools" class="view">
       <div class="page-hdr" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div>
-          <div class="page-title" data-i18n-key="tools_title">🔧 Tool Registry</div>
+          <div class="page-title"><span data-ico="wrench" aria-hidden="true"></span> <span data-i18n-key="tools_title">Registro de Ferramentas</span></div>
           <div class="page-desc" data-i18n-key="tools_desc">All recon tools — status, versions, and one-click runs.</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -392,7 +413,7 @@
             <option value="enabled">Enabled</option>
             <option value="disabled">Disabled</option>
           </select>
-          <button class="btn btn-secondary" onclick="loadToolsStatus()" data-i18n-key="btn_reload">↺ Refresh</button>
+          <button class="btn btn-secondary" onclick="loadToolsStatus()"><span data-ico="reload" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_reload">Atualizar</span></button>
         </div>
       </div>
       <div id="tools-playwright-config" style="margin-bottom:18px"></div>
@@ -403,7 +424,7 @@
     <!-- BUG BOUNTY HELPER VIEW -->
     <div id="view-bbhelper" class="view">
       <div class="page-hdr">
-        <div class="page-title" data-i18n-key="bbh_title">🎯 Bug Bounty Helper</div>
+        <div class="page-title"><span data-ico="target" aria-hidden="true"></span> <span data-i18n-key="bbh_title">Bug Bounty Helper</span></div>
         <div class="page-desc" data-i18n-key="bbh_desc">Google Dorks and OSINT shortcuts for a target domain — click a module to open the right search engine / service.</div>
       </div>
       <div class="bbh-domain-strip">
@@ -420,7 +441,7 @@
     <!-- EXTERNAL TOOLS VIEW -->
     <div id="view-exttools" class="view">
       <div class="page-hdr">
-        <div class="page-title" data-i18n-key="ext_title">✦ External Tools</div>
+        <div class="page-title"><span data-ico="sparkle" aria-hidden="true"></span> <span data-i18n-key="ext_title">Ferramentas Externas</span></div>
         <div class="page-desc" data-i18n-key="ext_desc">One-click shortcuts to external recon, OSINT and utility tools used during bug bounty engagements.</div>
       </div>
       <div id="ext-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
@@ -438,10 +459,12 @@
     <div id="view-admins" class="view">
       <div class="page-hdr" style="display:flex;align-items:flex-start;justify-content:space-between">
         <div>
-          <div class="page-title" data-i18n-key="admins_title">👥 Admin Accounts</div>
+          <div class="page-title"><span data-ico="users" aria-hidden="true"></span> <span data-i18n-key="admins_title">Contas de Administrador</span></div>
           <div class="page-desc" data-i18n-key="admins_desc">Manage who has access to the ASM Platform.</div>
         </div>
-        <button class="btn btn-primary" onclick="openAdminModal()" data-i18n-key="btn_add_admin">＋ Add Admin</button>
+        <button class="btn btn-secondary" onclick="inviteAdmin()"><span data-ico="plus" data-ico-size="14" aria-hidden="true"></span> Convidar</button>
+        <button class="btn btn-secondary" onclick="setup2FA()">2FA</button>
+        <button class="btn btn-primary" onclick="openAdminModal()"><span data-ico="plus" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_add_admin">Adicionar Admin</span></button>
       </div>
       <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:4px">
         <div class="tl-wrap">
@@ -499,6 +522,56 @@
     <div class="modal-btns">
       <button class="btn btn-secondary" onclick="closeAdminModal()">Cancel</button>
       <button class="btn btn-primary" onclick="saveAdmin()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD ALERT RULE MODAL -->
+<div class="modal-overlay" id="modal-alert-rule">
+  <div class="modal">
+    <div class="modal-title">Nova regra de alerta</div>
+    <div class="modal-field">
+      <label class="modal-label">Nome</label>
+      <input type="text" class="modal-input" id="ar-name" placeholder="Novos hosts" autocomplete="off">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Tipo</label>
+      <select class="modal-input" id="ar-type">
+        <option value="new_host">Novo host</option>
+        <option value="new_port">Nova porta</option>
+        <option value="new_tech">Nova tecnologia</option>
+        <option value="status_change">Mudança de status HTTP</option>
+        <option value="waf_change">Mudança de WAF</option>
+        <option value="cert_expiring">Certificado expirando</option>
+        <option value="cve_critical">CVE crítica</option>
+        <option value="supply_chain_critical">Supply chain crítica</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Canais</label>
+      <div id="ar-channels" class="ar-channels">
+        <label class="ar-ch"><input type="checkbox" value="slack"> slack</label>
+        <label class="ar-ch"><input type="checkbox" value="discord"> discord</label>
+        <label class="ar-ch"><input type="checkbox" value="email"> email</label>
+        <label class="ar-ch"><input type="checkbox" value="webhook"> webhook</label>
+        <label class="ar-ch"><input type="checkbox" value="jira"> jira</label>
+        <label class="ar-ch"><input type="checkbox" value="linear"> linear</label>
+      </div>
+      <div class="modal-hint">Configure SMTP, Slack, Discord, Jira e Linear em Configurações.</div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Severidade mínima</label>
+      <select class="modal-input" id="ar-min-sev">
+        <option value="info">Qualquer (info+)</option>
+        <option value="medium_and_above">Média e acima</option>
+        <option value="high_and_above">Alta e acima</option>
+        <option value="critical_only">Somente crítica</option>
+      </select>
+    </div>
+    <div id="ar-error" style="display:none;font-size:.75rem;color:#fb7185;margin-top:8px;padding:8px 10px;background:var(--red-dim);border-radius:6px"></div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeAlertRuleModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="submitAlertRule()">Criar regra</button>
     </div>
   </div>
 </div>
@@ -564,19 +637,19 @@
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <label class="rate-mode-btn selected" onclick="selectRateMode('stealth',this)">
           <input type="radio" name="rate_mode" value="stealth" checked style="display:none">
-          <span class="rmb-icon">🧊</span>
+          <span class="rmb-icon" data-ico="shield" aria-hidden="true"></span>
           <span class="rmb-label">Stealth</span>
           <span class="rmb-desc">Invisível · 24/7</span>
         </label>
         <label class="rate-mode-btn" onclick="selectRateMode('balanced',this)">
           <input type="radio" name="rate_mode" value="balanced" style="display:none">
-          <span class="rmb-icon">⚖️</span>
+          <span class="rmb-icon" data-ico="scale" aria-hidden="true"></span>
           <span class="rmb-label">Balanced</span>
           <span class="rmb-desc">Moderado · eficiente</span>
         </label>
         <label class="rate-mode-btn" onclick="selectRateMode('fast',this)">
           <input type="radio" name="rate_mode" value="fast" style="display:none">
-          <span class="rmb-icon">🚀</span>
+          <span class="rmb-icon" data-ico="bolt" aria-hidden="true"></span>
           <span class="rmb-label">Fast</span>
           <span class="rmb-desc">Rápido · pode alertar WAF</span>
         </label>
@@ -587,8 +660,19 @@
       <div id="scan-targets-list" style="font-size:.75rem;color:var(--teal);font-family:var(--mono);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.8;"></div>
     </div>
 
+    <div class="modal-field">
+      <label class="modal-label" style="cursor:pointer;display:flex;gap:8px;align-items:center">
+        <input type="checkbox" id="scan-incremental">
+        Scan incremental (delta)
+      </label>
+      <div class="modal-hint">Roda discovery/validação e só reexecuta fases caras se o fingerprint mudou.</div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Templates Nuclei custom (.yaml)</label>
+      <input type="file" id="nuclei-template-file" accept=".yaml,.yml">
+    </div>
     <div id="scan-checkpoint-info" style="display:none;margin-top:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:.75rem;line-height:1.6">
-      <div style="color:var(--teal);font-weight:600;margin-bottom:4px">🔍 Checkpoint diff</div>
+      <div style="color:var(--teal);font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px"><span data-ico="search" data-ico-size="14" aria-hidden="true"></span> Checkpoint diff</div>
       <div id="scan-checkpoint-body" style="color:var(--text2)"></div>
     </div>
     <div id="scan-error" style="display:none;font-size:.75rem;color:#fb7185;margin-top:8px;padding:8px 10px;background:var(--red-dim);border-radius:6px;border:1px solid rgba(244,63,94,.2)"></div>
@@ -613,9 +697,9 @@
       <div id="term-status"></div>
       <span id="term-live-badge" style="font-size:0.7rem;color:#4ade80;opacity:0.4;transition:opacity 0.4s;margin-left:8px" title="Dashboard updates live every 20s">● LIVE</span>
       <div class="terminal-actions">
-        <button class="terminal-btn danger" id="term-stop-btn" onclick="stopScan()">■ Stop</button>
-        <button class="terminal-btn" onclick="minimizeTerminal()">↓ Minimize</button>
-        <button class="terminal-btn" onclick="closeTerminal()">✕</button>
+        <button class="terminal-btn danger" id="term-stop-btn" onclick="stopScan()"><span data-ico="stop" data-ico-size="12" aria-hidden="true"></span> Stop</button>
+        <button class="terminal-btn" onclick="minimizeTerminal()"><span data-ico="chevron-down" data-ico-size="12" aria-hidden="true"></span> Minimizar</button>
+        <button class="terminal-btn" onclick="closeTerminal()" aria-label="Fechar"><span data-ico="x" data-ico-size="12" aria-hidden="true"></span></button>
       </div>
     </div>
     <div class="terminal-body" id="term-body" style="display:none"></div>
@@ -647,8 +731,9 @@
     <div class="log-modal-hdr">
       <div class="log-modal-title" id="log-modal-title">scan_name</div>
       <div class="log-modal-meta" id="log-modal-meta"></div>
-      <input class="log-modal-search" id="log-modal-search" placeholder="🔍 Filtrar linhas…" oninput="filterLogLines(this.value)">
-      <button class="terminal-btn" onclick="document.getElementById('log-modal-overlay').classList.remove('show')">✕</button>
+      <label class="sr-only" for="log-modal-search">Filtrar linhas</label>
+      <input class="log-modal-search" id="log-modal-search" placeholder="Filtrar linhas…" oninput="filterLogLines(this.value)">
+      <button class="terminal-btn" onclick="document.getElementById('log-modal-overlay').classList.remove('show')" aria-label="Fechar"><span data-ico="x" data-ico-size="12" aria-hidden="true"></span></button>
     </div>
     <div class="log-modal-body" id="log-modal-body"></div>
     <div class="log-modal-ftr">
@@ -674,11 +759,11 @@
 <div class="tenancy-overlay" id="tenancy-overlay" onclick="if(event.target===this)closeTenancyPanel()">
   <div class="tenancy-panel">
     <div class="tp-client">
-      <h3>◈ Select Client (Tenancy)</h3>
+      <h3>Selecionar cliente (Tenancy)</h3>
       <div class="tp-client-list" id="tenancy-client-list"></div>
     </div>
     <div class="tp-right">
-      <h3>⚙ Configuration</h3>
+      <h3>Configuração</h3>
       <div class="tp-key-hint">
         <div class="tp-key">Alt + T</div>
         <p>Hold to switch active client</p>
@@ -706,12 +791,12 @@
 <!-- TOOL CONFIG MODAL -->
 <div class="modal-overlay" id="modal-tool-config" onclick="if(event.target===this)closeToolConfig()">
   <div class="modal" style="max-width:520px;max-height:80vh;overflow-y:auto">
-    <div class="modal-title">⚙ Configure — <span id="tcfg-name"></span></div>
+    <div class="modal-title">Configurar — <span id="tcfg-name"></span></div>
     <div id="tcfg-fields"></div>
     <div class="modal-btns">
-      <button class="btn btn-secondary" onclick="resetToolConfig()">↺ Reset to Defaults</button>
-      <button class="btn btn-secondary" onclick="closeToolConfig()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveToolConfig()">💾 Save Config</button>
+      <button class="btn btn-secondary" onclick="resetToolConfig()"><span data-ico="reload" data-ico-size="14" aria-hidden="true"></span> Restaurar padrão</button>
+      <button class="btn btn-secondary" onclick="closeToolConfig()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveToolConfig()"><span data-ico="floppy" data-ico-size="14" aria-hidden="true"></span> Salvar</button>
     </div>
   </div>
 </div>
@@ -719,7 +804,7 @@
 <!-- FALSE POSITIVE MODAL -->
 <div class="modal-overlay" id="modal-fp" onclick="if(event.target===this)closeFPModal()">
   <div class="modal" style="max-width:450px">
-    <div class="modal-title">✕ Mark as False Positive</div>
+    <div class="modal-title">Marcar como falso positivo</div>
     <div class="modal-field">
       <label class="modal-label">Host</label>
       <div id="fp-host" style="color:var(--text1);font-family:var(--mono);font-size:0.8rem"></div>
@@ -756,6 +841,7 @@
 <!-- ── Global Search (Ctrl+K) ── -->
 <div class="modal-overlay gsearch-overlay" id="modal-global-search" onclick="if(event.target===this)closeGlobalSearch()">
   <div class="modal gsearch-modal">
+    <label class="sr-only" for="gsearch-input">Busca global</label>
     <input type="text" id="gsearch-input" class="gsearch-input" placeholder="Buscar empresas, hosts, dominios, findings... (Ctrl+K)" autocomplete="off" oninput="onGlobalSearchInput()" onkeydown="onGlobalSearchKeydown(event)">
     <div id="gsearch-results" class="gsearch-results"></div>
     <div class="gsearch-hint">↑↓ navegar · Enter abrir · Esc fechar</div>
@@ -765,12 +851,15 @@
 <!-- ── Core modules ── -->
 <script src="js/asm.js"></script>
 <script src="js/api.js"></script>
-<script src="js/bugbounty.js?v=2"></script>
-<script src="js/bbprograms.js?v=3"></script>
-<script src="js/generators.js?v=6"></script>
+<script src="js/bugbounty.js?v=4"></script>
+<script src="js/bbprograms.js?v=5"></script>
+<script src="js/generators.js?v=8"></script>
+<script src="js/theme.js?v=2"></script>
+<script src="js/asset-graph.js?v=5"></script>
+<script src="js/extras.js?v=1"></script>
 
 <!-- ── Optional: load generated data from parser ── -->
-<script src="dashboard.js?v=58"></script>
+<script src="dashboard.js?v=68"></script>
 
 </body>
 </html>

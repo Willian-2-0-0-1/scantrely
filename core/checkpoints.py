@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin
 
-import httpx
 from bs4 import BeautifulSoup
 
 CHECKPOINTS_DIR = Path(__file__).parent / "checkpoints"
@@ -129,14 +128,15 @@ def _extract_js_urls(soup: BeautifulSoup, base_url: str) -> list[str]:
 def fingerprint_host(url: str, timeout: int = 10) -> Optional[HostFingerprint]:
     """Fetch url and compute its fingerprint. Returns None on connection error."""
     try:
-        with httpx.Client(
+        from utils.circuit_breaker import guarded_httpx
+        resp = guarded_httpx(
+            "GET",
+            url,
             follow_redirects=True,
             verify=True,
             timeout=timeout,
             headers={"User-Agent": "Mozilla/5.0 ASM-Checkpoint/1.0"},
-            limits=httpx.Limits(max_connections=1),
-        ) as client:
-            resp = client.get(url)
+        )
 
         body = resp.text
         soup = BeautifulSoup(body, "html.parser")

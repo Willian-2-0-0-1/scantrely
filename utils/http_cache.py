@@ -9,7 +9,7 @@ TTL: duration of the scan (cache cleared on new scan)
 import sqlite3, hashlib, json, time, os
 from pathlib import Path
 from typing import Any
-from urllib.request import urlopen, Request
+from urllib.request import Request
 
 
 class HttpCache:
@@ -97,8 +97,9 @@ class HttpCache:
 
         req = Request(url, headers=headers or {"User-Agent": "ASM-Platform/1.0"})
         req.method = method.upper()
+        from utils.circuit_breaker import CircuitOpen, guarded_urlopen
         try:
-            with urlopen(req, timeout=timeout) as resp:
+            with guarded_urlopen(req, timeout=timeout) as resp:
                 resp_headers = dict(resp.headers)
                 body = resp.read()
                 result = {
@@ -109,6 +110,8 @@ class HttpCache:
                 }
                 self.set(method, url, resp.status, resp_headers, body)
                 return result
+        except CircuitOpen:
+            return {"status": 0, "headers": {}, "body_sha256": "", "body": None}
         except Exception:
             return {"status": 0, "headers": {}, "body_sha256": "", "body": None}
 

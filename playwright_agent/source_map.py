@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from urllib.parse import urljoin
 
-import httpx
-
 
 def extract_source_map_url(js_text: str) -> str | None:
     marker = "sourceMappingURL="
@@ -21,7 +19,10 @@ def fetch_source_map(js_url: str, source_map_url: str, timeout: int = 15) -> dic
         return None
     full = urljoin(js_url, source_map_url)
     try:
-        resp = httpx.get(full, timeout=timeout, follow_redirects=True, verify=False)
+        from utils.circuit_breaker import guarded_httpx
+        resp = guarded_httpx(
+            "GET", full, timeout=timeout, follow_redirects=True, verify=False,
+        )
         if resp.status_code != 200:
             return None
         return resp.json()

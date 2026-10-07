@@ -13,13 +13,13 @@ let _bbpLoading  = false;
 const _BBP_META = {
   hackerone: {
     label: 'HackerOne',
-    icon: '🟢',
+    ico: 'trophy',
     settingsKeys: ['hackerone_username', 'hackerone_token'],
     setupSteps: [
       'Acesse <a href="https://hackerone.com/settings/api_token_v2" target="_blank" rel="noopener" class="bbp-link">hackerone.com/settings/api_token_v2</a>',
       'Gere um novo token de API com permissão de leitura de programas',
       'Copie seu <strong>Username</strong> (não o e-mail) e o <strong>Token</strong>',
-      'Cole nos campos <code>HackerOne Username</code> e <code>HackerOne Token</code> em <a class="bbp-link" onclick="showPage(\'settings\')" href="#">⚙️ Configurações → Bug Bounty Platforms</a>',
+      'Cole nos campos <code>HackerOne Username</code> e <code>HackerOne Token</code> em <a class="bbp-link" onclick="showPage(\'settings\')" href="#">Configurações → Bug Bounty Platforms</a>',
     ],
     docsUrl: 'https://api.hackerone.com/',
   },
@@ -36,7 +36,7 @@ function showBBProgramsPage() {
   view.innerHTML = `
     <div class="bbp-header">
       <div>
-        <div class="page-title">🏆 Bug Bounty Programs</div>
+        <div class="page-title"><span data-ico="trophy" aria-hidden="true"></span> Bug Bounty Programs</div>
         <div class="page-desc">Explore programas reais de Bug Bounty do HackerOne sem sair da plataforma.</div>
       </div>
     </div>
@@ -57,7 +57,7 @@ function showBBProgramsPage() {
           <option value="public">Público</option>
           <option value="private">Privado</option>
         </select>
-        <button class="btn btn-primary" onclick="bbpLoad(true)">↻ Atualizar</button>
+        <button class="btn btn-primary" onclick="bbpLoad(true)"><span data-ico="reload" data-ico-size="14" aria-hidden="true"></span> Atualizar</button>
       </div>
     </div>
 
@@ -142,7 +142,7 @@ async function bbpLoad(force = false) {
     }
 
     if (!resp.ok || data.error) {
-      main.innerHTML = `<div class="bbp-empty">⚠️ ${_bbpEsc(data.error || 'Erro desconhecido')}</div>`;
+      main.innerHTML = `<div class="bbp-empty">${_bbpEsc(data.error || 'Erro desconhecido')}</div>`;
       _bbpLoading = false; return;
     }
 
@@ -150,7 +150,7 @@ async function bbpLoad(force = false) {
     if (toolbar) toolbar.style.display = '';
     _bbpRender(data);
   } catch (e) {
-    main.innerHTML = `<div class="bbp-empty">⚠️ Erro ao carregar: ${_bbpEsc(e.message)}</div>`;
+    main.innerHTML = `<div class="bbp-empty">Erro ao carregar: ${_bbpEsc(e.message)}</div>`;
   } finally {
     _bbpLoading = false;
   }
@@ -167,7 +167,7 @@ function _bbpRenderSetup() {
 
   document.getElementById('bbp-main').innerHTML = `
     <div class="bbp-setup-card">
-      <div class="bbp-setup-icon">${meta.icon}</div>
+      <div class="bbp-setup-icon" data-ico="${meta.ico||'trophy'}" aria-hidden="true"></div>
       <h3 class="bbp-setup-title">Configure a API do ${_bbpEsc(meta.label)}</h3>
       <p class="bbp-setup-desc">
         Para visualizar programas reais de Bug Bounty, você precisa configurar suas credenciais de API.
@@ -175,8 +175,8 @@ function _bbpRenderSetup() {
       </p>
       <div class="bbp-setup-steps">${steps}</div>
       <div class="bbp-setup-actions">
-        <button class="btn btn-primary" onclick="showPage('settings')">⚙️ Ir para Configurações</button>
-        <a href="${meta.docsUrl}" target="_blank" rel="noopener" class="btn btn-secondary">📖 Documentação da API</a>
+        <button class="btn btn-primary" onclick="showPage('settings')">Ir para Configurações</button>
+        <a href="${meta.docsUrl}" target="_blank" rel="noopener" class="btn btn-secondary">Documentação da API</a>
       </div>
       <div class="bbp-setup-note">
         Suas credenciais são armazenadas localmente e nunca compartilhadas.
@@ -192,12 +192,12 @@ function _bbpRenderAuthError(msg) {
   const meta = _BBP_META[_bbpPlatform];
   document.getElementById('bbp-main').innerHTML = `
     <div class="bbp-setup-card bbp-setup-card--error">
-      <div class="bbp-setup-icon">🔑</div>
+      <div class="bbp-setup-icon" data-ico="key" aria-hidden="true"></div>
       <h3 class="bbp-setup-title">Credenciais inválidas</h3>
       <p class="bbp-setup-desc">${_bbpEsc(msg)}</p>
       <div class="bbp-setup-actions">
-        <button class="btn btn-primary" onclick="showPage('settings')">⚙️ Corrigir em Configurações</button>
-        <a href="${meta.docsUrl}" target="_blank" rel="noopener" class="btn btn-secondary">📖 Documentação</a>
+        <button class="btn btn-primary" onclick="showPage('settings')">Corrigir em Configurações</button>
+        <a href="${meta.docsUrl}" target="_blank" rel="noopener" class="btn btn-secondary">Documentação</a>
       </div>
     </div>`;
 }
@@ -282,22 +282,22 @@ function _bbpProgramCard(p) {
         </div>
         <div class="bbp-card-badges">
           ${bounty
-            ? `<span class="bbp-badge bbp-badge-bounty">💰 Recompensa</span>`
+            ? `<span class="bbp-badge bbp-badge-bounty">Recompensa</span>`
             : `<span class="bbp-badge bbp-badge-vdp">VDP</span>`}
           ${isPublic
-            ? `<span class="bbp-badge bbp-badge-public">🌐 Público</span>`
-            : `<span class="bbp-badge bbp-badge-private">🔒 Privado</span>`}
+            ? `<span class="bbp-badge bbp-badge-public">Público</span>`
+            : `<span class="bbp-badge bbp-badge-private">Privado</span>`}
         </div>
       </div>
       ${(minBounty || maxBounty) ? `
         <div class="bbp-card-bounty">
-          💵 ${minBounty ? '$' + _bbpFmt(minBounty) : '—'} – ${maxBounty ? '$' + _bbpFmt(maxBounty) : '—'}
+          ${minBounty ? '$' + _bbpFmt(minBounty) : '—'} – ${maxBounty ? '$' + _bbpFmt(maxBounty) : '—'}
         </div>` : ''}
       ${scopes.length
         ? `<div class="bbp-card-scopes">${scopes.map(s => `<span class="bbp-scope-tag">${_bbpEsc(s)}</span>`).join('')}</div>`
         : ''}
       ${resolved
-        ? `<div class="bbp-card-stats">✓ ${_bbpFmt(resolved)} resolvidos${submitted ? ' · ' + _bbpFmt(submitted) + ' enviados' : ''}</div>`
+        ? `<div class="bbp-card-stats">${_bbpFmt(resolved)} resolvidos${submitted ? ' · ' + _bbpFmt(submitted) + ' enviados' : ''}</div>`
         : ''}
     </a>`;
 }

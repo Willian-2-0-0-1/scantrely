@@ -271,6 +271,45 @@ class ASMDatabase:
                 conn.execute("ALTER TABLE alert_rules ADD COLUMN name TEXT NOT NULL DEFAULT ''")
             except Exception:
                 pass  # column already exists
+            # Migration v4 → v5: 2FA, alert severity, invites, push
+            try:
+                conn.execute("ALTER TABLE admins ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE admins ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE alert_rules ADD COLUMN min_severity TEXT NOT NULL DEFAULT 'info'")
+            except Exception:
+                pass
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS invites (
+                    token TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    email TEXT NOT NULL DEFAULT '',
+                    role TEXT NOT NULL DEFAULT 'analyst',
+                    scoped_companies TEXT NOT NULL DEFAULT '[]',
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    used_at TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS push_subscriptions (
+                    id TEXT PRIMARY KEY,
+                    admin_id TEXT NOT NULL DEFAULT '',
+                    endpoint TEXT NOT NULL UNIQUE,
+                    keys_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
 
     def migrate_from_legacy(self) -> None:
@@ -296,7 +335,7 @@ class ASMDatabase:
         "settings", "admins", "companies", "schedules", "webhooks",
         "whitelist_entries", "audit_log", "asm_data_state", "snapshots",
         "subdomain_history", "scan_stats_history", "alert_rules", "alerts",
-        "tool_runs", "jobs", "finding_triage",
+        "tool_runs", "jobs", "finding_triage", "invites", "push_subscriptions",
     })
 
     def _table_count(self, table: str) -> int:
@@ -511,7 +550,8 @@ class ASMDatabase:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, username, email, password_hash, role, scoped_companies, created_at, last_login
+                SELECT id, username, email, password_hash, role, scoped_companies,
+                       created_at, last_login, totp_secret, totp_enabled
                 FROM admins
                 ORDER BY created_at, username
                 """
@@ -520,6 +560,8 @@ class ASMDatabase:
         for row in rows:
             admin = dict(row)
             admin["scoped_companies"] = self._json_loads(admin.get("scoped_companies", "[]"), [])
+            admin["totp_enabled"] = bool(admin.get("totp_enabled"))
+            admin["totp_secret"] = admin.get("totp_secret") or ""
             result.append(admin)
         return result
 
@@ -528,8 +570,9 @@ class ASMDatabase:
             conn.execute("DELETE FROM admins")
             conn.executemany(
                 """
-                INSERT INTO admins (id, username, email, password_hash, role, scoped_companies, created_at, last_login)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO admins (id, username, email, password_hash, role, scoped_companies,
+                                    created_at, last_login, totp_secret, totp_enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -541,6 +584,8 @@ class ASMDatabase:
                         self._json_dumps(admin.get("scoped_companies", [])),
                         admin.get("created_at", self._now()),
                         admin.get("last_login"),
+                        admin.get("totp_secret", "") or "",
+                        1 if admin.get("totp_enabled") else 0,
                     )
                     for admin in admins
                 ],
@@ -1301,11 +1346,11 @@ class ASMDatabase:
         """
         now = self._now()
         clauses = ["job_type = ?", "status IN ('pending', 'running')"]
-        params: list = [job_type]
+        where_params: list = [job_type]
         if company_id:
             clauses.append("company_id = ?")
-            params.append(company_id)
-        params.extend([(reason or "safety hold")[:4000], now])
+            where_params.append(company_id)
+        params: list = [(reason or "safety hold")[:4000], now, *where_params]
         with self._lock, self._connect() as conn:
             cur = conn.execute(
                 f"""
@@ -1316,6 +1361,24 @@ class ASMDatabase:
                 WHERE {' AND '.join(clauses)}
                 """,
                 tuple(params),
+            )
+            conn.commit()
+        return int(cur.rowcount or 0)
+
+    def release_safety_hold(self, *, reason_prefix: str = "SAFETY-WATCHDOG") -> int:
+        """Re-queue jobs the watchdog stopped so workers can claim them again."""
+        now = self._now()
+        like = f"{reason_prefix}%"
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE jobs
+                SET status = 'pending',
+                    error = '',
+                    updated_at = ?
+                WHERE status = 'stopped' AND error LIKE ?
+                """,
+                (now, like),
             )
             conn.commit()
         return int(cur.rowcount or 0)
@@ -1657,7 +1720,7 @@ class ASMDatabase:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, company_id, name, rule_type, enabled, channels_json
+                SELECT id, company_id, name, rule_type, enabled, channels_json, min_severity
                 FROM alert_rules
                 WHERE (company_id = ? OR company_id = '*') AND enabled = 1
                 """,
@@ -1671,6 +1734,7 @@ class ASMDatabase:
                 "rule_type": row["rule_type"],
                 "enabled": bool(row["enabled"]),
                 "channels": self._json_loads(row["channels_json"], []),
+                "min_severity": row["min_severity"] if "min_severity" in row.keys() else "info",
             }
             for row in rows
         ]
@@ -1680,7 +1744,7 @@ class ASMDatabase:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, company_id, name, rule_type, enabled, channels_json, created_at
+                SELECT id, company_id, name, rule_type, enabled, channels_json, created_at, min_severity
                 FROM alert_rules
                 WHERE company_id = ? OR company_id = '*'
                 ORDER BY created_at DESC
@@ -1696,28 +1760,33 @@ class ASMDatabase:
                 "enabled": bool(row["enabled"]),
                 "channels": self._json_loads(row["channels_json"], []),
                 "created_at": row["created_at"],
+                "min_severity": row["min_severity"] if "min_severity" in row.keys() else "info",
             }
             for row in rows
         ]
 
     def create_alert_rule(self, company_id: str, name: str, rule_type: str,
-                          channels: list[str], enabled: bool = True) -> str:
+                          channels: list[str], enabled: bool = True,
+                          min_severity: str = "info") -> str:
         rule_id = uuid.uuid4().hex[:12]
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO alert_rules (id, company_id, name, rule_type, enabled, channels_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO alert_rules (id, company_id, name, rule_type, enabled, channels_json, created_at, min_severity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (rule_id, company_id, name, rule_type, 1 if enabled else 0,
-                 self._json_dumps(channels), self._now()),
+                 self._json_dumps(channels), self._now(), min_severity or "info"),
             )
             conn.commit()
         return rule_id
 
     def update_alert_rule(self, company_id: str, rule_id: str, **fields) -> bool:
-        """Update one or more of: name, rule_type, enabled, channels."""
-        columns = {"name": "name", "rule_type": "rule_type", "enabled": "enabled", "channels": "channels_json"}
+        """Update one or more of: name, rule_type, enabled, channels, min_severity."""
+        columns = {
+            "name": "name", "rule_type": "rule_type", "enabled": "enabled",
+            "channels": "channels_json", "min_severity": "min_severity",
+        }
         sets, params = [], []
         for key, column in columns.items():
             if key not in fields:
@@ -1856,6 +1925,82 @@ class ASMDatabase:
             self.webhooks_file.write_text(
                 json.dumps(self.load_webhooks(), indent=2, ensure_ascii=False)
             )
+
+    def create_invite(self, username: str, email: str, role: str,
+                      scoped_companies: list, created_by: str, ttl_hours: int = 72) -> dict:
+        import secrets as _secrets
+        from datetime import timedelta
+        token = _secrets.token_urlsafe(24)
+        now = datetime.now()
+        expires = (now + timedelta(hours=ttl_hours)).isoformat(timespec="seconds")
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO invites (token, username, email, role, scoped_companies,
+                                     created_by, created_at, expires_at, used_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (token, username, email or "", role, self._json_dumps(scoped_companies or []),
+                 created_by or "", now.isoformat(timespec="seconds"), expires),
+            )
+            conn.commit()
+        return {"token": token, "username": username, "email": email, "role": role,
+                "scoped_companies": scoped_companies or [], "expires_at": expires}
+
+    def get_invite(self, token: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM invites WHERE token = ?", (token,)).fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        data["scoped_companies"] = self._json_loads(data.get("scoped_companies", "[]"), [])
+        return data
+
+    def mark_invite_used(self, token: str) -> bool:
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE invites SET used_at = ? WHERE token = ? AND used_at IS NULL",
+                (self._now(), token),
+            )
+            conn.commit()
+        return cur.rowcount > 0
+
+    def save_push_subscription(self, admin_id: str, endpoint: str, keys: dict) -> str:
+        sub_id = uuid.uuid4().hex[:12]
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO push_subscriptions (id, admin_id, endpoint, keys_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(endpoint) DO UPDATE SET
+                    admin_id=excluded.admin_id,
+                    keys_json=excluded.keys_json
+                """,
+                (sub_id, admin_id or "", endpoint, self._json_dumps(keys or {}), self._now()),
+            )
+            conn.commit()
+        return sub_id
+
+    def list_push_subscriptions(self, admin_id: str | None = None) -> list[dict]:
+        with self._connect() as conn:
+            if admin_id:
+                rows = conn.execute(
+                    "SELECT * FROM push_subscriptions WHERE admin_id = ?", (admin_id,)
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM push_subscriptions").fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            item["keys"] = self._json_loads(item.get("keys_json", "{}"), {})
+            out.append(item)
+        return out
+
+    def delete_push_subscription(self, endpoint: str) -> bool:
+        with self._lock, self._connect() as conn:
+            cur = conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+            conn.commit()
+        return cur.rowcount > 0
 
     def _sync_whitelist_file(self) -> None:
         if self.whitelist_file:

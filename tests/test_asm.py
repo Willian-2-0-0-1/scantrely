@@ -14,7 +14,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -59,6 +61,8 @@ def flask_app(tmp_path, db):
 
     app = Flask(__name__)
     app.config["TESTING"] = True
+    from utils.trace import register_trace
+    register_trace(app)
 
     SESSION_TTL = 86400
     sessions: dict = {}
@@ -316,6 +320,37 @@ def flask_app(tmp_path, db):
         load_asm_data=db.load_asm_data,
         audit=audit,
     ))
+
+    from routes.extras import create_extras_blueprint
+    app.register_blueprint(create_extras_blueprint(
+        require_auth=require_auth,
+        require_super_admin=require_super_admin,
+        get_session=get_session,
+        load_admins=load_admins,
+        save_admins=save_admins,
+        hash_pw=hash_pw,
+        get_settings=get_settings,
+        check_pw=check_pw,
+        db=db,
+        base_dir=tmp_path,
+        load_companies=load_companies,
+        job_scheduler=scheduler,
+        pipeline_state=runner.pipeline_state,
+        pipeline_phases=PIPELINE_PHASES,
+        audit=audit,
+        get_company_data=lambda cid: {"id": cid, "name": "t", "findings": [{"title": "x", "severity": "high", "host": "a.example", "module": "cve"}]},
+    ))
+
+    from utils.health import register_health_routes
+    register_health_routes(
+        app,
+        db=db,
+        bin_dir=tmp_path / "bin",
+        scans_dir=tmp_path / "scans",
+        data_dir=tmp_path,
+        job_scheduler=scheduler,
+        pipeline_state=runner.pipeline_state,
+    )
 
     app._test_sessions = sessions
     app._test_companies = companies
@@ -1003,6 +1038,19 @@ class TestReconRoutes:
         assert "email" in ids
         assert "dns" in ids
 
+    def test_pipeline_phases_catalog(self, auth_client):
+        resp = auth_client.get("/api/recon/pipeline/phases")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        ids = [p["id"] for p in data["phases"]]
+        assert ids == [
+            "discovery", "validation", "intel", "cleanup", "fingerprint",
+            "js_discovery", "api_mapping", "browser", "bug_checks",
+            "ports_services", "nuclei",
+        ]
+        assert "riddler" in data["optional_on_demand"]
+        assert "typosquat" in data["optional_on_demand"]
+
     def test_unknown_module_returns_400(self, auth_client):
         auth_client.post("/api/companies", json={"name": "Co", "domains": ["co.com"]})
         resp = auth_client.post("/api/recon/co/nonexistent_module")
@@ -1027,6 +1075,39 @@ class TestReconRoutes:
         resp = auth_client.get("/api/recon/co/pipeline")
         assert resp.status_code == 200
         assert resp.get_json()["status"] == "not_run"
+
+    def test_pipeline_status_uses_module_events(self, auth_client, flask_app):
+        flask_app._test_runner.pipeline_state["co"] = {
+            "status": "done",
+            "module_events": [
+                {"module": "phishing", "status": "running", "ts": "2026-10-07T14:00:00"},
+                {"module": "phishing", "status": "done", "ts": "2026-10-07T14:00:05"},
+                {
+                    "module": "git_leaks",
+                    "status": "error",
+                    "reason": "name 'shutil' is not defined",
+                    "ts": "2026-10-07T14:01:00",
+                },
+            ],
+        }
+        resp = auth_client.get("/api/recon/co/pipeline")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        by_mod = {m["module"]: m for ph in data["phases"] for m in ph["modules"]}
+        assert by_mod["phishing"]["status"] == "done"
+        assert by_mod["git_leaks"]["status"] == "error"
+        assert "shutil" in by_mod["git_leaks"]["reason"]
+
+    def test_pipeline_status_running_becomes_error_when_done(self, auth_client, flask_app):
+        flask_app._test_runner.pipeline_state["co"] = {
+            "status": "done",
+            "module_events": [
+                {"module": "gowitness", "status": "running", "ts": "2026-10-07T14:50:00"},
+            ],
+        }
+        resp = auth_client.get("/api/recon/co/pipeline")
+        by_mod = {m["module"]: m for ph in resp.get_json()["phases"] for m in ph["modules"]}
+        assert by_mod["gowitness"]["status"] == "error"
 
     def test_pipeline_start_recon_unavailable(self, auth_client):
         auth_client.post("/api/companies", json={"name": "Co2", "domains": ["co.com"]})
@@ -1595,7 +1676,7 @@ class TestToolCommandRegression:
         def _fake_urlopen(*args, **kwargs):
             return _Resp(json.dumps(sample).encode("utf-8"))
 
-        monkeypatch.setattr("utils.tools.urllib.request.urlopen", _fake_urlopen)
+        monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
         result = tool.run("example.com", {})
         assert result.status == "done"
         assert result.data["total_certs"] == 2
@@ -1643,3 +1724,1055 @@ class TestModuleEnvelope:
         timeout_env = _normalize_module_envelope("demo", None, status="timeout", reason="Timeout (120s)")
         assert timeout_env["status"] == "timeout"
         assert timeout_env["reason"] == "Timeout (120s)"
+
+        err_status, err_reason = _classify_result_status(None, "name 'shutil' is not defined")
+        assert err_status == "error"
+        assert "shutil" in err_reason
+
+        key_status, _ = _classify_result_status(None, "'phishing'")
+        assert key_status == "error"
+
+        empty_status, empty_reason = _classify_result_status(None, "")
+        assert empty_status == "done"
+        assert empty_reason == ""
+
+        skipped_status, skipped_reason = _classify_result_status(None, "whatweb not found")
+        assert skipped_status == "skipped"
+        assert "unavailable" in skipped_reason.lower() or "not found" in skipped_reason.lower()
+
+        done_fail_status, _ = _classify_result_status("done", "whatweb not found")
+        assert done_fail_status == "skipped"
+
+        key_skip, _ = _classify_result_status("error", "No Shodan API key — set SHODAN_API_KEY")
+        assert key_skip == "skipped"
+
+
+class TestPipelineResilience:
+    def test_unusable_checkpoint_is_rejected(self, db, tmp_path):
+        from core.pipeline import ReconRunner, _checkpoint_is_usable
+
+        runner = ReconRunner(
+            db=db,
+            base_dir=tmp_path,
+            get_settings=lambda: {},
+            load_hosts_fn=lambda cid: [],
+            recon_module=None,
+            recon_available=False,
+            tool_registry=None,
+        )
+        bad = {"status": "done", "reason": "whatweb not found", "error": "whatweb not found"}
+        assert _checkpoint_is_usable(bad) is False
+        runner.results["co:whatweb"] = bad
+        assert runner._module_checkpoint_is_valid(
+            "co", "whatweb", {"domains": ["example.com"]}, [], {},
+        ) is False
+
+        good = {"status": "done", "reason": "", "fingerprint": ""}
+        assert _checkpoint_is_usable(good) is True
+
+    def test_load_checkpoints_deletes_unusable(self, db, tmp_path):
+        from core.pipeline import ReconRunner
+
+        runner = ReconRunner(
+            db=db,
+            base_dir=tmp_path,
+            get_settings=lambda: {},
+            load_hosts_fn=lambda cid: [],
+            recon_module=None,
+            recon_available=False,
+            tool_registry=None,
+        )
+        cp_dir = tmp_path / "scans" / "co" / ".checkpoints"
+        cp_dir.mkdir(parents=True)
+        (cp_dir / "whatweb__example.com.json").write_text(
+            '{"status":"done","reason":"whatweb not found","module":"whatweb","target":"example.com"}',
+            encoding="utf-8",
+        )
+        (cp_dir / "dns.json").write_text(
+            '{"status":"done","reason":"","module":"dns","target":""}',
+            encoding="utf-8",
+        )
+        runner._load_checkpoints("co")
+        assert "co:whatweb" not in runner.results
+        assert runner.results["co:dns"]["status"] == "done"
+        assert not (cp_dir / "whatweb__example.com.json").exists()
+        assert (cp_dir / "dns.json").exists()
+
+    def test_finalize_in_flight_marks_running_cancelled(self):
+        from core.pipeline import finalize_in_flight_modules, module_status_index
+
+        results = {"co:certs": {"status": "running", "started_at": "2026-10-07T15:36:00"}}
+        state = {
+            "status": "stopped",
+            "module_status": {"certs": {"status": "running"}},
+            "module_events": [{"module": "certs", "status": "running"}],
+            "log": [],
+        }
+        mods = finalize_in_flight_modules("co", results=results, state=state)
+        assert "certs" in mods
+        assert results["co:certs"]["status"] == "cancelled"
+        assert state["module_status"]["certs"]["status"] == "cancelled"
+        assert any(ev.get("status") == "cancelled" for ev in state["module_events"])
+
+        index = module_status_index({
+            "status": "stopped",
+            "module_events": [{"module": "urlscan_io", "status": "running"}],
+        })
+        assert index["urlscan_io"]["status"] == "cancelled"
+
+    def test_api_tool_skips_without_key(self):
+        from utils.tools import HunterIOTool
+
+        result = HunterIOTool().run("example.com", {"settings": {}})
+        assert result.status == "skipped"
+        assert "hunter_key" in (result.reason or "")
+
+
+class TestCircuitBreaker:
+    def test_opens_after_threshold_and_fails_fast(self):
+        from utils.circuit_breaker import CircuitBreaker
+
+        br = CircuitBreaker("demo.example", failure_threshold=3, recovery_timeout=60)
+        assert br.allow() is True
+        br.failure()
+        br.failure()
+        assert br.state == "closed"
+        br.failure()
+        assert br.state == "open"
+        assert br.allow() is False
+
+    def test_half_open_success_closes(self):
+        from utils.circuit_breaker import CircuitBreaker
+
+        br = CircuitBreaker("demo2.example", failure_threshold=2, recovery_timeout=0.5)
+        br.failure()
+        br.failure()
+        assert br.state == "open"
+        br.opened_at = 0.0
+        assert br.allow() is True
+        assert br.state == "half_open"
+        br.success()
+        assert br.state == "closed"
+        assert br.allow() is True
+
+    def test_http_get_retries_zero_still_attempts_once(self, monkeypatch):
+        from utils.circuit_breaker import reset_all
+        from core import recon as recon_mod
+
+        reset_all()
+        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
+        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        calls = {"n": 0}
+
+        class _Resp:
+            status = 200
+            headers = {"Content-Type": "text/plain"}
+
+            def read(self):
+                return b"ok"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def _urlopen(req, timeout=None):
+            calls["n"] += 1
+            return _Resp()
+
+        monkeypatch.setattr(recon_mod.urllib.request, "urlopen", _urlopen)
+        status, body, _hdrs = recon_mod.http_get("https://example.com/x", timeout=1, retries=0)
+        assert status == 200
+        assert body == b"ok"
+        assert calls["n"] == 1
+
+    def test_http_get_skips_network_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from core import recon as recon_mod
+
+        reset_all()
+        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
+        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        br = breaker_for("dead.example")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr(recon_mod.urllib.request, "urlopen", _boom)
+        status, body, hdrs = recon_mod.http_get("https://dead.example/x", timeout=1, retries=3)
+        assert status == 0
+        assert body == b""
+        assert hdrs.get("X-Circuit-Breaker") == "open"
+        assert called["n"] == 0
+
+    def test_free_api_respects_open_circuit(self, db, tmp_path):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from core.pipeline import ReconRunner
+
+        reset_all()
+        br = breaker_for("urlscan.io")
+        for _ in range(5):
+            br.failure()
+        runner = ReconRunner(
+            db=db,
+            base_dir=tmp_path,
+            get_settings=lambda: {},
+            load_hosts_fn=lambda cid: [],
+            recon_module=None,
+            recon_available=False,
+            tool_registry=None,
+        )
+        out = runner._run_free_api("urlscan_io", "example.com")
+        assert out["status"] == "error"
+        assert out.get("circuit") == "open"
+        assert "circuit open" in out["reason"]
+
+    def test_http_get_json_returns_none_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from core import recon as recon_mod
+
+        reset_all()
+        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
+        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        br = breaker_for("dead-json.example")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr(recon_mod.urllib.request, "urlopen", _boom)
+        data = recon_mod._http_get_json("https://dead-json.example/x", timeout=1)
+        assert data is None
+        assert called["n"] == 0
+
+    def test_http_get_json_parses_body_on_200(self, monkeypatch):
+        from utils.circuit_breaker import reset_all
+        from core import recon as recon_mod
+
+        reset_all()
+        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
+        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+
+        class _Resp:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def read(self):
+                return b'{"ok": true, "n": 1}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        monkeypatch.setattr(recon_mod.urllib.request, "urlopen", lambda *a, **k: _Resp())
+        data = recon_mod._http_get_json("https://json.example/x", timeout=1)
+        assert data == {"ok": True, "n": 1}
+
+    def test_hudsonrock_skips_network_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from core import recon as recon_mod
+
+        reset_all()
+        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
+        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        br = breaker_for("cavalier.hudsonrock.com")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr(recon_mod.urllib.request, "urlopen", _boom)
+        out = recon_mod._check_hudsonrock("example.com")
+        assert out.get("error") == "hudsonrock unavailable"
+        assert called["n"] == 0
+
+    def test_cors_scan_skips_network_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from core import recon as recon_mod
+
+        reset_all()
+        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
+        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        br = breaker_for("cors-dead.example")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr(recon_mod.urllib.request, "urlopen", _boom)
+        out = recon_mod.run_cors_scan(
+            [{"host": "cors-dead.example", "status_code": 200, "ports": [443]}]
+        )
+        assert called["n"] == 0
+        assert out["findings"] == []
+        assert out["vulnerable"] == 0
+
+    def test_guarded_urlopen_skips_network_when_circuit_open(self, monkeypatch):
+        from urllib.request import Request
+        from utils.circuit_breaker import CircuitOpen, breaker_for, guarded_urlopen, reset_all
+
+        reset_all()
+        br = breaker_for("dead-hook.example")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        with pytest.raises(CircuitOpen):
+            guarded_urlopen(Request("https://dead-hook.example/x"), timeout=1)
+        assert called["n"] == 0
+
+    def test_guarded_urlopen_timeout_counts_as_failure(self, monkeypatch):
+        from urllib.request import Request
+        from utils.circuit_breaker import breaker_for, guarded_urlopen, reset_all
+
+        reset_all()
+
+        def _boom(*args, **kwargs):
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        with pytest.raises(TimeoutError):
+            guarded_urlopen(Request("https://flaky.example/x"), timeout=1)
+        br = breaker_for("flaky.example")
+        assert br.failures == 1
+        assert br.state == "closed"
+
+    def test_notification_post_skips_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from utils import notifications as n
+
+        reset_all()
+        br = breaker_for("hooks.slack.com")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        ok = n._post_json("https://hooks.slack.com/services/T/B/X", {"text": "hi"})
+        assert ok is False
+        assert called["n"] == 0
+
+    def test_dep_confusion_get_skips_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from utils import dep_confusion as dc
+
+        reset_all()
+        br = breaker_for("registry.npmjs.org")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        status, body = dc._http_get("https://registry.npmjs.org/left-pad", timeout=1)
+        assert status == 0
+        assert body == b""
+        assert called["n"] == 0
+
+    def test_hackertarget_fail_fast_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from utils.tools import HackerTargetTool
+
+        reset_all()
+        br = breaker_for("api.hackertarget.com")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        result = HackerTargetTool().run("example.com", {})
+        assert called["n"] == 0
+        assert result.status == "error"
+        assert "circuit open" in (result.reason or "")
+
+    def test_favicon_skips_target_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from utils.tools import FaviconHashTool
+
+        reset_all()
+        br = breaker_for("dead-fav.example")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        out = FaviconHashTool().run_api(
+            "dead-fav.example", {"settings": {"shodan_key": "x"}}
+        )
+        assert called["n"] == 0
+        assert out == []
+
+    def test_crtsh_fetch_skips_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from utils.tools import registry
+
+        reset_all()
+        br = breaker_for("crt.sh")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        result = registry.get("crtsh").run("example.com", {})
+        assert called["n"] == 0
+        assert result.data.get("total_certs", 0) == 0
+
+    def test_guarded_httpx_skips_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import CircuitOpen, breaker_for, guarded_httpx, reset_all
+
+        reset_all()
+        br = breaker_for("dead-pw.example")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("httpx.request", _boom)
+        with pytest.raises(CircuitOpen):
+            guarded_httpx("GET", "https://dead-pw.example/x", timeout=1)
+        assert called["n"] == 0
+
+    def test_source_map_fetch_skips_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from playwright_agent.source_map import fetch_source_map
+
+        reset_all()
+        br = breaker_for("js.example")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("httpx.request", _boom)
+        out = fetch_source_map("https://js.example/app.js", "app.js.map", timeout=1)
+        assert out is None
+        assert called["n"] == 0
+
+    def test_graphql_introspect_skips_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from playwright_agent.graphql_introspect import introspect
+
+        reset_all()
+        br = breaker_for("gql.example")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("httpx.request", _boom)
+        out = introspect(["https://gql.example/graphql"])
+        assert out["introspection_enabled"] is False
+        assert called["n"] == 0
+
+    def test_fingerprint_host_skips_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from core.checkpoints import fingerprint_host
+
+        reset_all()
+        br = breaker_for("cp.example")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("httpx.request", _boom)
+        assert fingerprint_host("https://cp.example/") is None
+        assert called["n"] == 0
+
+    def test_cloudlist_release_skips_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from utils.tools import CloudlistTool
+
+        reset_all()
+        br = breaker_for("api.github.com")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        assert CloudlistTool()._latest_release() is None
+        assert called["n"] == 0
+
+    def test_google_oauth_skips_when_circuit_open(self, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from core.rbac import exchange_google_code
+
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "id")
+        monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+        reset_all()
+        br = breaker_for("oauth2.googleapis.com")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        assert exchange_google_code("code", "https://localhost/cb") is None
+        assert called["n"] == 0
+
+    def test_chaos_hosts_skip_network(self, monkeypatch):
+        from urllib.request import Request
+        from utils.circuit_breaker import CircuitOpen, guarded_urlopen, reset_all
+
+        reset_all()
+        monkeypatch.setenv("ASM_CHAOS_HOSTS", "chaos.example")
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        with pytest.raises(CircuitOpen):
+            guarded_urlopen(Request("https://chaos.example/x"), timeout=1)
+        assert called["n"] == 0
+
+    def test_http_cache_fetch_skips_when_circuit_open(self, tmp_path, monkeypatch):
+        from utils.circuit_breaker import breaker_for, reset_all
+        from utils.http_cache import HttpCache
+
+        reset_all()
+        br = breaker_for("cached.example")
+        for _ in range(5):
+            br.failure()
+        called = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            called["n"] += 1
+            raise TimeoutError("nope")
+
+        monkeypatch.setattr("urllib.request.urlopen", _boom)
+        cache = HttpCache(str(tmp_path / "c.db"))
+        out = cache.fetch("https://cached.example/x")
+        assert out["status"] == 0
+        assert called["n"] == 0
+
+    def test_s3_put_403_counts_as_breaker_success(self, monkeypatch):
+        from io import BytesIO
+        from urllib.error import HTTPError
+        from utils.circuit_breaker import breaker_for, reset_all
+        from core.recon import run_s3_write_check
+
+        reset_all()
+
+        class _Proc:
+            returncode = 1
+
+        monkeypatch.setattr("core.recon.subprocess.run", lambda *a, **k: _Proc())
+
+        def _urlopen(req, timeout=None, **kwargs):
+            raise HTTPError(
+                "https://no-write-bucket.s3.amazonaws.com/x",
+                403,
+                "Forbidden",
+                hdrs=None,
+                fp=BytesIO(),
+            )
+
+        monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+        out = run_s3_write_check([{"type": "s3_bucket", "bucket": "no-write-bucket"}])
+        br = breaker_for("no-write-bucket.s3.amazonaws.com")
+        assert br.failures == 0
+        assert br.state == "closed"
+        assert out["critical_count"] == 0
+        assert out["total_tested"] == 1
+
+    def test_hermes_enrich_skips_when_circuit_open(self, auth_client):
+        from utils.circuit_breaker import breaker_for, reset_all
+
+        reset_all()
+        br = breaker_for("127.0.0.1")
+        for _ in range(5):
+            br.failure()
+        resp = auth_client.post("/api/ai/enrich-finding", json={"finding": {"title": "x"}})
+        assert resp.status_code == 503
+        assert "circuit open" in (resp.get_json().get("error") or "")
+
+    def test_emit_module_includes_trace_id(self, db, tmp_path):
+        from core.pipeline import ReconRunner
+
+        runner = ReconRunner(
+            db=db,
+            base_dir=tmp_path,
+            get_settings=lambda: {},
+            load_hosts_fn=lambda cid: [],
+            recon_module=None,
+            recon_available=False,
+            tool_registry=None,
+        )
+        runner.pipeline_state["co"] = {
+            "trace_id": "abc123",
+            "module_events": [],
+            "log": [],
+            "module_status": {},
+        }
+        runner._emit_module("co", "dns", "done")
+        ev = runner.pipeline_state["co"]["module_events"][-1]
+        assert ev["trace_id"] == "abc123"
+        assert ev["module"] == "dns"
+
+
+class TestHealth:
+    def test_health_is_public_and_checks_sqlite(self, client, flask_app):
+        from utils.lifecycle import reset_drain
+        reset_drain()
+        resp = client.get("/health")
+        assert resp.status_code in (200, 503)
+        data = resp.get_json()
+        assert data["version"]
+        assert data["checks"]["sqlite"]["ok"] is True
+        assert data["status"] in {"ok", "degraded", "fail", "draining"}
+        resp2 = client.get("/api/health")
+        assert resp2.status_code == resp.status_code
+        assert resp2.get_json()["checks"]["sqlite"]["ok"] is True
+
+    def test_health_echoes_request_id(self, client):
+        from utils.lifecycle import reset_drain
+        reset_drain()
+        resp = client.get("/health", headers={"X-Request-Id": "req-test-1"})
+        assert resp.headers.get("X-Request-Id") == "req-test-1"
+        assert resp.headers.get("X-Trace-Id") == "req-test-1"
+
+    def test_health_503_when_draining(self, db, tmp_path):
+        from utils.health import collect_health
+        from utils.lifecycle import begin_drain, reset_drain
+
+        reset_drain()
+        begin_drain()
+        try:
+            payload, code = collect_health(db=db, data_dir=tmp_path, bin_dir=tmp_path / "bin")
+            assert code == 503
+            assert payload["status"] == "draining"
+            assert payload["checks"]["lifecycle"]["draining"] is True
+        finally:
+            reset_drain()
+
+    def test_collect_health_load_past_peak(self, db, tmp_path):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from utils.health import collect_health
+        from utils.lifecycle import reset_drain
+
+        reset_drain()
+
+        def hit():
+            payload, code = collect_health(db=db, data_dir=tmp_path, bin_dir=tmp_path / "bin")
+            return code, payload.get("version")
+
+        n = 32
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            futs = [pool.submit(hit) for _ in range(n)]
+            results = [f.result() for f in as_completed(futs)]
+        assert len(results) == n
+        assert all(code in (200, 503) for code, _ in results)
+        assert all(ver for _, ver in results)
+
+    def test_collect_health_fails_without_db(self, tmp_path):
+        from utils.health import collect_health
+        from utils.lifecycle import reset_drain
+
+        reset_drain()
+        payload, code = collect_health(data_dir=tmp_path, bin_dir=tmp_path / "bin")
+        assert code == 503
+        assert payload["status"] == "fail"
+        assert payload["checks"]["sqlite"]["ok"] is False
+
+    def test_release_safety_hold_requeues_watchdog_jobs(self, db):
+        job = db.create_job(job_type="pipeline", company_id="co", target="example.com")
+        db.safety_hold_jobs(reason="SAFETY-WATCHDOG: load 99 > 4")
+        held = db.get_job(job["id"])
+        assert held["status"] == "stopped"
+        n = db.release_safety_hold()
+        assert n == 1
+        again = db.get_job(job["id"])
+        assert again["status"] == "pending"
+
+
+class TestPipelineAssignment:
+    def test_cleanup_phase_is_assigned(self):
+        from core.pipeline import PIPELINE_PHASES, pipeline_assigned_modules
+
+        assigned = pipeline_assigned_modules()
+        assert "cleanup" in assigned
+        cleanup = next(p for p in PIPELINE_PHASES if p["id"] == "cleanup")
+        assert cleanup.get("internal") is True
+        assert "cleanup" in (cleanup.get("modules") or [])
+
+    def test_assigned_covers_every_phase_module(self):
+        from core.pipeline import PIPELINE_PHASES, pipeline_assigned_modules
+
+        assigned = pipeline_assigned_modules()
+        for phase in PIPELINE_PHASES:
+            for mod in phase.get("modules") or []:
+                assert mod in assigned, f"{mod} missing from pipeline_assigned_modules()"
+
+    def test_every_phase_module_has_runner(self, db, tmp_path):
+        from core.pipeline import (
+            OPTIONAL_ON_DEMAND,
+            PIPELINE_PHASES,
+            ReconRunner,
+            pipeline_assigned_modules,
+        )
+
+        runner = ReconRunner(
+            db=db,
+            base_dir=tmp_path,
+            get_settings=lambda: {},
+            load_hosts_fn=lambda cid: [],
+            recon_module=None,
+            recon_available=False,
+            tool_registry=None,
+        )
+        keys = set(runner._make_fn_map("t", {"domains": ["example.com"], "name": "t"}, {}, []).keys())
+        assigned = pipeline_assigned_modules()
+        internal = {p["id"] for p in PIPELINE_PHASES if p.get("internal")}
+        missing = sorted(assigned - keys - internal)
+        orphans = sorted(keys - assigned - OPTIONAL_ON_DEMAND)
+        assert missing == [], f"phase modules without runner: {missing}"
+        assert orphans == [], f"runners without a phase: {orphans}"
+        assert "phishing" in keys
+        assert "git_leaks" in assigned
+        assert "amass" in assigned
+        assert "js_discovery" in {p["id"] for p in PIPELINE_PHASES}
+
+    def test_screenshot_host_from_filename(self):
+        from core.pipeline import screenshot_host_from_filename
+
+        assert screenshot_host_from_filename("http---api.portoseguro.com.br-80.jpeg") == "api.portoseguro.com.br"
+        assert screenshot_host_from_filename(
+            "http---api-gw.portobank-crossdomain.hml.portoseguro.com.br-443.jpeg"
+        ) == "api-gw.portobank-crossdomain.hml.portoseguro.com.br"
+        assert screenshot_host_from_filename(
+            "browser_https___catalogo_portoplus_com_br.png"
+        ) == "catalogo.portoplus.com.br"
+
+    def test_module_status_index_prefers_compact_map(self):
+        from core.pipeline import module_status_index
+
+        index = module_status_index({
+            "status": "done",
+            "module_events": [
+                {"module": "phishing", "status": "running"},
+            ],
+            "module_status": {
+                "phishing": {"status": "done", "reason": "ok", "finished_at": "2026-10-07T14:00:00"},
+            },
+        })
+        assert index["phishing"]["status"] == "done"
+        assert index["phishing"]["reason"] == "ok"
+
+
+class TestReconModuleImports:
+    def test_shutil_and_tempfile_are_module_globals(self):
+        import core.recon as recon
+
+        assert callable(recon.shutil.which)
+        assert hasattr(recon.tempfile, "NamedTemporaryFile")
+        assert hasattr(recon.base64, "urlsafe_b64decode")
+
+    def test_api_discovery_extra_does_not_need_has_kr(self):
+        from core.recon import run_api_discovery_extra
+
+        out = run_api_discovery_extra([], ["example.com"])
+        assert "sources_used" in out
+        assert "kiterunner" not in out["sources_used"]
+
+
+class TestSettingsAllowlist:
+    def test_alerting_keys_are_persisted(self):
+        src = ROOT.joinpath("server.py").read_text(encoding="utf-8")
+        for key in (
+            "smtp_host", "smtp_port", "smtp_user", "smtp_pass", "alert_email",
+            "jira_url", "jira_token", "jira_project", "jira_user",
+            "linear_token", "linear_team_id",
+            "defectdojo_url", "slash_token",
+        ):
+            assert f'"{key}"' in src, f"{key} missing from server.py settings allowlist"
+
+
+class TestSurfaceIntel:
+    def test_classify_cname_cloudfront(self):
+        from core.surface_intel import classify_cname
+        kind, label = classify_cname("d2rx95bc40seqr.cloudfront.net")
+        assert kind == "aws_cloudfront"
+        assert "CloudFront" in label
+        kind, label = classify_cname("meuportohotsitehmlcdn.z01.azurefd.net")
+        assert kind == "azure_frontdoor"
+        kind, label = classify_cname("x5ucc5i.impervadns.net")
+        assert kind == "imperva"
+
+    def test_parse_csp_hosts(self):
+        from core.surface_intel import parse_csp_hosts
+        hosts = parse_csp_hosts(
+            "frame-ancestors 'self' https://portoplus.webpremios.digital "
+            "https://meuportohotsitehml.azurewebsites.net https://portoplus.com.br"
+        )
+        assert "portoplus.webpremios.digital" in hosts
+        assert "meuportohotsitehml.azurewebsites.net" in hosts
+        assert "portoplus.com.br" in hosts
+
+    def test_assigned_to_discovery(self):
+        from core.pipeline import PIPELINE_PHASES, pipeline_assigned_modules
+        disc = next(p for p in PIPELINE_PHASES if p["id"] == "discovery")
+        assert "surface_intel" in disc["modules"]
+        intel = next(p for p in PIPELINE_PHASES if p["id"] == "intel")
+        assert "origin_discovery" in intel["modules"]
+        assigned = pipeline_assigned_modules()
+        assert "surface_intel" in assigned
+        assert "origin_discovery" in assigned
+
+    def test_run_surface_intel_mocked(self, monkeypatch):
+        from core import surface_intel as si
+
+        def fake_dns(names):
+            table = {
+                "portoplus.com.br": {"A": ["45.223.41.75"], "AAAA": [], "CNAME": [], "NS": ["ns1.portoseguro.com.br"]},
+                "catalogo.portoplus.com.br": {
+                    "A": [], "AAAA": [],
+                    "CNAME": ["d2rx95bc40seqr.cloudfront.net"],
+                    "NS": [],
+                },
+                "d2rx95bc40seqr.cloudfront.net": {
+                    "A": ["13.227.223.69", "13.227.223.99"],
+                    "AAAA": [],
+                    "CNAME": [],
+                    "NS": ["ns-894.awsdns-47.net", "ns-1174.awsdns-18.org"],
+                },
+                "hml.portoplus.com.br": {
+                    "A": ["150.171.110.36"], "AAAA": [],
+                    "CNAME": ["meuportohotsitehmlcdn.z01.azurefd.net"],
+                    "NS": [],
+                },
+                "staticblob.portoplus.com.br": {"A": [], "AAAA": [], "CNAME": [], "NS": []},
+            }
+            return {n: table.get(n, {"A": [], "AAAA": [], "CNAME": [], "NS": []}) for n in names}
+
+        def fake_http(host):
+            if host.endswith("cloudfront.net") or host.startswith("catalogo."):
+                return {
+                    "host": host, "url": f"https://{host}/", "status": 200 if "cloudfront" in host else 0,
+                    "headers": {},
+                    "server": "AmazonS3" if "cloudfront" in host else "",
+                    "via": "1.1 x.cloudfront.net (CloudFront)" if "cloudfront" in host else "",
+                    "acao": "*" if "cloudfront" in host else "",
+                    "acac": "true" if "cloudfront" in host else "",
+                    "csp": "frame-ancestors 'self' https://meuportohotsitehml.azurewebsites.net https://portoplus.webpremios.digital" if "cloudfront" in host else "",
+                    "x_amz": {}, "body_len": 100, "title": "porto", "error": "" if "cloudfront" in host else "no-response",
+                }
+            return {"host": host, "url": f"https://{host}/", "status": 200, "headers": {},
+                    "server": "", "via": "", "acao": "", "acac": "", "csp": "",
+                    "x_amz": {}, "body_len": 1, "title": "", "error": ""}
+
+        monkeypatch.setattr(si, "_dns_lookup", fake_dns)
+        monkeypatch.setattr(si, "_http_probe", fake_http)
+        monkeypatch.setattr("core.recon.get_ct_certs", lambda d, limit=200: [])
+        out = si.run_surface_intel(["portoplus.com.br"])
+        types = {f["type"] for f in out["findings"]}
+        assert "cdn_fronted" in types
+        assert "staging_host" in types
+        assert "cors" in types
+        assert "staging_in_csp" in types
+        assert "cdn_s3_origin" in types
+        assert "supply_chain_origin" in types
+        assert "cdn_default_hostname" in types
+        assert "catalogo.portoplus.com.br" in out["subdomains"]
+        assert any(e.get("rel") == "cname" for e in out["graph"])
+        cat = next(r for r in out["records"] if r["host"] == "catalogo.portoplus.com.br")
+        assert "13.227.223.69" in cat["a"]
+        assert cat["a_via"] == "cname"
+        assert any(n.endswith("awsdns-47.net") for n in cat["ns"])
+        assert cat["ns_via"] == "cname_target"
+        cors_hosts = {f["host"] for f in out["findings"] if f["type"] == "cors"}
+        assert "catalogo.portoplus.com.br" in cors_hosts
+        csp_hosts = {f["host"] for f in out["findings"] if f["type"] in ("staging_in_csp", "supply_chain_origin")}
+        assert "catalogo.portoplus.com.br" in csp_hosts
+
+    def test_noisy_csp_host(self):
+        from core.surface_intel import noisy_csp_host, supply_chain_host, owners_of
+        assert noisy_csp_host("www.google-analytics.com")
+        assert noisy_csp_host("cdn.jsdelivr.net")
+        assert not noisy_csp_host("portoplus.webpremios.digital")
+        assert supply_chain_host("portoplus.webpremios.digital")
+        assert supply_chain_host("meuportohotsitehml.azurewebsites.net")
+        recs = [{"host": "catalogo.portoplus.com.br", "cname": "d2rx95bc40seqr.cloudfront.net"}]
+        assert owners_of("d2rx95bc40seqr.cloudfront.net", recs, ["portoplus.com.br"]) == [
+            "catalogo.portoplus.com.br"
+        ]
+
+
+class TestBacklogClose:
+    def test_apk_recon_assigned_to_intel(self):
+        from core.pipeline import PIPELINE_PHASES, pipeline_assigned_modules
+        intel = next(p for p in PIPELINE_PHASES if p["id"] == "intel")
+        assert "apk_recon" in intel["modules"]
+        assert "apk_recon" in pipeline_assigned_modules()
+
+    def test_pipeline_ignore_helper_exists(self):
+        from core.pipeline import _ignore
+        _ignore(RuntimeError("x"), "test")
+
+    def test_severity_threshold(self):
+        from utils.alerting import _severity_meets
+        assert _severity_meets("critical", "high_and_above")
+        assert not _severity_meets("low", "high_and_above")
+        assert _severity_meets("medium", "medium_and_above")
+        assert not _severity_meets("info", "critical_only")
+
+    def test_defectdojo_fail_fast_when_circuit_open(self, auth_client):
+        from utils.circuit_breaker import breaker_for, reset_all
+
+        reset_all()
+        br = breaker_for("dojo.example.com")
+        for _ in range(5):
+            br.failure()
+        r = auth_client.post(
+            "/api/export/co1/defectdojo",
+            json={"url": "https://dojo.example.com", "token": "tok"},
+        )
+        assert r.status_code == 503
+        assert r.get_json().get("circuit") == "open"
+
+    def test_sarif_export(self):
+        from reporting_routes import findings_to_sarif
+        payload = findings_to_sarif({
+            "name": "Acme",
+            "findings": [{"title": "Open redirect", "severity": "high", "host": "www.acme.com", "module": "open_redirect"}],
+        })
+        assert payload["version"] == "2.1.0"
+        assert payload["runs"][0]["results"][0]["ruleId"] == "open_redirect"
+
+    def test_openapi(self, auth_client):
+        r = auth_client.get("/api/openapi.json")
+        assert r.status_code == 200
+        spec = r.get_json()
+        assert spec["openapi"].startswith("3.")
+        assert "/api/recon/{cid}/pipeline/{module}" in spec["paths"]
+
+    def test_cancel_module(self, auth_client, flask_app):
+        runner = flask_app._test_runner
+        runner.pipeline_state["co1"] = {"status": "running", "log": [], "skip_modules": []}
+        r = auth_client.delete("/api/recon/co1/pipeline/subfinder")
+        assert r.status_code == 200
+        assert "subfinder" in r.get_json()["skip_modules"]
+        assert runner.pipeline_state["co1"]["skip_modules"] == ["subfinder"]
+
+    def test_alert_rule_min_severity(self, auth_client, db):
+        r = auth_client.post("/api/alert-rules/co1", json={
+            "name": "crit only",
+            "rule_type": "new_host",
+            "channels": ["slack"],
+            "min_severity": "critical_only",
+        })
+        assert r.status_code == 200, r.get_json()
+        rules = db.get_all_alert_rules("co1")
+        assert rules
+        assert rules[0]["min_severity"] == "critical_only"
+
+    def test_invite_flow(self, auth_client, flask_app):
+        r = auth_client.post("/api/admins/invite", json={
+            "username": "analyst1",
+            "email": "a@example.com",
+            "role": "analyst",
+            "scoped_companies": ["co1"],
+        })
+        assert r.status_code == 201, r.get_json()
+        token = r.get_json()["token"]
+        pub = flask_app.test_client().get(f"/api/auth/invite/{token}")
+        assert pub.status_code == 200
+        acc = flask_app.test_client().post(
+            f"/api/auth/invite/{token}/accept",
+            json={"password": "password123"},
+            content_type="application/json",
+        )
+        assert acc.status_code == 201, acc.get_json()
+        assert acc.get_json()["username"] == "analyst1"
+
+    def test_nuclei_template_upload(self, auth_client, tmp_path):
+        r = auth_client.post(
+            "/api/recon/co1/nuclei-templates",
+            json={"name": "custom.yaml", "content": "id: t\ninfo:\n  name: t\n"},
+        )
+        assert r.status_code == 200, r.get_json()
+        listed = auth_client.get("/api/recon/co1/nuclei-templates")
+        assert "custom.yaml" in listed.get_json()["templates"]
+
+    def test_2fa_setup_and_login(self, auth_client, flask_app, db):
+        pyotp = pytest.importorskip("pyotp")
+        r = auth_client.post("/api/auth/2fa/setup")
+        assert r.status_code == 200, r.get_json()
+        secret = r.get_json()["secret"]
+        code = pyotp.TOTP(secret).now()
+        en = auth_client.post("/api/auth/2fa/enable", json={"totp_code": code})
+        assert en.status_code == 200, en.get_json()
+        c = flask_app.test_client()
+        denied = c.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+        assert denied.status_code == 401
+        assert denied.get_json().get("need_2fa") is True
+        ok = c.post("/api/auth/login", json={
+            "username": "admin", "password": "admin", "totp_code": pyotp.TOTP(secret).now(),
+        })
+        assert ok.status_code == 200, ok.get_json()
+
+    def test_legacy_route_shims_are_reexports(self):
+        for name in ("recon_routes.py", "core_routes.py", "ops_routes.py", "asset_routes.py", "scan_routes.py", "reporting_routes.py"):
+            text = ROOT.joinpath(name).read_text(encoding="utf-8")
+            assert "Compatibility shim" in text
+            assert "from routes." in text

@@ -23,8 +23,6 @@ def _gql_endpoints(urls: list[str]) -> list[str]:
 
 
 def introspect(urls: list[str], *, cookies: dict | None = None, user_agent: str = "", timeout: int = 15) -> dict:
-    import httpx
-
     endpoints = _gql_endpoints(urls)
     if not endpoints:
         return {"introspection_enabled": False, "endpoints": []}
@@ -35,8 +33,11 @@ def introspect(urls: list[str], *, cookies: dict | None = None, user_agent: str 
 
     for url in endpoints[:3]:
         try:
-            r = httpx.post(url, json=_INTROSPECT, timeout=timeout, verify=False,
-                           cookies=cookies or {}, headers=headers)
+            from utils.circuit_breaker import guarded_httpx
+            r = guarded_httpx(
+                "POST", url, json=_INTROSPECT, timeout=timeout, verify=False,
+                cookies=cookies or {}, headers=headers,
+            )
         except Exception:
             continue
         if r.status_code != 200:

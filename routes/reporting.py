@@ -14,6 +14,58 @@ from html import escape as _esc
 from flask import Blueprint, Response, jsonify, request, g
 
 
+_SARIF_LEVEL = {"critical": "error", "high": "error", "medium": "warning", "low": "note", "info": "note"}
+
+
+def findings_to_sarif(company: dict) -> dict:
+    findings = company.get("findings") or []
+    rules = {}
+    results = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        rule_id = str(finding.get("module") or finding.get("category") or "finding")[:64] or "finding"
+        if rule_id not in rules:
+            rules[rule_id] = {
+                "id": rule_id,
+                "name": rule_id,
+                "shortDescription": {"text": rule_id},
+            }
+        uri = finding.get("url") or finding.get("host") or company.get("name") or "unknown"
+        if uri and not str(uri).startswith(("http://", "https://", "file:")):
+            uri = f"https://{uri}"
+        results.append({
+            "ruleId": rule_id,
+            "level": _SARIF_LEVEL.get(str(finding.get("severity", "info")).lower(), "note"),
+            "message": {"text": finding.get("title") or finding.get("desc") or "Finding"},
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": uri},
+                }
+            }],
+            "properties": {
+                "severity": finding.get("severity", ""),
+                "host": finding.get("host", ""),
+                "category": finding.get("category", ""),
+            },
+        })
+    return {
+        "version": "2.1.0",
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "Scantrely",
+                    "version": "1.2.0",
+                    "informationUri": "https://github.com/Willian-2-0-0-1/scantrely",
+                    "rules": list(rules.values()),
+                }
+            },
+            "results": results,
+        }],
+    }
+
+
 def _render_report_html(company: dict, findings: list, risk: dict) -> str:
     sev_color = {"critical": "#ef4444", "high": "#f97316", "medium": "#eab308", "low": "#3b82f6", "info": "#6b7280"}
     f_rows = ""
@@ -82,6 +134,7 @@ def create_reporting_blueprint(
     load_whitelist,
     load_asm_data,
     audit,
+    base_dir=None,
 ):
     bp = Blueprint("reporting_routes", __name__)
 
@@ -168,6 +221,42 @@ def create_reporting_blueprint(
                 html,
                 mimetype="text/html",
                 headers={"Content-Disposition": f'attachment; filename="{cid}_report.html"'},
+            )
+
+        if fmt == "sarif":
+            payload = findings_to_sarif(company)
+            return Response(
+                json.dumps(payload, indent=2, ensure_ascii=False),
+                mimetype="application/sarif+json",
+                headers={"Content-Disposition": f'attachment; filename="{cid}_findings.sarif"'},
+            )
+
+        if fmt == "pdf":
+            risk = compute_risk_score(company)
+            whitelist = load_whitelist().get(cid, [])
+            suppressed = {(entry["host"], entry["title"]) for entry in whitelist}
+            active_findings = [
+                finding for finding in company.get("findings", [])
+                if (finding.get("host", ""), finding.get("title", "")) not in suppressed
+            ]
+            html = _render_report_html(company, active_findings, risk)
+            try:
+                from playwright.sync_api import sync_playwright
+            except ImportError:
+                return jsonify({"error": "playwright not installed"}), 500
+            try:
+                with sync_playwright() as pw:
+                    browser = pw.chromium.launch()
+                    page = browser.new_page()
+                    page.set_content(html, wait_until="load")
+                    pdf_bytes = page.pdf(format="A4", print_background=True)
+                    browser.close()
+            except Exception as e:
+                return jsonify({"error": f"PDF generation failed: {e}"}), 500
+            return Response(
+                pdf_bytes,
+                mimetype="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{cid}_report.pdf"'},
             )
 
         return jsonify({"error": f"Unknown format: {fmt}"}), 400

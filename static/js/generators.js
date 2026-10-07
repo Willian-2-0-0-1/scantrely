@@ -4,27 +4,27 @@
 'use strict';
 
 const GEN_MODULES = [
-  { id:'cpf',       icon:'🪪', label:'Gerador de CPF' },
-  { id:'cnpj',      icon:'🏢', label:'Gerador de CNPJ' },
-  { id:'rg',        icon:'📄', label:'Gerador de RG' },
-  { id:'cep',       icon:'📮', label:'Gerador de CEP' },
-  { id:'pis',       icon:'💼', label:'Gerador de PIS/PASEP' },
-  { id:'renavam',   icon:'🚗', label:'Gerador de RENAVAM' },
-  { id:'cnh',       icon:'🪪', label:'Gerador de CNH' },
-  { id:'titulo',    icon:'🗳️', label:'Gerador Título de Eleitor' },
-  { id:'ie',        icon:'🏪', label:'Gerador Inscrição Estadual' },
-  { id:'cartao',    icon:'💳', label:'Gerador Cartão de Crédito' },
-  { id:'placa',     icon:'🚘', label:'Gerador Placa de Veículos' },
-  { id:'veiculo',   icon:'🚙', label:'Gerador de Veículos' },
-  { id:'conta',     icon:'🏦', label:'Gerador de Conta Bancária' },
-  { id:'certidao',  icon:'📜', label:'Gerador de Certidões' },
-  { id:'pessoa',    icon:'👤', label:'Gerador de Pessoas' },
-  { id:'empresa',   icon:'🏭', label:'Gerador de Empresas' },
-  { id:'curriculo', icon:'📋', label:'Gerador de Currículo' },
-  { id:'nome',      icon:'✍️', label:'Gerador de Nomes' },
-  { id:'nick',      icon:'🎮', label:'Gerador de Nicks' },
-  { id:'numeros',   icon:'🔢', label:'Gerador de Números Aleatórios' },
-  { id:'senha',     icon:'🔑', label:'Gerador de Senha' },
+  { id:'cpf',       ico:"idcard", label:'Gerador de CPF' },
+  { id:'cnpj',      ico:"building", label:'Gerador de CNPJ' },
+  { id:'rg',        ico:"file", label:'Gerador de RG' },
+  { id:'cep',       ico:"map", label:'Gerador de CEP' },
+  { id:'pis',       ico:"clipboard", label:'Gerador de PIS/PASEP' },
+  { id:'renavam',   ico:"car", label:'Gerador de RENAVAM' },
+  { id:'cnh',       ico:"idcard", label:'Gerador de CNH' },
+  { id:'titulo',    ico:"vote", label:'Gerador Título de Eleitor' },
+  { id:'ie',        ico:"store", label:'Gerador Inscrição Estadual' },
+  { id:'cartao',    ico:"card", label:'Gerador Cartão de Crédito' },
+  { id:'placa',     ico:"car", label:'Gerador Placa de Veículos' },
+  { id:'veiculo',   ico:"car", label:'Gerador de Veículos' },
+  { id:'conta',     ico:"bank", label:'Gerador de Conta Bancária' },
+  { id:'certidao',  ico:"scroll", label:'Gerador de Certidões' },
+  { id:'pessoa',    ico:"person", label:'Gerador de Pessoas' },
+  { id:'empresa',   ico:"factory", label:'Gerador de Empresas' },
+  { id:'curriculo', ico:"clipboard", label:'Gerador de Currículo' },
+  { id:'nome',      ico:"pencil", label:'Gerador de Nomes' },
+  { id:'nick',      ico:"game", label:'Gerador de Nicks' },
+  { id:'numeros',   ico:"numbers", label:'Gerador de Números Aleatórios' },
+  { id:'senha',     ico:"key", label:'Gerador de Senha' },
 ];
 
 let _genActive = 'cpf';
@@ -463,7 +463,7 @@ function _genPessoaCompleta(paisId='BR', generoId=null, racaId=null){
 // ════════════════════════════════════════════════════════════════════════
 
 window._genBulkResults = [];
-function _bulkCopyAll(){ _copyToClipboard(window._genBulkResults.join('\n')); _genFlash('bulk-copy-all','✓ Copiado!','📋 Copiar Tudo'); }
+function _bulkCopyAll(){ _copyToClipboard(window._genBulkResults.join('\n')); _genFlash('bulk-copy-all','Copiado!','Copiar tudo'); }
 function _bulkDownload(name){
   const blob=new Blob([window._genBulkResults.join('\n')],{type:'text/plain'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
@@ -484,7 +484,7 @@ function _bulkControls(genId, hasMask=true, extra=''){
       </div>
       <div class="gen-bulk-actions" style="margin-top:12px">
         <button class="btn btn-primary" onclick="genExec_${genId}()">↻ Gerar</button>
-        <button class="btn btn-secondary" id="bulk-copy-all" onclick="_bulkCopyAll()">📋 Copiar Tudo</button>
+        <button class="btn btn-secondary" id="bulk-copy-all" onclick="_bulkCopyAll()">Copiar tudo</button>
         <button class="btn btn-secondary" onclick="_bulkDownload('${genId}')">⬇ .TXT</button>
       </div>
     </div>
@@ -512,7 +512,7 @@ function _renderBulkList(id, items){
 // ════════════════════════════════════════════════════════════════════════
 
 function _genRender_cpf(){return`
-  <div class="gen-top-bar"><h2>🪪 Gerador de CPF</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de CPF</h2></div>
   ${_bulkControls('cpf',true)}
   <div class="gen-info-box">Gerado com algoritmo oficial de dois dígitos verificadores.</div>`;
 }
@@ -522,7 +522,7 @@ window.genExec_cpf = function(){
 };
 
 function _genRender_cnpj(){return`
-  <div class="gen-top-bar"><h2>🏢 Gerador de CNPJ</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de CNPJ</h2></div>
   ${_bulkControls('cnpj',true)}
   <div class="gen-info-box">CNPJ com algoritmo oficial de dígitos verificadores.</div>`;
 }
@@ -532,7 +532,7 @@ window.genExec_cnpj = function(){
 };
 
 function _genRender_rg(){return`
-  <div class="gen-top-bar"><h2>📄 Gerador de RG</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de RG</h2></div>
   ${_bulkControls('rg',true)}
   <div class="gen-info-box">Formato SP: XX.XXX.XXX-D (D pode ser dígito ou X).</div>`;
 }
@@ -542,7 +542,7 @@ window.genExec_rg = function(){
 };
 
 function _genRender_cep(){return`
-  <div class="gen-top-bar"><h2>📮 Gerador de CEP</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de CEP</h2></div>
   ${_bulkControls('cep',true)}`;
 }
 window.genExec_cep = function(){
@@ -551,7 +551,7 @@ window.genExec_cep = function(){
 };
 
 function _genRender_pis(){return`
-  <div class="gen-top-bar"><h2>💼 Gerador de PIS/PASEP</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de PIS/PASEP</h2></div>
   ${_bulkControls('pis',true)}
   <div class="gen-info-box">11 dígitos com dígito verificador (mod 11).</div>`;
 }
@@ -561,7 +561,7 @@ window.genExec_pis = function(){
 };
 
 function _genRender_renavam(){return`
-  <div class="gen-top-bar"><h2>🚗 Gerador de RENAVAM</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de RENAVAM</h2></div>
   ${_bulkControls('renavam',true)}`;
 }
 window.genExec_renavam = function(){
@@ -570,7 +570,7 @@ window.genExec_renavam = function(){
 };
 
 function _genRender_cnh(){return`
-  <div class="gen-top-bar"><h2>🪪 Gerador de CNH</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de CNH</h2></div>
   ${_bulkControls('cnh',false)}
   <div class="gen-info-box">11 dígitos com dois dígitos verificadores.</div>`;
 }
@@ -580,7 +580,7 @@ window.genExec_cnh = function(){
 };
 
 function _genRender_titulo(){return`
-  <div class="gen-top-bar"><h2>🗳️ Gerador de Título de Eleitor</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Título de Eleitor</h2></div>
   ${_bulkControls('titulo',true)}`;
 }
 window.genExec_titulo = function(){
@@ -591,7 +591,7 @@ window.genExec_titulo = function(){
 function _genRender_ie(){
   const ufOpts=_IE_STATES.map(u=>`<option value="${u}">${u}</option>`).join('');
   return`
-  <div class="gen-top-bar"><h2>🏪 Gerador de Inscrição Estadual</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Inscrição Estadual</h2></div>
   ${_bulkControls('ie',true,`<div class="gen-field-group"><label>Estado</label><select id="ie-uf" class="gen-input"><option value="R">Aleatório</option>${ufOpts}</select></div>`)}`;
 }
 window.genExec_ie = function(){
@@ -601,9 +601,9 @@ window.genExec_ie = function(){
 };
 
 function _genRender_cartao(){return`
-  <div class="gen-top-bar"><h2>💳 Gerador de Cartão de Crédito</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Cartão de Crédito</h2></div>
   ${_bulkControls('cartao',true,`<div class="gen-field-group"><label>Bandeira</label><select id="cartao-brand" class="gen-input"><option value="R">Aleatória</option>${_CARDS.map(c=>`<option value="${c.n}">${c.n}</option>`).join('')}</select></div>`)}
-  <div class="gen-info-box">⚠️ Algoritmo Luhn. Números fictícios — não possuem fundos reais.</div>`;
+  <div class="gen-info-box">Algoritmo Luhn. Números fictícios — não possuem fundos reais.</div>`;
 }
 window.genExec_cartao = function(){
   const q=parseInt(document.getElementById('cartao-qty')?.value||1),m=document.getElementById('cartao-mask')?.value==='1';
@@ -622,7 +622,7 @@ window.genExec_cartao = function(){
 };
 
 function _genRender_placa(){return`
-  <div class="gen-top-bar"><h2>🚘 Gerador de Placa de Veículos</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Placa de Veículos</h2></div>
   ${_bulkControls('placa',true,`<div class="gen-field-group"><label>Tipo</label><select id="placa-tipo" class="gen-input"><option value="R">Aleatório</option><option value="mercosul">Mercosul (ABC1D23)</option><option value="antiga">Antigo (ABC-1234)</option></select></div>`)}`;
 }
 window.genExec_placa = function(){
@@ -632,7 +632,7 @@ window.genExec_placa = function(){
 };
 
 function _genRender_veiculo(){return`
-  <div class="gen-top-bar"><h2>🚙 Gerador de Veículos</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Veículos</h2></div>
   ${_bulkControls('veiculo',false)}`;
 }
 window.genExec_veiculo = function(){
@@ -641,7 +641,7 @@ window.genExec_veiculo = function(){
 };
 
 function _genRender_conta(){return`
-  <div class="gen-top-bar"><h2>🏦 Gerador de Conta Bancária</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Conta Bancária</h2></div>
   ${_bulkControls('conta',false)}
   <div class="gen-info-box">Dados fictícios — não representam contas reais.</div>`;
 }
@@ -651,7 +651,7 @@ window.genExec_conta = function(){
 };
 
 function _genRender_certidao(){return`
-  <div class="gen-top-bar"><h2>📜 Gerador de Certidões</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Certidões</h2></div>
   ${_bulkControls('certidao',false,`<div class="gen-field-group"><label>Tipo</label><select id="cert-tipo" class="gen-input"><option value="R">Aleatório</option><option>Nascimento</option><option>Casamento</option><option>Óbito</option></select></div>`)}`;
 }
 window.genExec_certidao = function(){
@@ -662,7 +662,7 @@ window.genExec_certidao = function(){
 
 function _genRender_nome(){
   return`
-  <div class="gen-top-bar"><h2>✍️ Gerador de Nomes</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Nomes</h2></div>
   ${_bulkControls('nome',false,`
     <div class="gen-field-group"><label>País</label><select id="nome-pais" class="gen-input"><option value="R">Aleatório</option>${_PAIS_IDS.map(p=>`<option value="${p}">${_PAISES[p].bandeira} ${_PAISES[p].nome}</option>`).join('')}</select></div>
     <div class="gen-field-group"><label>Gênero</label><select id="nome-genero" class="gen-input"><option value="R">Aleatório</option><option value="M">Masculino</option><option value="F">Feminino</option></select></div>`)}`;
@@ -682,7 +682,7 @@ window.genExec_nome = function(){
 };
 
 function _genRender_nick(){return`
-  <div class="gen-top-bar"><h2>🎮 Gerador de Nicks</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Nicks</h2></div>
   ${_bulkControls('nick',false)}`;
 }
 const _NICK_ADJ=['Dark','Shadow','Wolf','Fire','Iron','Storm','Cyber','Pixel','Neo','Ghost','Dead','Night','Steel','Blood','Crystal','Void','Toxic','Hyper','Ultra','Chaos'];
@@ -693,7 +693,7 @@ window.genExec_nick = function(){
 };
 
 function _genRender_senha(){return`
-  <div class="gen-top-bar"><h2>🔑 Gerador de Senha</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Senha</h2></div>
   <div class="gen-card">
     <div class="gen-bulk-row">
       <div class="gen-field-group"><label>Quantidade</label><input type="number" id="senha-qty" value="1" min="1" max="1000" class="gen-input" style="width:90px"></div>
@@ -707,7 +707,7 @@ function _genRender_senha(){return`
     </div>
     <div class="gen-bulk-actions" style="margin-top:12px">
       <button class="btn btn-primary" onclick="genExec_senha()">↻ Gerar</button>
-      <button class="btn btn-secondary" id="bulk-copy-all" onclick="_bulkCopyAll()">📋 Copiar Tudo</button>
+      <button class="btn btn-secondary" id="bulk-copy-all" onclick="_bulkCopyAll()">Copiar tudo</button>
       <button class="btn btn-secondary" onclick="_bulkDownload('senhas')">⬇ .TXT</button>
     </div>
   </div>
@@ -725,7 +725,7 @@ window.genExec_senha = function(){
 
 
 function _genRender_numeros(){return`
-  <div class="gen-top-bar"><h2>🔢 Gerador de Números Aleatórios</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Números Aleatórios</h2></div>
   <div class="gen-card">
     <div class="gen-bulk-row">
       <div class="gen-field-group"><label>De</label><input type="number" id="num-min" value="1" class="gen-input" style="width:90px"></div>
@@ -735,7 +735,7 @@ function _genRender_numeros(){return`
     </div>
     <div class="gen-bulk-actions" style="margin-top:12px">
       <button class="btn btn-primary" onclick="genExec_numeros()">↻ Gerar</button>
-      <button class="btn btn-secondary" id="bulk-copy-all" onclick="_bulkCopyAll()">📋 Copiar Tudo</button>
+      <button class="btn btn-secondary" id="bulk-copy-all" onclick="_bulkCopyAll()">Copiar tudo</button>
       <button class="btn btn-secondary" onclick="_bulkDownload('numeros')">⬇ .TXT</button>
     </div>
   </div>
@@ -762,10 +762,10 @@ function _genRender_pessoa(){
   const paisOpts=_PAIS_IDS.map(p=>`<option value="${p}">${_PAISES[p].bandeira} ${_PAISES[p].nome}</option>`).join('');
   const racaOpts=_RACAS.map(r=>`<option value="${r.id}">${r.pt}</option>`).join('');
   return`
-  <div class="gen-top-bar"><h2>👤 Gerador de Pessoas</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Pessoas</h2></div>
   <div class="gen-card">
     <div class="gen-bulk-row">
-      <div class="gen-field-group"><label>País</label><select id="p-pais" class="gen-input"><option value="R">🌍 Aleatório</option>${paisOpts}</select></div>
+      <div class="gen-field-group"><label>País</label><select id="p-pais" class="gen-input"><option value="R">Aleatório</option>${paisOpts}</select></div>
       <div class="gen-field-group"><label>Gênero</label><select id="p-gen" class="gen-input"><option value="R">Aleatório</option><option value="M">Masculino</option><option value="F">Feminino</option><option value="NB">Não-binário</option><option value="TM">Trans Masc.</option><option value="TF">Trans Fem.</option></select></div>
       <div class="gen-field-group"><label>Raça/Etnia</label><select id="p-raca" class="gen-input"><option value="R">Aleatória</option>${racaOpts}</select></div>
       <div class="gen-field-group"><label>Quantidade</label><input type="number" id="p-qty" value="1" min="1" max="50" class="gen-input" style="width:80px"></div>
@@ -811,19 +811,19 @@ function _renderPessoaCard(p){
       </div>
     </div>
     <div class="pessoa-sections">
-      ${_pSection('🪪 Identificação',_pF('Nome Completo',p.nome_completo)+_pF('Primeiro Nome',p.primeiro_nome)+_pF('Sobrenome',p.sobrenome)+_pF('Gênero',p.genero)+_pF('Raça/Etnia',p.raca)+_pF('País',p.pais)+_pF('Naturalidade',p.naturalidade)+_pF('Data de Nascimento',p.nascimento)+_pF('Idade',p.idade)+_pF('Signo',p.signo)+_pF('Tipo Sanguíneo',p.tipo_sanguineo)+_pF('Estado Civil',p.estado_civil)+_pF('Filhos',p.filhos))}
-      ${_pSection('📞 Contato',_pF('Email Principal',p.email_principal)+_pF('Email Alternativo',p.email_alternativo)+_pF('Telefone',p.telefone)+_pF('Telefone 2',p.telefone_2))}
-      ${_pSection('🏠 Endereço',_pF('Rua/Número',p.endereco)+_pF('Cidade',p.cidade)+_pF('Estado',p.estado)+_pF('CEP/ZIP',p.cep)+_pF('País',p.pais_nome))}
-      ${_pSection('📋 Documentos',docs)}
-      ${_pSection('🧬 Características Físicas',_pF('Altura',p.altura)+_pF('Peso',p.peso)+_pF('Cor dos Olhos',p.cor_olhos)+_pF('Tom de Pele',p.tom_pele)+_pF('Cor do Cabelo',p.cor_cabelo)+_pF('Tipo de Cabelo',p.tipo_cabelo))}
-      ${_pSection('🧠 Personalidade',_pF('MBTI',p.mbti)+_pF('Linguagem do Amor',p.linguagem_amor)+_pF('Estilo de Aprendizado',p.estilo_aprendizado))}
-      ${_pSection('💼 Profissional',_pF('Ocupação',p.ocupacao)+_pF('Área',p.area)+_pF('Empresa',p.empresa)+_pF('Escolaridade',p.escolaridade)+_pF('Renda',p.renda))}
-      ${_pSection('❤️ Preferências',_pF('Cor Favorita',p.cor_favorita)+_pF('Estação do Ano',p.estacao_favorita)+_pF('Período do Dia',p.hora_preferida)+_pF('Comida Favorita',p.comida)+_pF('Fruta Favorita',p.fruta_favorita)+_pF('Intolerâncias',p.intolerancias)+_pF('Esporte',p.esporte)+_pF('Hobbies',hobbies)+_pF('Música',musica)+_pF('Gênero de Filme',p.filme)+_pF('Gênero de Livro',p.livro)+_pF('Streaming',streaming)+_pF('Rede Social',p.rede_social)+_pF('Pet',p.pet)+_pF('Estilo de Vida',p.estilo_vida)+_pF('Viagem',p.viagem))}
-      ${_pSection('🕊️ Crenças',_pF('Religião',p.religiao)+_pF('Visão Política',p.politica))}
-      ${_pSection('💻 Digital',_pF('Username',p.username)+_pF('Senha',p.senha)+_pF('IP',p.ip)+_pF('Moeda',p.moeda))}
+      ${_pSection('Identificação',_pF('Nome Completo',p.nome_completo)+_pF('Primeiro Nome',p.primeiro_nome)+_pF('Sobrenome',p.sobrenome)+_pF('Gênero',p.genero)+_pF('Raça/Etnia',p.raca)+_pF('País',p.pais)+_pF('Naturalidade',p.naturalidade)+_pF('Data de Nascimento',p.nascimento)+_pF('Idade',p.idade)+_pF('Signo',p.signo)+_pF('Tipo Sanguíneo',p.tipo_sanguineo)+_pF('Estado Civil',p.estado_civil)+_pF('Filhos',p.filhos))}
+      ${_pSection('Contato',_pF('Email Principal',p.email_principal)+_pF('Email Alternativo',p.email_alternativo)+_pF('Telefone',p.telefone)+_pF('Telefone 2',p.telefone_2))}
+      ${_pSection('Endereço',_pF('Rua/Número',p.endereco)+_pF('Cidade',p.cidade)+_pF('Estado',p.estado)+_pF('CEP/ZIP',p.cep)+_pF('País',p.pais_nome))}
+      ${_pSection('Documentos',docs)}
+      ${_pSection('Características físicas',_pF('Altura',p.altura)+_pF('Peso',p.peso)+_pF('Cor dos Olhos',p.cor_olhos)+_pF('Tom de Pele',p.tom_pele)+_pF('Cor do Cabelo',p.cor_cabelo)+_pF('Tipo de Cabelo',p.tipo_cabelo))}
+      ${_pSection('Personalidade',_pF('MBTI',p.mbti)+_pF('Linguagem do Amor',p.linguagem_amor)+_pF('Estilo de Aprendizado',p.estilo_aprendizado))}
+      ${_pSection('Profissional',_pF('Ocupação',p.ocupacao)+_pF('Área',p.area)+_pF('Empresa',p.empresa)+_pF('Escolaridade',p.escolaridade)+_pF('Renda',p.renda))}
+      ${_pSection('Preferências',_pF('Cor Favorita',p.cor_favorita)+_pF('Estação do Ano',p.estacao_favorita)+_pF('Período do Dia',p.hora_preferida)+_pF('Comida Favorita',p.comida)+_pF('Fruta Favorita',p.fruta_favorita)+_pF('Intolerâncias',p.intolerancias)+_pF('Esporte',p.esporte)+_pF('Hobbies',hobbies)+_pF('Música',musica)+_pF('Gênero de Filme',p.filme)+_pF('Gênero de Livro',p.livro)+_pF('Streaming',streaming)+_pF('Rede Social',p.rede_social)+_pF('Pet',p.pet)+_pF('Estilo de Vida',p.estilo_vida)+_pF('Viagem',p.viagem))}
+      ${_pSection('Crenças',_pF('Religião',p.religiao)+_pF('Visão Política',p.politica))}
+      ${_pSection('Digital',_pF('Username',p.username)+_pF('Senha',p.senha)+_pF('IP',p.ip)+_pF('Moeda',p.moeda))}
     </div>
     <div style="margin-top:12px;display:flex;gap:8px">
-      <button class="btn btn-secondary" onclick="_copyToClipboard(JSON.stringify(window._genBulkResults[0]||'',null,2))">📋 Copiar JSON</button>
+      <button class="btn btn-secondary" onclick="_copyToClipboard(JSON.stringify(window._genBulkResults[0]||'',null,2))">Copiar JSON</button>
     </div>
   </div>`;
 }
@@ -838,7 +838,7 @@ function _genEmpresa(){
   return{razao:`${nome} ${tipo}`,cnpj:_genCNPJ(true),ie:_genIE('SP',true).replace('/000',''),tipo,ramo:_pick(_RAMOS),email:`contato@${nome.toLowerCase().replace(/\s+/g,'')}.com.br`,telefone:_genPhone('BR'),cep:_genCEP(true)};
 }
 function _genRender_empresa(){return`
-  <div class="gen-top-bar"><h2>🏭 Gerador de Empresas</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Empresas</h2></div>
   ${_bulkControls('empresa',false)}`;
 }
 window.genExec_empresa = function(){
@@ -850,7 +850,7 @@ const _SKILLS=[['JavaScript','React','Node.js','TypeScript'],['Python','Django',
 const _CARGOS=['Desenvolvedor(a) Pleno','Desenvolvedor(a) Sênior','Analista de Sistemas','Tech Lead','DevOps Engineer'];
 const _EMP_JOBS=['TechCorp Brasil','Softex Solutions','CloudMaster S.A.','AgileWorks','ByteForce Digital'];
 function _genRender_curriculo(){return`
-  <div class="gen-top-bar"><h2>📋 Gerador de Currículo</h2></div>
+  <div class="gen-top-bar"><h2>Gerador de Currículo</h2></div>
   ${_bulkControls('curriculo',false,`<div class="gen-field-group"><label>País</label><select id="cv-pais" class="gen-input"><option value="R">Aleatório</option>${_PAIS_IDS.map(p=>`<option value="${p}">${_PAISES[p].bandeira} ${_PAISES[p].nome}</option>`).join('')}</select></div>`)}`;
 }
 window.genExec_curriculo = function(){
@@ -879,7 +879,7 @@ function showGeneratorsPage(){
             <input type="text" placeholder="Filtrar..." id="gen-filter-input" oninput="genFilterSidebar()" autocomplete="off">
           </div>
           <div id="gen-sidebar-list">
-            ${GEN_MODULES.map(m=>`<button class="gen-nav-item ${m.id===_genActive?'active':''}" id="gen-nav-${m.id}" onclick="genActivate('${m.id}')"><span class="gen-nav-icon">${m.icon}</span><span class="gen-nav-label">${m.label}</span></button>`).join('')}
+            ${GEN_MODULES.map(m=>`<button class="gen-nav-item ${m.id===_genActive?'active':''}" id="gen-nav-${m.id}" onclick="genActivate('${m.id}')"><span class="gen-nav-icon" data-ico="${m.ico||'hash'}" aria-hidden="true"></span><span class="gen-nav-label">${m.label}</span></button>`).join('')}
           </div>
         </aside>
         <main class="gen-main" id="gen-main"></main>
