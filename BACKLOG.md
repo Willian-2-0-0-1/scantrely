@@ -1,6 +1,6 @@
 # Backlog — Scantrely ASM Platform
 
-> Última atualização: 2026-10-07 (1.2.0)  
+> Última atualização: 2026-10-07 (1.3.0)  
 > Legenda de prioridade: 🔴 Alta · 🟡 Média · 🟢 Baixa
 
 ---
@@ -69,6 +69,7 @@ Nenhum bug confirmado aberto nesta lista. B1–B7 foram corrigidos em 2026-10-07
 
 | Commit | O que foi corrigido |
 |--------|---------------------|
+| local 2026-10-07 | 1.3.0 — Exposição estilo Cavalier: parser Hudson Rock rico, persist hudsonrock-only, busca ao vivo, aba + workspace |
 | local 2026-10-07 | 1.2.0 — Hermes breaker; S3 403 = sucesso; http_cache guarded; drain SIGTERM; X-Request-Id + pipeline trace_id; chaos `ASM_CHAOS_HOSTS`; load test `/health` |
 | local 2026-10-07 | 1.1.13 — OAuth Google com timeout + breaker; bootstrap cloudlist (GitHub/ZIP) via `guarded_urlopen` |
 | local 2026-10-07 | 1.1.12 — Playwright httpx (source map, GraphQL, race, client-trust, probe) e checkpoints via `guarded_httpx` |

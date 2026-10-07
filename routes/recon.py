@@ -120,9 +120,75 @@ def create_recon_blueprint(
             "optional_on_demand": sorted(OPTIONAL_ON_DEMAND),
         })
 
+    def _company_row(cid: str):
+        data = load_asm_data() or {}
+        companies = data.get("companies") or []
+        co = next((item for item in companies if item.get("id") == cid), None)
+        return data, co
+
+    def _lookup_exposure(query: str) -> tuple[dict, int]:
+        from core.recon import classify_infostealer_query, lookup_infostealer
+        kind, value = classify_infostealer_query(query)
+        if not kind:
+            return {"error": "invalid query"}, 400
+        result = lookup_infostealer(value)
+        if isinstance(result, dict) and result.get("error") == "hudsonrock unavailable":
+            return result, 503
+        return result, 200
+
+    @bp.route("/api/intel/exposure", methods=["POST"])
+    @require_auth
+    def api_intel_exposure():
+        body = request.get_json(silent=True) or {}
+        query = body.get("q") or body.get("query") or request.args.get("q") or ""
+        result, status = _lookup_exposure(query)
+        return jsonify(result), status
+
+    @bp.route("/api/recon/<cid>/exposure", methods=["GET", "POST"])
+    @require_auth
+    def api_company_exposure(cid: str):
+        data, co = _company_row(cid)
+        if co is None:
+            return jsonify({"error": "Company not found"}), 404
+        if request.method == "GET":
+            breach = co.get("breach_data") if isinstance(co.get("breach_data"), dict) else {}
+            return jsonify({
+                "company_id": cid,
+                "query": (co.get("domains") or [""])[0],
+                "hudsonrock": breach.get("hudsonrock") if isinstance(breach.get("hudsonrock"), dict) else {},
+                "breach_data": breach,
+            })
+        body = request.get_json(silent=True) or {}
+        query = body.get("q") or body.get("query") or ""
+        if not str(query).strip():
+            query = (co.get("domains") or [""])[0]
+        result, status = _lookup_exposure(query)
+        if status != 200:
+            return jsonify(result), status
+        kind = result.get("kind") if isinstance(result, dict) else ""
+        saved = False
+        if kind == "domain":
+            breach = co.get("breach_data") if isinstance(co.get("breach_data"), dict) else {}
+            breach = dict(breach)
+            breach["hudsonrock"] = result
+            breach["domain"] = result.get("query") or query
+            if "scanned_at" not in breach:
+                breach["scanned_at"] = datetime.now().isoformat(timespec="seconds")
+            co["breach_data"] = breach
+            save_asm_data(data)
+            saved = True
+        return jsonify({
+            "company_id": cid,
+            "saved": saved,
+            "kind": kind,
+            "hudsonrock": result,
+        })
+
     @bp.route("/api/recon/<cid>/<module>", methods=["POST"])
     @require_auth
     def api_run_recon(cid: str, module: str):
+        if module == "exposure":
+            return api_company_exposure(cid)
         if module in {"playwright", "playwright_recon"}:
             return api_run_playwright(cid)
         if module not in recon_modules:
@@ -883,6 +949,8 @@ def create_recon_blueprint(
     @bp.route("/api/recon/<cid>/<module>", methods=["GET", "DELETE"])
     @require_auth
     def api_get_recon(cid: str, module: str):
+        if module == "exposure" and request.method == "GET":
+            return api_company_exposure(cid)
         if request.method == "DELETE" and module == "data":
             data = load_asm_data()
             co = next((c for c in data.get("companies", []) if c.get("id") == cid), None)

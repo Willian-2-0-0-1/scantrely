@@ -6,7 +6,7 @@
 ![Módulos](https://img.shields.io/badge/modulos-50+-green)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow)
 ![Playwright](https://img.shields.io/badge/playwright-headless-purple)
-![Versão](https://img.shields.io/badge/versão-1.2.0-orange)
+![Versão](https://img.shields.io/badge/versão-1.3.0-orange)
 ![Licença](https://img.shields.io/badge/license-MIT-lightgrey)
 
 > Veja o [CHANGELOG.md](CHANGELOG.md) para a lista completa de novidades e correções de cada versão.
@@ -23,7 +23,7 @@
 
 ### Intel & OSINT (Fase 1b)
 - **Shodan** — hosts, portas, vulnerabilidades por IP
-- **Breach data** — HIBP, Dehashed, LeakIX, IntelX
+- **Breach data** — Hudson Rock Cavalier (infostealers), HIBP, Dehashed, LeakIX, IntelX. Aba **Exposição** + `POST /api/intel/exposure`
 - **CertStream** — monitoramento em tempo real de CT logs
 - **Mobile** — APK recon via Google Play + apkleaks (URIs, endpoints, secrets)
 - **Phishing** — monitoramento de phishing, opensquat

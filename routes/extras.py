@@ -20,7 +20,7 @@ _OPENAPI = {
     "openapi": "3.0.3",
     "info": {
         "title": "Scantrely ASM API",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "description": "Local External Attack Surface Monitoring API.",
     },
     "servers": [{"url": "/", "description": "Local"}],
@@ -54,6 +54,11 @@ _OPENAPI = {
         "/api/alert-rules/{cid}": {"get": {"summary": "Alert rules"}, "post": {"summary": "Create rule"}},
         "/api/stats-history/{cid}": {"get": {"summary": "Historical scan stats"}},
         "/api/integrations/slash": {"post": {"summary": "Slack/Discord /scan command"}},
+        "/api/intel/exposure": {"post": {"summary": "Live infostealer OSINT lookup by domain or email"}},
+        "/api/recon/{cid}/exposure": {
+            "get": {"summary": "Stored infostealer exposure for a company"},
+            "post": {"summary": "Lookup and save domain exposure for a company"},
+        },
         "/api/openapi.json": {"get": {"summary": "This specification"}},
     },
 }

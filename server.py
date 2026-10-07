@@ -418,7 +418,7 @@ def serve_generators_js():
 
 @app.route("/js/<name>.js")
 def serve_extra_js(name: str):
-    allowed = {"theme", "asset-graph", "extras", "icons"}
+    allowed = {"theme", "asset-graph", "extras", "icons", "exposure"}
     if name not in allowed:
         abort(404)
     path = BASE / "static" / "js" / f"{name}.js"
@@ -1099,7 +1099,7 @@ if __name__ == "__main__":
 
     print(f"""
   ===================================
-    ASM Platform - Server v1.2.0
+    ASM Platform - Server v1.3.0
   ===================================
   -> http://{args.host}:{args.port}
   -> Database       : {DB_FILE}

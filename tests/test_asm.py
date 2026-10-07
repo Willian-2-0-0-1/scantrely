@@ -1999,6 +1999,84 @@ class TestCircuitBreaker:
         assert out.get("error") == "hudsonrock unavailable"
         assert called["n"] == 0
 
+    def test_hudsonrock_parses_cavalier_domain_payload(self):
+        from core.recon import parse_hudsonrock_domain, parse_hudsonrock_email, classify_infostealer_query
+
+        assert classify_infostealer_query("https://WWW.PortoSeguro.com.br/path") == ("domain", "portoseguro.com.br")
+        assert classify_infostealer_query("Name@Empresa.com") == ("email", "name@empresa.com")
+        assert classify_infostealer_query("not a query") == ("", "")
+        payload = {
+            "employees": 89,
+            "users": 37392,
+            "third_parties": 189,
+            "total": 37670,
+            "totalStealers": 10,
+            "totalUrls": 918,
+            "last_employee_compromised": "2026-08-20",
+            "last_user_compromised": "2026-10-05",
+            "stealerFamilies": {"total": 20000, "RedLine": 13350, "Lumma": 6055},
+            "employeePasswords": {"totalPass": 26, "weak": {"qty": 24, "perc": 92.31}, "strong": {"qty": 1, "perc": 3.85}},
+            "userPasswords": [{"_key": "Medium", "_value": 8}],
+            "thirdPartyDomains": [{"domain": "login.microsoftonline.com", "occurrence": 12}],
+            "applications": [{"keyword": "adfs"}, {"keyword": "vpn"}],
+            "antiviruses": {"total": 5, "list": [{"name": "Windows Defender", "count": 3}]},
+            "logo": "https://example.com/logo.png",
+            "data": {
+                "employees_urls": [
+                    {"url": "https://vpn.example.com", "type": "vpn", "occurrence": 4},
+                    {"url": "https://*****", "type": "hidden", "occurrence": 9},
+                ],
+                "clients_urls": [{"url": "https://app.example.com", "type": "web", "occurrence": 2}],
+                "stealer_families": [{"_key": "ignored_nested", "_value": 1}],
+            },
+        }
+        out = parse_hudsonrock_domain(payload, "portoseguro.com.br")
+        assert out["employees"] == 89
+        assert out["users"] == 37392
+        assert out["stealer_families"]["RedLine"] == 13350
+        assert "total" not in out["stealer_families"]
+        assert "ignored_nested" not in out["stealer_families"]
+        assert out["last_employee_compromised"] == "2026-08-20"
+        assert out["employee_passwords"]["weak"] == 24
+        assert "totalPass" not in out["employee_passwords"]
+        assert out["third_party_domains"][0]["domain"] == "login.microsoftonline.com"
+        assert out["third_party_domains"][0]["count"] == 12
+        assert out["applications"]["adfs"] == 1
+        assert out["antiviruses"]["Windows Defender"] == 3
+        assert out["internal_urls"][0]["url"] == "https://vpn.example.com"
+        assert all("*****" not in row["url"] for row in out["employees_urls"])
+        email = parse_hudsonrock_email({
+            "message": "ok",
+            "total_corporate_services": 2,
+            "total_user_services": 5,
+            "stealers": [{
+                "date_compromised": "2026-01-01",
+                "computer_name": "PC",
+                "malware_path": "C:\\\\steal.exe",
+                "ip": "1.2.***",
+                "top_logins": ["a***@x.com"],
+                "top_passwords": ["*****"],
+                "operating_system": "Windows",
+                "antiviruses": ["Defender"],
+            }],
+        }, "a@x.com")
+        assert email["kind"] == "email"
+        assert email["stealer_count"] == 1
+        assert "malware_path" not in email["stealers"][0]
+        assert email["stealers"][0]["top_passwords"] == ["*****"]
+
+    def test_hudsonrock_only_breach_persists(self):
+        from pipeline import breach_data_should_persist
+        assert breach_data_should_persist({
+            "total_findings": 0,
+            "hudsonrock": {"employees": 2, "users": 0, "error": None},
+        })
+        assert not breach_data_should_persist({
+            "total_findings": 0,
+            "hudsonrock": {"error": "hudsonrock unavailable"},
+        })
+        assert not breach_data_should_persist({})
+
     def test_cors_scan_skips_network_when_circuit_open(self, monkeypatch):
         from utils.circuit_breaker import breaker_for, reset_all
         from core import recon as recon_mod
@@ -2371,6 +2449,84 @@ class TestCircuitBreaker:
         assert ev["module"] == "dns"
 
 
+class TestExposureRoutes:
+    def test_intel_exposure_requires_auth(self, client):
+        resp = client.post("/api/intel/exposure", json={"q": "example.com"})
+        assert resp.status_code == 401
+
+    def test_company_exposure_requires_auth(self, client):
+        resp = client.get("/api/recon/co/exposure")
+        assert resp.status_code == 401
+
+    def test_intel_exposure_rejects_invalid_query(self, auth_client):
+        resp = auth_client.post("/api/intel/exposure", json={"q": "not a query"})
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "invalid query"
+
+    def test_company_exposure_get_stored(self, auth_client, db):
+        db.save_asm_data({
+            "companies": [{
+                "id": "co",
+                "name": "Co",
+                "domains": ["example.com"],
+                "breach_data": {
+                    "hudsonrock": {
+                        "source": "hudsonrock_cavalier",
+                        "kind": "domain",
+                        "employees": 3,
+                        "users": 10,
+                        "stealer_families": {"RedLine": 2},
+                    }
+                },
+            }]
+        })
+        resp = auth_client.get("/api/recon/co/exposure")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["hudsonrock"]["employees"] == 3
+        assert data["hudsonrock"]["stealer_families"]["RedLine"] == 2
+
+    def test_intel_exposure_uses_lookup(self, auth_client, monkeypatch):
+        monkeypatch.setattr(
+            "core.recon.lookup_infostealer",
+            lambda q: {
+                "source": "hudsonrock_cavalier",
+                "kind": "domain",
+                "query": q,
+                "employees": 4,
+                "users": 8,
+                "stealer_families": {"Lumma": 1},
+            },
+        )
+        resp = auth_client.post("/api/intel/exposure", json={"q": "example.com"})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["employees"] == 4
+        assert data["kind"] == "domain"
+
+    def test_company_exposure_post_saves_domain(self, auth_client, db, monkeypatch):
+        db.save_asm_data({
+            "companies": [{"id": "co", "name": "Co", "domains": ["example.com"]}]
+        })
+        monkeypatch.setattr(
+            "core.recon.lookup_infostealer",
+            lambda q: {
+                "source": "hudsonrock_cavalier",
+                "kind": "domain",
+                "query": q,
+                "employees": 7,
+                "users": 1,
+            },
+        )
+        resp = auth_client.post("/api/recon/co/exposure", json={})
+        assert resp.status_code == 200, resp.get_json()
+        body = resp.get_json()
+        assert body["saved"] is True
+        assert body["hudsonrock"]["employees"] == 7
+        stored = db.load_asm_data()["companies"][0]["breach_data"]["hudsonrock"]
+        assert stored["employees"] == 7
+
+
 class TestHealth:
     def test_health_is_public_and_checks_sqlite(self, client, flask_app):
         from utils.lifecycle import reset_drain
@@ -2705,6 +2861,8 @@ class TestBacklogClose:
         spec = r.get_json()
         assert spec["openapi"].startswith("3.")
         assert "/api/recon/{cid}/pipeline/{module}" in spec["paths"]
+        assert "/api/intel/exposure" in spec["paths"]
+        assert "/api/recon/{cid}/exposure" in spec["paths"]
 
     def test_cancel_module(self, auth_client, flask_app):
         runner = flask_app._test_runner

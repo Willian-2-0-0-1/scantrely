@@ -243,6 +243,8 @@
       if (typeof showPage === 'function') showPage('bbprograms');
     } else if (parts[0] === 'generators') {
       if (typeof showPage === 'function') showPage('generators');
+    } else if (parts[0] === 'exposure') {
+      if (typeof showPage === 'function') showPage('exposure');
     }
   }
 

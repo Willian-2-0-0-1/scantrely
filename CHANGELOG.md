@@ -2,6 +2,16 @@
 
 Todas as mudanças relevantes do projeto são documentadas aqui.
 
+## [1.3.0] - 2026-10-07
+
+### Exposição (ideias do Cavalier, marca Scantrely)
+
+- Parser Hudson Rock lê `stealerFamilies`, datas de último compromisso, força de senha, `thirdPartyDomains`, aplicações, URLs de funcionários/clientes (pula `*****`), antivírus e logo.
+- Lookup por e-mail sanitizado: sem `malware_path`; logins e senhas seguem mascarados como a API pública já devolve.
+- Persistência do módulo Breach grava hudsonrock mesmo sem LeakIX/HIBP/TruffleHog.
+- `POST /api/intel/exposure` busca ao vivo. `GET/POST /api/recon/<cid>/exposure` lê e atualiza a empresa. Auth obrigatória. Circuit breaker do host Cavalier.
+- Aba da empresa + página Workspace search-first, cards KPI, barras de família com rótulo (não só cor), split de senha, terceiros e tabelas de URL.
+
 ## [1.2.0] - 2026-10-07
 
 ### Robustez

@@ -691,6 +691,32 @@ def _select_browser_targets(hosts: list, domains: list, max_targets: int=12) -> 
             selected.insert(0, primary)
     return selected[:max_targets]
 
+
+def breach_data_should_persist(breach_data) -> bool:
+    """Keep hudsonrock-only intel even when LeakIX/HIBP/TruffleHog are empty."""
+    if not isinstance(breach_data, dict) or not breach_data:
+        return False
+    try:
+        if int(breach_data.get('total_findings') or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    for key in ('trufflehog', 'hibp', 'leakix', 'dehashed', 'breaches', 'credentials'):
+        if breach_data.get(key):
+            return True
+    hr = breach_data.get('hudsonrock')
+    if not isinstance(hr, dict) or hr.get('error'):
+        return False
+    for key in ('employees', 'users', 'third_parties', 'total', 'stealer_count', 'total_urls'):
+        try:
+            if int(hr.get(key) or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    if hr.get('stealer_families') or hr.get('stealers'):
+        return True
+    return False
+
 class ReconRunner:
     """Owns recon result state and executes modules / full pipeline."""
 
@@ -2766,7 +2792,7 @@ class ReconRunner:
             co_data['shodan_hosts'] = shodan_hosts
             log(f'  ↳ Shodan: {len(shodan_hosts)} hosts persistidos')
         breach_data = _result('breach')
-        if breach_data.get('total_findings', 0) > 0 or breach_data.get('trufflehog') or breach_data.get('hibp') or breach_data.get('leakix') or breach_data.get('dehashed') or breach_data.get('breaches') or breach_data.get('credentials'):
+        if breach_data_should_persist(breach_data):
             co_data['breach_data'] = breach_data
             log(f"  ↳ Breach: {breach_data.get('total_findings', 0)} findings persistidos")
         dns_data = _result('dns')

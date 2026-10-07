@@ -611,6 +611,7 @@ function _syncSidebarActive() {
     generators:  "nav-generators",
     admins:      "nav-admins",
     runtime:     "nav-runtime",
+    exposure:    "nav-exposure",
   };
   if (page === "company" && state.currentId) {
     document.querySelectorAll(".nav-co").forEach(el => {
@@ -911,6 +912,10 @@ function renderCompanyView(co) {
   const tcOperation = document.getElementById("tc-operation");
   if (tcOperation) tcOperation.textContent = "";
   document.getElementById("tc-screenshots").textContent = "";
+  const hrStored = (co.breach_data && co.breach_data.hudsonrock) || {};
+  const expCount = (Number(hrStored.employees||0) + Number(hrStored.users||0) + Number(hrStored.stealer_count||0));
+  const tcExp = document.getElementById("tc-exposure");
+  if (tcExp) tcExp.textContent = expCount > 0 ? String(expCount) : "";
   // Async: load counts without blocking render
   if (SERVER_MODE) {
     fetch(`/api/screenshots/${co.id}`, {headers:_authHeaders()}).then(r=>r.ok?r.json():[]).then(d=>{
@@ -1054,7 +1059,8 @@ const TAB_GROUPS = {
   vulns:       ['vulns'],
   logs:        ['toollogs'],
   pipeline:    ['pipeline', 'terminal'],
-  graph:       ['graph']
+  graph:       ['graph'],
+  exposure:    ['exposure']
 };
 const TAB_TO_GROUP = {};
 (function() { for (const [g, tabs] of Object.entries(TAB_GROUPS)) tabs.forEach(t => TAB_TO_GROUP[t] = g); })();
@@ -1093,6 +1099,7 @@ async function switchGroup(groupName, btn) {
     if (name === 'timeline'     && co)              renderTimelineTab(co);
     if (name === 'diff'         && co)              renderDiffTab(co);
     if (name === 'graph'        && co && typeof renderAssetGraph === 'function') renderAssetGraph(co);
+    if (name === 'exposure'     && co && typeof renderExposureTab === 'function') renderExposureTab(co);
   }
 
   if (typeof ASM !== 'undefined' && ASM.updateHash && state.currentId) {
@@ -1175,6 +1182,7 @@ const _GC_DEFS = {
   screenshots:['screenshots'],
   operation:  ['operation'],
   logs:       ['toollogs'],
+  exposure:   ['exposure'],
 };
 
 function updateGroupCounts() {
@@ -1900,7 +1908,8 @@ function renderOverview(co) {
         </div>
       </div>
     </div>
-    <div id="ov-trends" style="margin-top:16px"></div>`;
+    <div id="ov-trends" style="margin-top:16px"></div>
+    ${typeof renderExposureTeaser === "function" ? renderExposureTeaser(co) : ""}`;
 }
 
 async function loadScanHistory(cid) {
@@ -6492,6 +6501,17 @@ function showPage(page) {
     if (typeof showGeneratorsPage === 'function') showGeneratorsPage();
     _i18n();
     if (typeof ASM !== 'undefined' && ASM.updateHash) ASM.updateHash('generators');
+  } else if (page === "exposure") {
+    state.page = "exposure";
+    state.currentId = null;
+    stopLiveDataPolling();
+    document.body.classList.remove("executive-home");
+    document.getElementById("view-exposure").classList.add("active");
+    _syncSidebarActive();
+    _crumb('crumb_exposure');
+    if (typeof showExposurePage === 'function') showExposurePage();
+    _i18n();
+    if (typeof ASM !== 'undefined' && ASM.updateHash) ASM.updateHash('exposure');
   }
 }
 
@@ -9513,7 +9533,7 @@ const RECON_MODULES = [
   {id:"related",   label:"Related Domains",          desc:".net, .org, .com variations of your domains",      eta:"~30s", ico:"link"},
   {id:"cloud",     label:"Cloud Asset Discovery",    desc:"S3, Azure Blob, GCP buckets — public/private",     eta:"~3m", ico:"cloud"},
   {id:"wayback",   label:"Wayback / GAU Mining",     desc:"Historical URLs with .env, .git, admin paths",     eta:"~2m", ico:"archive"},
-  {id:"breach",    label:"Breach Intelligence",      desc:"LeakIX, HaveIBeenPwned, TruffleHog secrets",       eta:"~30s", ico:"bug"},
+  {id:"breach",    label:"Breach Intelligence",      desc:"Hudson Rock Cavalier, LeakIX, HaveIBeenPwned, TruffleHog", eta:"~30s", ico:"lock"},
   {id:"shodan",    label:"Shodan Intelligence",      desc:"Open ports, CVEs and banners per IP",              eta:"~1m", ico:"radar"},
   {id:"portscan",  label:"Port Scan",                desc:"naabu/nmap — risky exposed services",              eta:"~5m", ico:"plug"},
   {id:"services",  label:"Exposed Paths",            desc:"/.git /.env /admin /swagger /actuator…",          eta:"~5m", ico:"folder"},
