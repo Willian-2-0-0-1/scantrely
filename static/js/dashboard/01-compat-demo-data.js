@@ -511,7 +511,7 @@ function _infraRow(key, value, cls = "") {
 function _portSummaryCard(label, value, accent = "") {
   return `
     <div class="job-kpi ${accent}">
-      <div class="job-kpi-num">${Number(value || 0)}</div>
+      <div class="job-kpi-num">${typeof value === "string" && value !== "" && !/^\d+$/.test(value) ? esc(value) : Number(value || 0)}</div>
       <div class="job-kpi-label">${esc(label)}</div>
     </div>`;
 }

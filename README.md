@@ -6,12 +6,13 @@ Plataforma local de **Attack Surface Management**: descobre subdomínios, portas
 
 1. Cadastre a empresa e os domínios no escopo.
 2. Rode o scan (aba **Técnico → Pipeline**).
-3. Abra **Prioridades**: até 10 ações ordenadas, cada uma com *o quê, onde, por quê e como corrigir*.
+3. A empresa abre na **matriz de ativos**: um host por linha e uma coluna por assunto (achados por severidade, CVE, secrets, endpoints, portas, infra, tech, captura). Filtre, ordene, ligue/desligue colunas e clique numa contagem para ver o detalhe do host.
+4. **Prioridades** reúne até 10 ações ordenadas, cada uma com *o quê, onde, por quê e como corrigir*.
 
 | Aba | Para quê |
 |---|---|
+| **Ativos** (tela inicial) | Matriz de hosts + domínios, endpoints, portas, infraestrutura, screenshots, grafo, typosquat |
 | **Prioridades** | O que fazer agora |
-| **Ativos** | Hosts, domínios, portas, infraestrutura, screenshots, grafo, typosquat |
 | **Vulnerabilidades** | Todos os achados, CVEs, supply chain, segredos em JS |
 | **Exposição** | Credenciais vazadas / infostealers |
 | **Técnico** | Pipeline, logs, alertas, histórico, diferenças entre scans |

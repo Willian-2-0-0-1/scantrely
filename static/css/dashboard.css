@@ -4239,3 +4239,10 @@ button.am-sev:hover, button.am-count:hover { filter:brightness(1.25); }
 .ai-table td:first-child, .ai-table th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
 .ai-table thead th:first-child { z-index: 3; }
 .ai-table-wrap .pager { position: sticky; left: 0; bottom: 0; background: var(--surface); }
+@media (max-width: 720px) {
+  .ai-filter .ai-search { flex: 1 1 100%; }
+  .ai-filter .ai-drop { flex: 1 1 calc(50% - 10px); min-width: 0; padding: 9px 8px; font-size: .72rem; }
+  .am-chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .am-chip { white-space: nowrap; }
+  .ai-table-wrap { max-height: none; }
+}

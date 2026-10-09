@@ -411,17 +411,15 @@ async function renderVulnsTab(co) {
       </div>
     </div>`;
 
-  html += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
-    ${_vStatCard(esc(_opT("vuln_kpi_confirmed", "Confirmadas")), findings.length, "var(--green)")}
-    ${_vStatCard(esc(_opT("vuln_kpi_critical", "Críticas")), summaryCards.critical, "var(--red)")}
-    ${_vStatCard(esc(_opT("vuln_kpi_high", "Altas")), summaryCards.high, "var(--orange)")}
-    ${_vStatCard(esc(_opT("vuln_kpi_medium", "Médias")), summaryCards.medium, "var(--yellow)")}
-    ${_vStatCard(esc(_opT("vuln_kpi_low", "Baixas")), summaryCards.low, "var(--blue)")}
-    ${_vStatCard("CORS", cors.length, "var(--red)")}
-    ${_vStatCard("GraphQL", graphql.length, "var(--teal)")}
-    ${_vStatCard("Nuclei", nuclei.length, "var(--orange)")}
-    ${_vStatCard("Takeover", takeover.length, "var(--yellow)")}
-  </div>`;
+  // Só o que tem dado: a quebra por severidade já aparece nos cartões logo abaixo.
+  const _kpis = [
+    [esc(_opT("vuln_kpi_confirmed", "Confirmadas")), findings.length, "var(--green)"],
+    ["CORS", cors.length, "var(--red)"],
+    ["GraphQL", graphql.length, "var(--teal)"],
+    ["Nuclei", nuclei.length, "var(--orange)"],
+    ["Takeover", takeover.length, "var(--yellow)"],
+  ].filter(([, n], i) => i === 0 || n > 0);
+  html += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">${_kpis.map(k => _vStatCard(...k)).join("")}</div>`;
 
   if (findings.length) {
     html += `<div class="findings-summary">
@@ -460,8 +458,8 @@ async function renderVulnsTab(co) {
 
   html += `<div style="margin-top:18px">`;
 
-  const _sectionHdr = (title, count) => `<div style="font-size:.9rem;font-weight:700;color:var(--text);margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)">${esc(title)} <span style="color:var(--text3);font-weight:400">(${count})</span></div>`;
-  const _emptySection = msg => `<div style="padding:12px 16px;color:var(--text3);font-size:.8rem;background:var(--card);border:1px solid var(--border);border-radius:8px">${esc(msg)}</div>`;
+  const _sectionHdr = (title, count) => !count ? "" : `<div style="font-size:.9rem;font-weight:700;color:var(--text);margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)">${esc(title)} <span style="color:var(--text3);font-weight:400">(${count})</span></div>`;
+  const _emptySection = () => "";   // seção sem dados não aparece
 
   html += _sectionHdr(_opT("vuln_cors_title", "CORS mal configurado"), cors.length);
   if (!cors.length) {

@@ -16,6 +16,9 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 - `core/recon.py` dividido em `core/reconlib/*` (36 módulos); corrigidos NameError latentes em xss_scan e na checagem de CNAME do salesforce_recon.
 - `static/js/dashboard.js` (12 mil linhas) dividido em `static/js/dashboard/NN-*.js` (17 arquivos, mesma ordem); render de todos os painéis conferido antes/depois. `priorities.js` não era servido pelo servidor (404): corrigido; rota `/js/<nome>.js` genérica.
 - **Tela principal = matriz de ativos** (Ativos → Hosts, abre por padrão): uma linha por host e colunas Achados (por severidade), CVE, Secrets, Endpoints, Portas, Infra, Tech, Título, IP, Captura; Domínio opcional. Filtros por achados/“contém”/domínio, atalhos com contagem e menu “Colunas” (salvo no navegador). Ordenação por qualquer coluna (numéricas do maior para o menor).
+- Gaveta do host com achados, CVE, secrets e endpoints; contagens da matriz abrem a seção certa; exportação CSV/JSON respeita os filtros e leva todas as colunas; cabeçalho e coluna URL fixos; layout compacto no celular.
+- Corrigidos: `_downloadBlob` inexistente (botões CSV/JSON de hosts e achados não faziam nada), "NaN" no cartão de ferramenta da aba Portas, data velha no rodapé.
+- Vulnerabilidades: seções e cartões sem dados não aparecem; KPIs de severidade deixaram de duplicar os cartões.
 - Docs movidos para `docs/`, README curto e backlog único.
 
 ## [1.3.11] - 2026-10-08

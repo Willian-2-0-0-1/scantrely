@@ -572,7 +572,7 @@ async function loadTrendCharts(cid) {
 // ════════════════════════════════════════════════════════════════════════
 async function initApp() {
   if (SERVER_MODE) {
-    document.getElementById("footer-gen").textContent = "Server mode";
+    document.getElementById("footer-gen").textContent = "Último scan";
     await reloadServerData();
     await loadPlaywrightDefaults();
     _startJobCountPoll();
@@ -580,8 +580,10 @@ async function initApp() {
     document.getElementById("footer-gen").textContent =
       typeof window.ASM_DATA !== "undefined" ? "Live data" : "Demo data";
   }
-  const gen = DATA.generated
-    ? new Date(DATA.generated).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})
+  // Rodapé: data do scan mais recente (DATA.generated é só a data do arquivo de dados e fica velha).
+  const _latest = allCompanies().map(c => c.last_scan || c.pipeline_ran_at || c.updated_at).filter(Boolean).sort().pop() || DATA.generated;
+  const gen = _latest
+    ? new Date(_latest).toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})
     : "—";
   document.getElementById("footer-date").textContent = gen;
   renderSidebar();
