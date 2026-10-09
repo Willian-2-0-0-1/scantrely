@@ -473,7 +473,7 @@ async function renderVulnsTab(co) {
       const acac = f.acac === true || f.acac === "true" || f.acac === 1;
       return `<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          ${_sevBadge(f.severity || "high")}
+          ${_sevBadge(["critical","high"].includes(f.severity) ? "medium" : (f.severity || "medium"))}
           <span style="font-weight:700;color:var(--teal)">${esc(f.host || "")}</span>
           <span style="font-size:.72rem;color:var(--text3)">${esc(f.test || "")}</span>
         </div>

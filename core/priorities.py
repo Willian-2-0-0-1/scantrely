@@ -61,7 +61,8 @@ _PLAYBOOK: dict[str, tuple[str, str, str, str]] = {
 }
 _MAX_ACTIONS = 10
 # tipos de higiene/monitoramento: nunca aparecem acima deste nível, mesmo que o achado bruto seja mais alto
-_SEV_CAP = {"header": "medium", "brand_domain_exposure": "medium", "vhost": "low"}
+_SEV_CAP = {"cors": "medium", "header": "medium", "vendor_fingerprint": "medium", "waf_bypass": "medium",
+            "staging_in_csp": "low", "brand_domain_exposure": "medium", "vhost": "low"}
 SEV_WEIGHT_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 

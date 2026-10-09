@@ -68,15 +68,17 @@ def test_brand_exposure_capped_at_high():
     assert tidy_findings([f], {})[0]["severity"] == "high"
 
 
-def test_stored_chains_on_non_inventory_hosts_removed_and_stats_updated():
-    co = {"id": "c", "hosts": [{"host": "www.x.com"}], "stats": {},
+def test_stored_chains_are_recomputed_over_inventory_hosts_only():
+    co = {"id": "c", "hosts": [{"host": "www.x.com", "waf": "Direct"}], "stats": {},
           "findings": [
+              {"key": "r", "type": "git_exposed", "severity": "critical", "title": "real", "host": "www.x.com", "desc": "[core]\nrepositoryformatversion = 0", "value": "/.git/config"},
               {"key": "1", "type": "attack_chain", "severity": "critical", "title": "c1", "host": "typo.com"},
-              {"key": "2", "type": "attack_chain", "severity": "critical", "title": "c2", "host": "www.x.com"},
+              {"key": "2", "type": "attack_chain", "severity": "critical", "title": "c2", "host": "outro.x.com"},
           ]}
     rep = tidy_stored({"companies": [co]})
-    assert rep == {"c": (2, 1)}
-    assert co["stats"]["findings_critical"] == 1
+    chains = [f for f in co["findings"] if f["type"] == "attack_chain"]
+    assert [c["key"] for c in chains] == ["chain-nowaf-critical-www.x.com"]   # recalculada; as antigas fora do inventário saem
+    assert rep == {"c": (3, 2)} and co["stats"]["findings_critical"] == 2
 
 
 def test_priorities_rank_and_skip_derived_chains():
@@ -199,6 +201,44 @@ def test_cors_error_response_is_downgraded(monkeypatch):
     monkeypatch.setattr(cors, "http_get", fake)
     out = cors.run_cors_scan([{"host": "api.x.com", "status_code": 403, "ports": ["443"]}])
     f = out["findings"][0]
-    assert f["severity"] == "high" and "HTTP 403" in f["desc"]          # crítico → alto quando a raiz responde 403
+    assert f["severity"] == "low" and "HTTP 403" in f["desc"]            # com credenciais seria médio; raiz 403 rebaixa para baixo
     monkeypatch.setattr(cors, "http_get", lambda url, **k: (200, b"ok", {"access-control-allow-origin": (k.get("extra_headers") or {}).get("Origin", ""), "access-control-allow-credentials": "true"}))
-    assert cors.run_cors_scan([{"host": "api.x.com", "status_code": 200, "ports": ["443"]}])["findings"][0]["severity"] == "critical"
+    assert cors.run_cors_scan([{"host": "api.x.com", "status_code": 200, "ports": ["443"]}])["findings"][0]["severity"] == "medium"   # CORS nunca passa de médio
+
+
+def test_cors_is_capped_at_medium_everywhere_and_chains_follow():
+    from core.finding_hygiene import derive_attack_chains, tidy_findings, tidy_stored
+    cors = {"key": "c1", "type": "cors", "module": "cors_scan", "severity": "critical", "title": "CORS", "host": "api.x.com"}
+    assert tidy_findings([cors], {})[0]["severity"] == "medium"
+    co = {"id": "c", "hosts": [{"host": "api.x.com", "status_code": 200, "waf": "Direct"}], "stats": {},
+          "findings": [dict(cors), {"key": "old", "type": "attack_chain", "severity": "critical", "host": "api.x.com", "title": "Sem WAF + Finding Crítico: api.x.com"}]}
+    tidy_stored({"companies": [co]})
+    assert [f["severity"] for f in co["findings"] if f["type"] == "cors"] == ["medium"]
+    assert not [f for f in co["findings"] if f["type"] == "attack_chain"]          # a cadeia só existia por causa do "crítico"
+    assert co["stats"]["findings_critical"] == 0
+    assert derive_attack_chains([{"key": "x", "type": "git_exposed", "severity": "critical", "host": "api.x.com", "title": "t"}], co)[0]["key"] == "chain-nowaf-critical-api.x.com"
+
+
+def test_cve_without_detected_version_is_only_possible():
+    from core.finding_hygiene import cap_unversioned_cves, tidy_findings
+    co = {"cve_findings": [{"cve_id": "CVE-1", "severity": "critical", "detected_version": None, "score": 9.6},
+                           {"cve_id": "CVE-2", "severity": "high", "detected_version": "1.2.3", "score": 8},
+                           {"cve_id": "CVE-3", "severity": "high", "detected_version": None, "kev": True}],
+          "cve_summary": {"critical": 1, "high": 2, "medium": 0, "low": 0}}
+    f1 = {"key": "a", "type": "cve", "value": "CVE-1", "severity": "critical", "title": "CVE-1", "host": "h"}
+    f2 = {"key": "b", "type": "cve", "value": "CVE-2", "severity": "high", "title": "CVE-2", "host": "h"}
+    out = {f["value"]: f for f in tidy_findings([f1, f2], co)}
+    assert out["CVE-1"]["severity"] == "low" and out["CVE-1"]["verified"] is False
+    assert out["CVE-2"]["severity"] == "high"                      # versão detectada e dentro da faixa: mantém
+    sev = {c["cve_id"]: c["severity"] for c in co["cve_findings"]}
+    assert sev == {"CVE-1": "low", "CVE-2": "high", "CVE-3": "medium"}   # KEV sem versão: no máximo médio
+    assert co["cve_summary"] == {"critical": 0, "high": 1, "medium": 1, "low": 1}
+
+
+def test_weak_evidence_types_are_capped():
+    from core.finding_hygiene import SEVERITY_CAPS, cap_severity
+    assert cap_severity("cors", "critical") == "medium" and cap_severity("cors", "low") == "low"
+    assert cap_severity("vendor_fingerprint", "high") == "medium" and cap_severity("waf_bypass", "critical") == "medium"
+    assert cap_severity("header", "high") == "medium" and cap_severity("staging_in_csp", "high") == "low"
+    assert cap_severity("git_exposed", "critical") == "critical"      # sem teto: exige prova (conteúdo de git)
+    assert SEVERITY_CAPS["cors"] == "medium"

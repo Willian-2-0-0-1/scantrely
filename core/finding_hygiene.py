@@ -11,7 +11,27 @@ from datetime import datetime
 
 from core.verification import looks_like_git
 
+INACTIVE_STATUSES = ("not_seen", "resolved")
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+# Teto de severidade por tipo: evidência fraca (presença, heurística, padrão de URL) não pode ser crítica/alta.
+# CORS é decisão explícita do usuário; os demais seguem a regra "sem prova de exploração, no máximo médio".
+SEVERITY_CAPS = {
+    "cors": "medium",               # nunca crítico (decisão do usuário)
+    "header": "medium",             # cabeçalho/cookie ausente
+    "vendor_fingerprint": "medium", # só a presença do produto; não prova a versão vulnerável
+    "waf_bypass": "medium",         # heurística: tamanho da resposta mudou com X-Forwarded-For
+    "staging_in_csp": "low",        # referência a staging na CSP
+    "brand_domain_exposure": "high",
+}
+_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
+def cap_severity(ftype: str, severity: str) -> str:
+    cap = SEVERITY_CAPS.get(ftype)
+    if cap and _RANK.get(severity, 4) < _RANK[cap]:
+        return cap
+    return severity
+
 _VHOST_WILDCARD_MIN = 3          # respostas idênticas em ≥3 vhosts do mesmo IP = padrão do WAF/CDN
 _VHOST_ADMIN_WORDS = ("admin", "staging", "dev", "test", "internal", "jenkins", "gitlab")
 _MOJIBAKE = re.compile(r"[ÃÂâð][^\x00-\x7f]{1,11}")
@@ -152,6 +172,32 @@ def _false_positive_git(f: dict) -> bool:
     return not looks_like_git(path, evidence)
 
 
+def unversioned_cve_severity(severity: str, kev: bool = False) -> str:
+    """CVE casada só pelo nome do produto (versão não detectada) é "possível", nunca crítica/alta."""
+    if kev:
+        return "medium"
+    return severity if severity in ("low", "info") else "low"
+
+
+def cap_unversioned_cves(co_data: dict) -> set[str]:
+    """Rebaixa em `cve_findings` as CVEs sem versão detectada e devolve os ids afetados."""
+    capped: set[str] = set()
+    findings = co_data.get("cve_findings")
+    if not isinstance(findings, list):
+        return capped
+    for c in findings:
+        if isinstance(c, dict) and not c.get("detected_version") and c.get("severity") not in ("low", "info"):
+            c.setdefault("severity_raw", c.get("severity"))
+            c["severity"] = unversioned_cve_severity(c.get("severity"), bool(c.get("kev")))
+            c["verified"] = False
+            capped.add(c.get("cve_id"))
+    summ = co_data.get("cve_summary")
+    if isinstance(summ, dict) and capped:
+        for k in ("critical", "high", "medium", "low"):
+            summ[k] = sum(1 for c in findings if isinstance(c, dict) and c.get("severity") == k)
+    return capped
+
+
 def dismiss_false_positives(findings: list[dict], co_data: dict) -> list[dict]:
     """Tira da lista achados que não resistem à verificação e guarda o motivo em `auto_dismissed`."""
     keep, dismissed = [], co_data.setdefault("auto_dismissed", [])
@@ -174,13 +220,16 @@ def dismiss_false_positives(findings: list[dict], co_data: dict) -> list[dict]:
 def tidy_findings(findings: list[dict], co_data: dict) -> list[dict]:
     """Aplica todas as regras de higiene. Idempotente."""
     out: list[dict] = []
+    unversioned = cap_unversioned_cves(co_data)
     for f in dismiss_false_positives(findings, co_data):
         f = dict(f)
+        if f.get("type") == "cve" and f.get("value") in unversioned:
+            f["severity"] = unversioned_cve_severity(f.get("severity"), bool(f.get("kev")))
+            f["verified"] = False
         for k in ("title", "desc"):
             if k in f:
                 f[k] = repair_mojibake(f[k])
-        if f.get("type") == "brand_domain_exposure" and f.get("severity") == "critical":
-            f["severity"] = "high"          # typosquat é risco de marca, não de infraestrutura
+        f["severity"] = cap_severity(f.get("type"), f.get("severity"))
         out.append(f)
 
     vd = co_data.get("vhost_data")
@@ -188,6 +237,43 @@ def tidy_findings(findings: list[dict], co_data: dict) -> list[dict]:
         out = [f for f in out if f.get("type") != "vhost"] + vhost_findings(vd)
 
     return _group_headers(out)
+
+
+def derive_attack_chains(findings: list[dict], co_data: dict) -> list[dict]:
+    """Correlações por host do inventário (só achados ativos). Derivadas: recalculadas a cada scan."""
+    inventory = chain_candidate_hosts(co_data)
+    by_host: dict[str, list[dict]] = defaultdict(list)
+    for f in findings:
+        h = f.get("host", "")
+        if h and h in inventory and f.get("type") not in ("brand_domain_exposure", "attack_chain") \
+                and f.get("status") not in INACTIVE_STATUSES:
+            by_host[h].append(f)
+    hosts = {h.get("host"): h for h in co_data.get("hosts", [])}
+    out: list[dict] = []
+
+    def chain(key, title, severity, desc, host):
+        out.append({"key": key, "type": "attack_chain", "title": title, "severity": severity, "category": "correlation",
+                    "desc": desc, "host": host, "module": "correlation"})
+
+    for host, hf in by_host.items():
+        sevs = {f.get("severity") for f in hf}
+        has_secret = any(f.get("type") == "secret" for f in hf)
+        has_dangerous_port = any(f.get("type") in ("default_creds", "infra_exposure") for f in hf)
+        if has_secret and has_dangerous_port and "critical" not in sevs:
+            types = [(f.get("metadata") or {}).get("type", "?") for f in hf if f.get("type") == "secret"]
+            chain(f"chain-secret-port-{host}", f"Attack Chain: Secret + Exposed Service em {host}", "critical",
+                  f"Host {host} tem simultaneamente: segredos expostos ({', '.join(set(types))}) e serviços sem autenticação. "
+                  "Combinação permite acesso direto ao ambiente.", host)
+        waf = (hosts.get(host) or {}).get("waf")
+        if (not waf or waf == "Direct") and "critical" in sevs:
+            chain(f"chain-nowaf-critical-{host}", f"Sem WAF + Finding Crítico: {host}", "critical",
+                  f"Host {host} expõe finding crítico diretamente à internet (sem WAF). Exploração direta sem obstáculos.", host)
+        critical_high = [f for f in hf if f.get("severity") in ("critical", "high")]
+        if len(critical_high) >= 3:
+            titles = [f.get("title", "")[:50] for f in critical_high[:3]]
+            chain(f"chain-concentrated-{host}", f"Superfície concentrada: {len(critical_high)} findings críticos/altos em {host}", "high",
+                  f"Host {host} concentra {len(critical_high)} findings de alta severidade: {'; '.join(titles)}", host)
+    return out
 
 
 def chain_candidate_hosts(co_data: dict) -> set[str]:
@@ -210,10 +296,9 @@ def tidy_stored(data: dict) -> dict:
         if not before:
             continue
         # cadeias antigas ficam; as inválidas (host fora do inventário / typosquat) saem
-        inv = chain_candidate_hosts(co)
-        keep = [f for f in before
-                if not (f.get("type") == "attack_chain" and f.get("host") not in inv)]
+        keep = [f for f in before if f.get("type") != "attack_chain"]
         after = tidy_findings(keep, co)
+        after += derive_attack_chains(after, co)    # cadeias são derivadas: recalculadas sobre os achados já corrigidos
         co["findings"] = after
         co.setdefault("stats", {}).update(count_by_severity(after))
         report[co.get("id")] = (len(before), len(after))

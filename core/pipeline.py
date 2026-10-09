@@ -3608,41 +3608,10 @@ class ReconRunner:
                 all_findings.append({'key': key, 'type': 'tableau_exposure', 'title': f.get('title', ''), 'severity': f.get('severity', 'medium'), 'category': 'exposure', 'desc': f.get('desc', ''), 'host': f.get('host', ''), 'value': f.get('url', ''), 'url': f.get('url', ''), 'module': 'tableau', 'request_raw': f.get('request_raw', ''), 'response_raw': f.get('response_raw', ''), 'matched': f.get('matched', '')})
                 existing_keys.add(key)
         all_findings = merge_persist_findings(co_data, all_findings, existing_keys, primary_domain)
-        from core.finding_hygiene import tidy_findings, chain_candidate_hosts
+        from core.finding_hygiene import tidy_findings, derive_attack_chains
         all_findings = tidy_findings(all_findings, co_data)
         existing_keys = {f.get('key') or f.get('title') or '' for f in all_findings}
-        _inventory_hosts = chain_candidate_hosts(co_data)
-        host_findings: dict[str, list[dict]] = {}
-        for f in all_findings:
-            h = f.get('host', '')
-            if h and h in _inventory_hosts and f.get('type') != 'brand_domain_exposure':
-                host_findings.setdefault(h, []).append(f)
-        for hostname, hf in host_findings.items():
-            sevs = {f.get('severity') for f in hf}
-            cats = {f.get('category') for f in hf}
-            has_secret = any((f.get('type') == 'secret' for f in hf))
-            has_dangerous_port = any((f.get('type') in ('default_creds', 'infra_exposure') for f in hf))
-            if has_secret and has_dangerous_port and ('critical' not in sevs):
-                key = f'chain-secret-port-{hostname}'
-                if key not in existing_keys:
-                    secret_types = [f.get('metadata', {}).get('type', '?') for f in hf if f.get('type') == 'secret']
-                    all_findings.append({'key': key, 'type': 'attack_chain', 'title': f'Attack Chain: Secret + Exposed Service em {hostname}', 'severity': 'critical', 'category': 'correlation', 'desc': f"Host {hostname} tem simultaneamente: segredos expostos ({', '.join(set(secret_types))}) e serviços sem autenticação. Combinação permite acesso direto ao ambiente.", 'host': hostname, 'module': 'correlation'})
-                    existing_keys.add(key)
-            host_obj = next((h for h in co_data.get('hosts', []) if h.get('host') == hostname), {})
-            no_waf = not host_obj.get('waf') or host_obj.get('waf') == 'Direct'
-            has_critical = 'critical' in sevs
-            if no_waf and has_critical:
-                key = f'chain-nowaf-critical-{hostname}'
-                if key not in existing_keys:
-                    all_findings.append({'key': key, 'type': 'attack_chain', 'title': f'Sem WAF + Finding Crítico: {hostname}', 'severity': 'critical', 'category': 'correlation', 'desc': f'Host {hostname} expõe finding crítico diretamente à internet (sem WAF). Exploração direta sem obstáculos.', 'host': hostname, 'module': 'correlation'})
-                    existing_keys.add(key)
-            critical_high = [f for f in hf if f.get('severity') in ('critical', 'high')]
-            if len(critical_high) >= 3:
-                key = f'chain-concentrated-{hostname}'
-                if key not in existing_keys:
-                    titles = [f.get('title', '')[:50] for f in critical_high[:3]]
-                    all_findings.append({'key': key, 'type': 'attack_chain', 'title': f'Superfície concentrada: {len(critical_high)} findings críticos/altos em {hostname}', 'severity': 'high', 'category': 'correlation', 'desc': f"Host {hostname} concentra {len(critical_high)} findings de alta severidade: {'; '.join(titles)}", 'host': hostname, 'module': 'correlation'})
-                    existing_keys.add(key)
+        all_findings += [c for c in derive_attack_chains(all_findings, co_data) if c['key'] not in existing_keys]
         from core.finding_lifecycle import apply_lifecycle as _apply_lifecycle
         all_findings = _apply_lifecycle(all_findings, _reeval)
         all_findings = [_normalize_finding(f, f.get('module') or f.get('category') or 'general') for f in all_findings]

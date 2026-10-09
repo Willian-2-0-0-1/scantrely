@@ -67,20 +67,17 @@ def run_cors_scan(hosts: list) -> dict:
                     continue
 
                 has_creds = acac == "true"
-                if reflected and has_creds and test_name in ("evil_reflection", "null_origin", "pre_domain_bypass"):
-                    sev = "critical"
-                elif reflected and has_creds:
-                    sev = "high"
-                elif acao == "*" and not has_creds:
+                # CORS nunca é crítico/alto: no máximo médio (a exploração depende de um endpoint autenticado).
+                if acao == "*" and not has_creds:
                     sev = "low"
                 else:
-                    sev = base_sev
+                    sev = "medium" if (has_creds or base_sev in ("high", "medium")) else base_sev
 
                 # Resposta de erro (4xx/5xx) na raiz — típico de API gateway — reflete o CORS sem provar impacto:
                 # rebaixa um nível e deixa isso explícito (o impacto depende de um endpoint autenticado).
                 err_note = ""
                 if status >= 400:
-                    sev = {"critical": "high", "high": "medium", "medium": "low"}.get(sev, sev)
+                    sev = {"medium": "low"}.get(sev, sev)
                     err_note = f" (resposta HTTP {status} na raiz: confirme em um endpoint autenticado)"
 
                 candidate = {

@@ -388,6 +388,7 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
         for c in cves:
             c["detected_version"] = version
             c["affected_hosts"]   = affected[:10]
+
         findings.extend(cves)
 
     # Deduplicate by CVE ID — merge affected_hosts, keep highest score
@@ -415,6 +416,14 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
     # Flag CISA KEV entries
     for f in all_unique:
         f["kev"] = _KEV_CACHE.get(f["cve_id"], False)
+
+    # Sem versão detectada não há como saber se o alvo é vulnerável: a CVE é só "possível" (nunca crítica/alta).
+    from core.finding_hygiene import unversioned_cve_severity
+    for f in all_unique:
+        if not f.get("detected_version"):
+            f["severity_raw"] = f["severity"]
+            f["severity"] = unversioned_cve_severity(f["severity"], f["kev"])
+            f["verified"] = False
 
     # Sort: KEV first, then EPSS×CVSS descending
     all_findings = sorted(

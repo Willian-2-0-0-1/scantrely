@@ -3697,7 +3697,7 @@ class TestFindingLifecyclePersist:
         assert got[old_hdr["key"]]["status"] == "not_seen" and got[old_hdr["key"]]["miss_count"] == 1
         assert "status" not in got["cors-1"]                       # módulo que não rodou: intacto
         stats = db.load_asm_data()["companies"][0]["stats"]
-        assert stats["findings_medium"] == 0 and stats["findings_high"] == 1
+        assert stats["findings_medium"] == 1 and stats["findings_high"] == 0   # header não visto não conta; CORS (carregado) vira médio no teto
 
     def test_still_present_finding_is_refreshed_not_stale(self, db, tmp_path):
         key = "header-missing-a.x.com-Content-Security-Policy"
