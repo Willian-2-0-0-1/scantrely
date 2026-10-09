@@ -361,6 +361,13 @@ def flask_app(tmp_path, db):
     return app
 
 
+def _dashboard_js() -> str:
+    """O front foi dividido em static/js/dashboard/NN-*.js (carregados em ordem)."""
+    parts = sorted((ROOT / "static" / "js" / "dashboard").glob("*.js"))
+    assert parts, "static/js/dashboard/*.js não encontrado"
+    return "\n".join(p.read_text(encoding="utf-8") for p in parts)
+
+
 @pytest.fixture()
 def client(flask_app):
     return flask_app.test_client()
@@ -3405,7 +3412,7 @@ class TestOperationPersist:
         assert out is False
 
     def test_operation_tab_no_longer_gates_on_playwright_job(self):
-        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        js = _dashboard_js()
         start = js.index("function _opT(")
         end = js.index("async function renderReconTab")
         body = js[start:end]
@@ -3512,14 +3519,14 @@ class TestOriginLink:
         assert "javascript:" not in html
 
     def test_dashboard_opens_origin_instead_of_copy(self):
-        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        js = _dashboard_js()
         assert "function originLinkHtml" in js
         assert "function jumpToFound" in js
         assert "Click to copy URL" not in js
         assert "Click file path to copy" not in js
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
         assert "origin-link.js" in html
-        assert "dashboard.js?v=82" in html
+        assert "js/dashboard/17-terminal-alerts-init.js" in html
         assert "operation-persist.js?v=2" in html
         assert "function isJsPathNoise" in js
         assert 'id="endpoints-secrets"' in js
@@ -3529,7 +3536,7 @@ class TestOriginLink:
         assert '"/" + p.screenshot_path' not in js
 
     def test_hosts_inventory_on_visible_subdomains_shell(self):
-        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        js = _dashboard_js()
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
         css = (ROOT / "static" / "css" / "dashboard.css").read_text(encoding="utf-8")
         i18n = (ROOT / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
@@ -3542,7 +3549,7 @@ class TestOriginLink:
         assert "_ssOnKey" in js
         assert "⧉" not in js
         assert "hostPanel = \"subdomains\"" in js
-        assert "dashboard.js?v=82" in html
+        assert "js/dashboard/17-terminal-alerts-init.js" in html
         assert "dashboard.css?v=35" in html
         assert "i18n.js?v=21" in html
         assert "exposure.js?v=3" in html
@@ -3556,7 +3563,7 @@ class TestOriginLink:
 
     def test_exposure_and_hosts_badge_semantics(self):
         exp = (ROOT / "static" / "js" / "exposure.js").read_text(encoding="utf-8")
-        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        js = _dashboard_js()
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
         i18n = (ROOT / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
         assert "function exposureCount" in exp
@@ -3570,12 +3577,12 @@ class TestOriginLink:
         assert "Run Pipeline" not in js
         assert "Stop Pipeline" not in js
         assert 'pipe_title' in i18n
-        assert "dashboard.js?v=82" in html
+        assert "js/dashboard/17-terminal-alerts-init.js" in html
         assert "exposure.js?v=3" in html
         assert "_setIconLabel(btn, active ? \"stop\" : \"play\", label)" in js or "_setIconLabel(btn, active ? 'stop' : 'play', label)" in js
 
     def test_recon_screenshots_copy_is_localized(self):
-        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        js = _dashboard_js()
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
         i18n = (ROOT / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
         start = js.index("function loadScreenshots")
@@ -3605,11 +3612,11 @@ class TestOriginLink:
         assert "recon_crawled_empty" in i18n
         assert "_opT(\"recon_cov_kicker\"" in panel or "_opT('recon_cov_kicker'" in panel
         assert "s.value||'').slice(0,40)" not in body
-        assert "dashboard.js?v=82" in html
+        assert "js/dashboard/17-terminal-alerts-init.js" in html
         assert "i18n.js?v=21" in html
 
     def test_confirmed_vulns_copy_is_localized(self):
-        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        js = _dashboard_js()
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
         i18n = (ROOT / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
         start = js.index("async function renderVulnsTab")
@@ -3637,5 +3644,5 @@ class TestOriginLink:
         assert "vuln_title" in i18n
         assert "vuln_loading" in i18n
         assert "vuln_cnt" in i18n
-        assert "dashboard.js?v=82" in html
+        assert "js/dashboard/17-terminal-alerts-init.js" in html
         assert "i18n.js?v=21" in html

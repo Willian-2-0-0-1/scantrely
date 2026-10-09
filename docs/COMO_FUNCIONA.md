@@ -95,7 +95,7 @@ asm/
 │
 ├── static/                # Frontend (SPA)
 │   ├── index.html         # Shell da SPA (inclui tela de login)
-│   └── js/                # api.js, asm.js, dashboard.js (UI principal)
+│   └── js/                # api.js, asm.js, dashboard/*.js (UI principal, 17 arquivos em ordem)
 │   └── css/dashboard.css
 │
 ├── config/                # Estado em JSON (admins, empresas, settings, webhooks…)
@@ -227,7 +227,7 @@ mesclados na superfície pelo harvester do pipeline.
 
 ### Configuração de API keys (tela de Settings)
 As chaves de API são geridas pela página **Settings** da SPA, definida de forma
-declarativa em `SETTINGS_SCHEMA` (`static/js/dashboard.js`) — cada entrada renderiza,
+declarativa em `SETTINGS_SCHEMA` (`static/js/dashboard/*.js`) — cada entrada renderiza,
 carrega e salva automaticamente. O fluxo de persistência:
 
 ```
@@ -274,7 +274,7 @@ SQLite único com WAL. Tabelas principais:
 
 ## 7. Frontend (`static/`)
 
-SPA servida diretamente pelo Flask. `index.html` carrega `static/js/dashboard.js` (UI principal),
+SPA servida diretamente pelo Flask. `index.html` carrega `static/js/dashboard/*.js` (UI principal),
 `asm.js` e `api.js` (cliente HTTP). A tela de login faz parte da própria SPA. O grande
 `asm_data.js` é gerado dinamicamente a partir do banco.
 

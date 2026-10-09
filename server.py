@@ -386,45 +386,18 @@ def index():
 def serve_dashboard_css():
     return (BASE / "static" / "css" / "dashboard.css").read_text(encoding="utf-8"), 200, {"Content-Type": "text/css; charset=utf-8"}
 
-@app.route("/dashboard.js")
-def serve_dashboard_js():
-    return (BASE / "static" / "js" / "dashboard.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
-
-@app.route("/js/asm.js")
-def serve_asm_js():
-    return (BASE / "static" / "js" / "asm.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
-
-@app.route("/js/api.js")
-def serve_api_js():
-    return (BASE / "static" / "js" / "api.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
-
-@app.route("/js/config.js")
-def serve_config_js():
-    return (BASE / "static" / "js" / "config.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
-
-@app.route("/js/i18n.js")
-def serve_i18n_js():
-    return (BASE / "static" / "js" / "i18n.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
-
-@app.route("/js/bugbounty.js")
-def serve_bugbounty_js():
-    return (BASE / "static" / "js" / "bugbounty.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
-
-@app.route("/js/bbprograms.js")
-def serve_bbprograms_js():
-    return (BASE / "static" / "js" / "bbprograms.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
-
-@app.route("/js/generators.js")
-def serve_generators_js():
-    return (BASE / "static" / "js" / "generators.js").read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
-
 @app.route("/js/<name>.js")
 def serve_extra_js(name: str):
-    allowed = {"theme", "asset-graph", "extras", "icons", "exposure", "operation-persist", "origin-link"}
-    if name not in allowed:
-        abort(404)
-    path = BASE / "static" / "js" / f"{name}.js"
-    if not path.is_file():
+    return _serve_js(BASE / "static" / "js" / f"{name}.js", name)
+
+
+@app.route("/js/dashboard/<name>.js")
+def serve_dashboard_part(name: str):
+    return _serve_js(BASE / "static" / "js" / "dashboard" / f"{name}.js", name)
+
+
+def _serve_js(path, name: str):
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", name) or not path.is_file():
         abort(404)
     return path.read_text(encoding="utf-8"), 200, {"Content-Type": "application/javascript; charset=utf-8"}
 

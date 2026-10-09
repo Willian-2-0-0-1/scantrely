@@ -232,7 +232,7 @@
         <button class="tab-btn"        data-group="hosts"      onclick="switchGroup('hosts',this)"><span data-i18n-key="tab_assets">Ativos</span> <span class="tab-count" id="gc-hosts"></span></button>
         <button class="tab-btn"        data-group="vulns"      onclick="switchGroup('vulns',this)"><span data-i18n-key="tab_vulns">Vulnerabilidades</span> <span class="tab-count" id="gc-vulns"></span></button>
         <button class="tab-btn"        data-group="exposure"   onclick="switchGroup('exposure',this)"><span data-i18n-key="tab_exposure">Exposição</span> <span class="tab-count" id="gc-exposure"></span></button>
-        <button class="tab-btn"        data-group="operation"  onclick="switchGroup('operation',this)"><span data-i18n-key="tab_technical">Técnico</span> <span class="tab-count" id="gc-operation"></span></button>
+        <button class="tab-btn"        data-group="operation"  onclick="switchGroup('operation',this)"><span data-i18n-key="tab_technical">Técnico</span></button>
         </div>
         <button class="tab-scroll-btn tab-scroll-right" id="tab-scroll-right" onclick="scrollTabBar(1)" aria-label="Scroll tabs right">›</button>
       </div>
@@ -890,7 +890,23 @@
 <script src="js/priorities.js?v=1"></script>
 
 <!-- ── Optional: load generated data from parser ── -->
-<script src="dashboard.js?v=82"></script>
+<script src="js/dashboard/01-compat-demo-data.js?v=1"></script>
+<script src="js/dashboard/02-navigation.js?v=2"></script>
+<script src="js/dashboard/03-companies-overview.js?v=1"></script>
+<script src="js/dashboard/04-global-search.js?v=2"></script>
+<script src="js/dashboard/05-findings-cve-supplychain.js?v=1"></script>
+<script src="js/dashboard/06-hosts-ports-subdomains.js?v=1"></script>
+<script src="js/dashboard/07-endpoints.js?v=1"></script>
+<script src="js/dashboard/08-infra-add-company.js?v=1"></script>
+<script src="js/dashboard/09-scan-hud.js?v=1"></script>
+<script src="js/dashboard/10-helpers-auth-routing.js?v=1"></script>
+<script src="js/dashboard/11-jobs-detail.js?v=1"></script>
+<script src="js/dashboard/12-operation-recon-screenshots.js?v=1"></script>
+<script src="js/dashboard/13-jobs-queue.js?v=1"></script>
+<script src="js/dashboard/14-settings-webhooks-tools.js?v=1"></script>
+<script src="js/dashboard/15-admins-pipeline.js?v=1"></script>
+<script src="js/dashboard/16-jsreverse-vulns-toollogs.js?v=1"></script>
+<script src="js/dashboard/17-terminal-alerts-init.js?v=1"></script>
 
 </body>
 </html>

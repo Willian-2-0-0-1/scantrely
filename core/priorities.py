@@ -60,6 +60,8 @@ _PLAYBOOK: dict[str, tuple[str, str, str, str]] = {
               "Confirmar se cada um deve estar acessível.", "vulns"),
 }
 _MAX_ACTIONS = 10
+# tipos de higiene/monitoramento: nunca aparecem acima deste nível, mesmo que o achado bruto seja mais alto
+_SEV_CAP = {"header": "medium", "brand_domain_exposure": "medium", "vhost": "low"}
 SEV_WEIGHT_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 
@@ -84,14 +86,14 @@ def build_priorities(co: dict, limit: int = _MAX_ACTIONS) -> dict:
     actions = []
     for ftype, items in groups.items():
         sev = min((f["severity"] for f in items), key=lambda v: SEV_WEIGHT_RANK[v])
+        if ftype in _SEV_CAP and SEV_WEIGHT_RANK[sev] < SEV_WEIGHT_RANK[_SEV_CAP[ftype]]:
+            sev = _SEV_CAP[ftype]
         hosts = sorted({h for f in items for h in _hosts_of(f)})
         play = _PLAYBOOK.get(ftype)
         title, why, fix, tab = play or (items[0].get("title", ftype), items[0].get("desc", ""), "Ver detalhes no achado.", "vulns")
         kev = any(f.get("kev") for f in items)
         score = SEV_WEIGHT[sev] + (30 if kev else 0) + min(15, 5 * math.log2(len(hosts) + 1))
         # ruído conhecido: tipos informativos pesam menos que o resto da mesma severidade
-        if ftype in ("brand_domain_exposure", "vhost", "header"):
-            score -= 20
         actions.append({
             "type": ftype, "severity": sev, "severity_label": SEV_LABEL[sev], "title": title, "why": why, "fix": fix,
             "tab": tab, "count": len(items), "hosts": hosts[:6], "hosts_more": max(0, len(hosts) - 6),

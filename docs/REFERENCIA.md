@@ -149,7 +149,7 @@ server.py (Flask)
   │   └── ...               +12 módulos especializados
   ├── static/               Frontend SPA (vanilla JS + CSS)
   │   ├── index.html        Shell da aplicação
-  │   └── js/               dashboard.js (10K linhas), api.js, asm.js
+  │   └── js/               api.js, asm.js, dashboard/ (17 arquivos NN-*.js, carregados em ordem)
   ├── bin/                  35+ binários (Go, Python)
   ├── wordlists/            Wordlists de fuzzing/brute (~220 MB)
   └── config/               Estado em JSON (admins, empresas, settings)

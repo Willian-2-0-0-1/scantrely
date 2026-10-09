@@ -91,3 +91,11 @@ def test_priorities_rank_and_skip_derived_chains():
     assert [a["type"] for a in out["actions"]] == ["git_exposed", "cve", "header"]
     assert out["actions"][0]["rank"] == 1 and out["actions"][0]["fix"]
     assert out["hidden"] == 0
+
+
+def test_priorities_caps_hygiene_types():
+    from core.priorities import build_priorities
+    co = {"findings": [{"key": "h", "type": "header", "severity": "high", "host": "a", "title": "x"},
+                       {"key": "v", "type": "vhost", "severity": "high", "host": "b", "title": "y"}]}
+    sev = {a["type"]: a["severity"] for a in build_priorities(co)["actions"]}
+    assert sev == {"header": "medium", "vhost": "low"}
