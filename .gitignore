@@ -57,3 +57,4 @@ config/settings.backup.json
 wordlists/
 bin/
 fotoscomplemento_guest_pii_leak.txt
+backups/

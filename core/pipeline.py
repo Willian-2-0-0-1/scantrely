@@ -3299,7 +3299,7 @@ class ReconRunner:
             co_data['snmp_data'] = snmp_data
             log(f"  ↳ SNMP: {snmp_data.get('vulnerable', 0)} hosts com community 'public'")
         _prior = co_data.get('findings', [])
-        all_findings: list[dict] = [f for f in _prior if f.get('type') not in ('cve', 'secret')]
+        all_findings: list[dict] = [f for f in _prior if f.get('type') not in ('cve', 'secret', 'attack_chain')]
         existing_keys = {f.get('key') or f.get('title') or f.get('name') or '' for f in all_findings}
         try:
             from validators import filter_nuclei_info, dedup_findings
@@ -3530,12 +3530,11 @@ class ReconRunner:
             if key not in existing_keys:
                 all_findings.append({'key': key, 'type': 'zone_transfer', 'title': f"Zone Transfer permitido: {attempt.get('domain', '')} via {attempt.get('ns', '')}", 'severity': 'critical', 'category': 'dns', 'desc': f"AXFR bem-sucedido no nameserver {attempt.get('ns', '')} para {attempt.get('domain', '')}. {len(attempt.get('records', []))} registros expostos. Permite enumerar toda a zona DNS da empresa.", 'host': attempt.get('domain', ''), 'value': attempt.get('ns', ''), 'module': 'zone_transfer', 'metadata': {'records_count': len(attempt.get('records', [])), 'ns': attempt.get('ns', '')}})
                 existing_keys.add(key)
-        for f in co_data.get('vhost_data', {}).get('findings', []):
-            key = f"vhost-{f.get('host', '')}-{f.get('vhost', '')}"
-            if key not in existing_keys:
-                sev = 'high' if any((w in f.get('vhost', '').lower() for w in ('admin', 'staging', 'dev', 'test', 'internal', 'jenkins', 'gitlab'))) else 'medium'
-                all_findings.append({'key': key, 'type': 'vhost', 'title': f"Virtual Host descoberto: {f.get('vhost', '')} em {f.get('host', '')}", 'severity': sev, 'category': 'discovery', 'desc': f"VHost `{f.get('vhost', '')}` responde com status {f.get('status_code', '')} no IP {f.get('ip', '')}. Pode ser ambiente não publicado.", 'host': f.get('host', ''), 'value': f.get('vhost', ''), 'module': 'vhost', 'metadata': {'ip': f.get('ip', ''), 'status_code': f.get('status_code', ''), 'size': f.get('size', '')}})
-                existing_keys.add(key)
+        from core.finding_hygiene import vhost_findings as _vhost_findings
+        for vf in _vhost_findings(co_data.get('vhost_data') or {}):
+            if vf['key'] not in existing_keys:
+                all_findings.append(vf)
+                existing_keys.add(vf['key'])
         for f in co_data.get('default_creds_data', {}).get('findings', []):
             key = f"defcreds-{f.get('host', '')}-{f.get('port', '')}"
             if key not in existing_keys:
@@ -3604,10 +3603,14 @@ class ReconRunner:
                 all_findings.append({'key': key, 'type': 'tableau_exposure', 'title': f.get('title', ''), 'severity': f.get('severity', 'medium'), 'category': 'exposure', 'desc': f.get('desc', ''), 'host': f.get('host', ''), 'value': f.get('url', ''), 'url': f.get('url', ''), 'module': 'tableau', 'request_raw': f.get('request_raw', ''), 'response_raw': f.get('response_raw', ''), 'matched': f.get('matched', '')})
                 existing_keys.add(key)
         all_findings = merge_persist_findings(co_data, all_findings, existing_keys, primary_domain)
+        from core.finding_hygiene import tidy_findings, chain_candidate_hosts
+        all_findings = tidy_findings(all_findings, co_data)
+        existing_keys = {f.get('key') or f.get('title') or '' for f in all_findings}
+        _inventory_hosts = chain_candidate_hosts(co_data)
         host_findings: dict[str, list[dict]] = {}
         for f in all_findings:
             h = f.get('host', '')
-            if h:
+            if h and h in _inventory_hosts and f.get('type') != 'brand_domain_exposure':
                 host_findings.setdefault(h, []).append(f)
         for hostname, hf in host_findings.items():
             sevs = {f.get('severity') for f in hf}

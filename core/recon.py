@@ -141,7 +141,7 @@ from datetime       import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ HTTP infrastructure Ã¢â‚¬â€ rate limiting, UA rotation, retry/backoff Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── HTTP infrastructure — rate limiting, UA rotation, retry/backoff ──
 
 _UA_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -200,9 +200,9 @@ _domain_state_lock = threading.Lock()
 
 # Minimum seconds between requests to the same domain (jittered)
 _RATE_BASE   = 0.4   # base delay
-_RATE_JITTER = 0.3   # Ã‚Â± random jitter
+_RATE_JITTER = 0.3   # ± random jitter
 
-# curl_cffi Ã¢â‚¬â€ TLS fingerprint mimicry (optional)
+# curl_cffi — TLS fingerprint mimicry (optional)
 try:
     from curl_cffi import requests as _cffi_requests
     _CFFI_AVAILABLE = True
@@ -410,13 +410,13 @@ def _http_get_json(url: str, timeout: int = 15, extra_headers: dict | None = Non
         return None
 
 
-# Legacy alias kept for backward compat Ã¢â‚¬â€ modules call UA directly
+# Legacy alias kept for backward compat — modules call UA directly
 UA = _random_ua()
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ DNS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── DNS ──
 
 def dns_records(domain: str) -> dict:
-    """Full DNS enumeration: A AAAA MX TXT NS SOA CNAME SRV CAA Ã¢â‚¬â€ single dig call."""
+    """Full DNS enumeration: A AAAA MX TXT NS SOA CNAME SRV CAA — single dig call."""
     RECORD_TYPES = ["A", "AAAA", "MX", "TXT", "NS", "SOA", "CNAME", "SRV", "CAA"]
     out = {}
     # Batch all queries into one subprocess call (vs 9 separate dig processes)
@@ -444,7 +444,7 @@ def dns_records(domain: str) -> dict:
     return out
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Batch DNS utility Ã¢â‚¬â€ single subprocess for multiple queries Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Batch DNS utility — single subprocess for multiple queries ──
 
 def _dns_batch(queries: list[tuple]) -> dict:
     """Run multiple DNS queries in ONE subprocess.
@@ -452,7 +452,7 @@ def _dns_batch(queries: list[tuple]) -> dict:
     queries: list of (domain, record_type, flags) tuples
     flags: list of extra dig args like ["+time=2", "+tries=1"]
 
-    Returns dict mapping (domain, rtype) Ã¢â€ â€™ list of values.
+    Returns dict mapping (domain, rtype) → list of values.
     """
     if not queries:
         return {}
@@ -487,7 +487,7 @@ def _dns_batch_short(queries: list[tuple]) -> dict:
     result = {}
     try:
         r = _subp(args, capture_output=True, text=True, timeout=15)
-        # Output: one value per line, mixed types Ã¢â‚¬â€ we map by (query position)
+        # Output: one value per line, mixed types — we map by (query position)
         lines = [l.strip() for l in r.stdout.strip().splitlines() if l.strip()]
         pos = 0
         for domain, rtype, flags in queries:
@@ -502,7 +502,7 @@ def _dns_batch_short(queries: list[tuple]) -> dict:
     return result
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Zone Transfer Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Zone Transfer ──
 def run_zone_transfer(domains: list) -> dict:
     """Attempt AXFR zone transfer against all nameservers for every domain."""
     all_subdomains: list[str] = []
@@ -558,7 +558,7 @@ def run_zone_transfer(domains: list) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Supply Chain Scan Ã¢â‚¬â€ Client-side JS Library CVE Check Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Supply Chain Scan — Client-side JS Library CVE Check ──
 # Scans JS/frontend libraries detected by whatweb/wappalyzer for known CVEs.
 # Uses the NVD API v2 keyword search for precise product+version matching.
 
@@ -619,7 +619,7 @@ def run_supply_chain_scan(hosts: list, nvd_key: str = "") -> dict:
     findings: list[dict] = []
     seen_cves: set[str] = set()
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Extract JS libraries with versions from host technologies Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Extract JS libraries with versions from host technologies ──
     # host tech format: "product:version", "Product X.Y", "Product/1.2.3"
     lib_versions: dict[str, tuple[str, list[str]]] = {}  # {product_lower: (version, [hosts])}
 
@@ -666,7 +666,7 @@ def run_supply_chain_scan(hosts: list, nvd_key: str = "") -> dict:
             "scanned_at": datetime.now().isoformat(timespec="seconds"),
         }
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Query NVD for each library@version Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Query NVD for each library@version ──
     headers = {"User-Agent": "ASM-Platform/1.0", "Accept": "application/json"}
     if nvd_key:
         headers["apiKey"] = nvd_key
@@ -746,7 +746,7 @@ def run_supply_chain_scan(hosts: list, nvd_key: str = "") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Email Security Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Email Security ──
 
 DKIM_SELECTORS = [
     "google","selector1","selector2","default","mail","dkim","k1","s1","s2",
@@ -768,21 +768,21 @@ def check_spf(domain: str) -> dict:
                 all_m = next((m for m in mechs if re.match(r'^[+~\-?]?all$', m)), None)
                 if all_m is None or "all" not in line:
                     result["score"] = "incomplete"
-                    result["issues"].append("No 'all' mechanism Ã¢â‚¬â€ incomplete policy")
+                    result["issues"].append("No 'all' mechanism — incomplete policy")
                 elif all_m.startswith("+"):
                     result["score"] = "critical"
                     result["issues"].append("+all: ANY server can send email as this domain")
                 elif all_m.startswith("?"):
                     result["score"] = "high"
-                    result["issues"].append("?all: neutral Ã¢â‚¬â€ no enforcement, effectively spoofable")
+                    result["issues"].append("?all: neutral — no enforcement, effectively spoofable")
                 elif all_m.startswith("~"):
                     result["score"] = "medium"
-                    result["issues"].append("~all: softfail Ã¢â‚¬â€ most providers won't reject")
+                    result["issues"].append("~all: softfail — most providers won't reject")
                 elif all_m.startswith("-"):
                     result["score"] = "pass"
                 # redirect?
                 if any("redirect=" in m for m in mechs):
-                    result["issues"].append("Uses redirect= Ã¢â‚¬â€ check target domain's SPF")
+                    result["issues"].append("Uses redirect= — check target domain's SPF")
                 if any("include:" in m for m in mechs):
                     count = sum(1 for m in mechs if "include:" in m)
                     if count > 8:
@@ -790,7 +790,7 @@ def check_spf(domain: str) -> dict:
                 break
         if not result["record"]:
             result["score"] = "missing"
-            result["issues"].append("No SPF record Ã¢â‚¬â€ domain is fully spoofable")
+            result["issues"].append("No SPF record — domain is fully spoofable")
     except Exception as e:
         result["error"] = str(e)
     return result
@@ -815,7 +815,7 @@ def check_dmarc(domain: str) -> dict:
 
                 if policy == "none":
                     result["score"] = "high"
-                    result["issues"].append("p=none: monitoring only Ã¢â‚¬â€ spoofed emails are delivered")
+                    result["issues"].append("p=none: monitoring only — spoofed emails are delivered")
                 elif policy == "quarantine":
                     result["score"] = "medium"
                     if result["pct"] < 100:
@@ -827,19 +827,19 @@ def check_dmarc(domain: str) -> dict:
                         result["issues"].append(f"pct={result['pct']}: only {result['pct']}% of mail is rejected")
 
                 if not result["rua"]:
-                    result["issues"].append("No rua= tag Ã¢â‚¬â€ no DMARC reporting configured")
+                    result["issues"].append("No rua= tag — no DMARC reporting configured")
                 if sp == "none" and policy != "none":
                     result["issues"].append(f"sp=none: subdomain policy is weaker than main domain")
                 break
         if not result["record"]:
             result["score"] = "missing"
-            result["issues"].append("No DMARC record Ã¢â‚¬â€ spoofed emails bypass policy checks")
+            result["issues"].append("No DMARC record — spoofed emails bypass policy checks")
     except Exception as e:
         result["error"] = str(e)
     return result
 
 def check_bimi(domain: str) -> dict:
-    """Check BIMI (Brand Indicators for Message Identification) Ã¢â‚¬â€ bonus."""
+    """Check BIMI (Brand Indicators for Message Identification) — bonus."""
     try:
         r = _subp(["dig","+short","+time=2","+tries=1","TXT", f"default._bimi.{domain}"],
                            capture_output=True, text=True, timeout=5)
@@ -912,7 +912,7 @@ def email_spoofability(spf: dict, dmarc: dict) -> str:
     return "low"
 
 def run_email_recon(domain: str) -> dict:
-    """Full email security analysis: SPF, DMARC, DKIM, BIMI, MX Ã¢â‚¬â€ single DNS batch."""
+    """Full email security analysis: SPF, DMARC, DKIM, BIMI, MX — single DNS batch."""
     spf_r   = {"record": None, "score": "missing", "issues": [], "mechanisms": []}
     dmarc_r = {"record": None, "policy": None, "pct": 100, "rua": None, "ruf": None, "score": "missing", "issues": []}
     bimi_r  = {"record": None, "score": "missing", "issues": []}
@@ -990,14 +990,14 @@ def run_email_recon(domain: str) -> dict:
         "scanned_at":    datetime.now().isoformat(timespec="seconds"),
     }
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Certificate Transparency Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Certificate Transparency ──
 
 def get_ct_certs(domain: str, limit: int = 500) -> list:
     """Query crt.sh + certspotter + Shodan CTL for certificates issued to domain."""
     certs = _ct_from_crtsh(domain, limit)
     if not certs:
         certs = _ct_from_certspotter(domain, limit)
-    # Always merge Shodan CTL Ã¢â‚¬â€ complimentary source with different coverage
+    # Always merge Shodan CTL — complimentary source with different coverage
     shodan_certs = _ct_from_shodan(domain, limit)
     certs = certs + shodan_certs
     # Deduplicate by (common_name, not_after)
@@ -1106,7 +1106,7 @@ def _ct_from_certspotter(domain: str, limit: int) -> list:
     return certs
 
 def _ct_from_shodan(domain: str, limit: int = 500) -> list:
-    """Shodan Certificate Transparency Log API Ã¢â‚¬â€ free, no key required.
+    """Shodan Certificate Transparency Log API — free, no key required.
     https://ctl.shodan.io/api/v1/domain/{domain}"""
     certs = []
     try:
@@ -1191,7 +1191,7 @@ def get_ssl_info(host: str, port: int = 443) -> dict:
             cert, tls_ver, cipher = _connect(verify=True)
             self_signed = False
         except ssl.SSLCertVerificationError:
-            # Invalid/self-signed cert Ã¢â‚¬â€ connect without verify but use binary_form parsing
+            # Invalid/self-signed cert — connect without verify but use binary_form parsing
             ctx2 = ssl.create_default_context()
             ctx2.check_hostname = False
             ctx2.verify_mode = ssl.CERT_NONE
@@ -1310,7 +1310,7 @@ def _count_issuers(certs: list) -> dict:
         counts[iss] = counts.get(iss,0) + 1
     return dict(sorted(counts.items(), key=lambda x: -x[1])[:10])
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ ASN / IP Intelligence Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── ASN / IP Intelligence ──
 
 def get_ip_info(ip: str) -> dict:
     """IP info via ipinfo.io (free, 50k/month)."""
@@ -1372,7 +1372,7 @@ def detect_cloud_provider(ip: str) -> str | None:
     return None
 
 
-# Non-HTTP port Ã¢â€ â€™ service classification for ASM inventory
+# Non-HTTP port → service classification for ASM inventory
 _KNOWN_PORTS = {
     21: ("FTP", "File Transfer"),
     22: ("SSH", "Secure Shell"),
@@ -1523,7 +1523,7 @@ def run_asn_recon(hosts: list, domain: str = "") -> dict:
         "scanned_at":  datetime.now().isoformat(timespec="seconds"),
     }
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Exposed Services Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Exposed Services ──
 
 EXPOSED_PATHS = {
     "Admin Panels": [
@@ -1613,7 +1613,7 @@ def run_services_recon(host: str, timeout: int = 5) -> list:
                 })
     return sorted(results, key=lambda x: ["critical","high","medium","low"].index(x["severity"]))
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Leaks & Secrets Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Leaks & Secrets ──
 
 def _dns_resolves(hostname: str, timeout: int = 3) -> bool:
     """Check if hostname resolves via dig (avoids glibc DNS hangs)."""
@@ -1689,7 +1689,7 @@ def search_github(domain: str, token: str = None) -> dict:
     # Using file qualifiers (extension:, filename:) to target credential-bearing files
     # and avoid noise from READMEs, tests, docs.
     queries = [
-        # .env files Ã¢â‚¬â€ highest signal
+        # .env files — highest signal
         (f'"{domain}" extension:env',                                "high"),
         (f'"{domain}" filename:.env',                                "high"),
         (f'"{domain}" filename:.env.local OR filename:.env.production', "high"),
@@ -1723,7 +1723,7 @@ def search_github(domain: str, token: str = None) -> dict:
                                        extra_headers={k: v for k, v in headers.items()
                                                       if k != "User-Agent"})
             if status == 403:
-                errors.append("GitHub rate limit reached Ã¢â‚¬â€ add a token in Settings")
+                errors.append("GitHub rate limit reached — add a token in Settings")
                 break
             if status != 200 or not body:
                 errors.append(f"Query '{q}': HTTP {status}")
@@ -1736,7 +1736,7 @@ def search_github(domain: str, token: str = None) -> dict:
                 fullname = repo.get("full_name", "")
                 filepath = item.get("path", "")
 
-                # Skip forks Ã¢â‚¬â€ they duplicate the original repo's code
+                # Skip forks — they duplicate the original repo's code
                 if repo.get("fork"):
                     continue
 
@@ -1784,7 +1784,7 @@ def search_codebase_leaks(domain: str) -> dict:
     results = []
     if not _dns_resolves("api.hackertarget.com"):
         return {"results": []}
-    # GreyNoise / PublicWWW alternatives Ã¢â‚¬â€ use HackerTarget which is free
+    # GreyNoise / PublicWWW alternatives — use HackerTarget which is free
     try:
         url = f"https://api.hackertarget.com/hostsearch/?q={domain}"
         status, raw, _ = http_get(url, timeout=10)
@@ -1830,10 +1830,10 @@ def run_leaks_recon(domain: str, hosts: list, github_token: str = None) -> dict:
         "scanned_at":  datetime.now().isoformat(timespec="seconds"),
     }
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Risk Scoring Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Risk Scoring ──
 
 def score_host(host: dict, findings: list) -> int:
-    """0Ã¢â‚¬â€œ100 risk score per host."""
+    """0–100 risk score per host."""
     score = 0
     hostname = host.get("host","")
 
@@ -1851,11 +1851,11 @@ def score_host(host: dict, findings: list) -> int:
 
     return min(score, 100)
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Security Headers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Security Headers ──
 
 HEADER_CHECKS = {
     "Strict-Transport-Security": {
-        "desc": "HSTS Ã¢â‚¬â€ forces HTTPS connections",
+        "desc": "HSTS — forces HTTPS connections",
         "missing_sev": "high",
         "check": lambda v: (
             "missing max-age" if "max-age" not in v.lower() else
@@ -1864,7 +1864,7 @@ HEADER_CHECKS = {
         ),
     },
     "Content-Security-Policy": {
-        "desc": "CSP Ã¢â‚¬â€ prevents XSS and data injection",
+        "desc": "CSP — prevents XSS and data injection",
         "missing_sev": "high",
         "check": lambda v: (
             "unsafe-inline in script-src" if "unsafe-inline" in v else
@@ -1938,7 +1938,7 @@ def run_security_headers(host: str) -> dict:
                 "present":  False,
                 "value":    None,
                 "severity": meta["missing_sev"],
-                "issue":    f"Missing Ã¢â‚¬â€ {meta['desc']}",
+                "issue":    f"Missing — {meta['desc']}",
             })
             scores.append(meta["missing_sev"])
         else:
@@ -1980,40 +1980,40 @@ def run_security_headers(host: str) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Vendor / Edge Appliance Fingerprinting Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Vendor / Edge Appliance Fingerprinting ──
 
 _VENDOR_FINGERPRINTS = [
     # name, paths, response_signature, severity, cve_note
     ("Citrix Netscaler / ADC", ["/vpn/index.html", "/logon/LogonPoint/tmindex.html", "/citrix/", "/logon/LogonPoint/index.html"],
      ["Citrix", "Netscaler", "ADC", "netscaler", "logonpoint"], "critical",
-     "CVE-2023-3519 RCE, CVE-2019-19781 path traversal Ã¢â‚¬â€ both KEV-listed"),
+     "CVE-2023-3519 RCE, CVE-2019-19781 path traversal — both KEV-listed"),
     ("F5 BIG-IP", ["/tmui/login.jsp", "/tmui/", "/mgmt/tm/sys/"],
      ["BIG-IP", "bigip", "tmui", "F5 Networks"], "critical",
-     "CVE-2022-1388 auth bypass RCE, CVE-2023-46747 Ã¢â‚¬â€ KEV-listed"),
+     "CVE-2022-1388 auth bypass RCE, CVE-2023-46747 — KEV-listed"),
     ("Pulse Secure / Ivanti Connect", ["/dana-na/", "/dana-na/auth/url_default/welcome.cgi", "/dana-na/auth/url_default/welcome.cgi?p=user-conf"],
      ["Pulse Secure", "Ivanti", "dana-na", "welcome.cgi"], "critical",
-     "CVE-2024-21887 command injection, CVE-2023-46805 auth bypass Ã¢â‚¬â€ chained, both KEV"),
+     "CVE-2024-21887 command injection, CVE-2023-46805 auth bypass — chained, both KEV"),
     ("FortiGate / FortiOS", ["/remote/login", "/remote/info", "/api/v2/"],
      ["FortiGate", "FortiOS", "fortinet"], "critical",
-     "CVE-2024-21762 RCE, CVE-2022-42475 heap-based RCE Ã¢â‚¬â€ both KEV"),
+     "CVE-2024-21762 RCE, CVE-2022-42475 heap-based RCE — both KEV"),
     ("PaloAlto GlobalProtect", ["/global-protect/", "/global-protect/login.esp", "/global-protect/portal/css/login.css"],
      ["GlobalProtect", "Palo Alto", "PAN-OS"], "critical",
-     "CVE-2024-3400 command injection RCE Ã¢â‚¬â€ KEV-listed"),
+     "CVE-2024-3400 command injection RCE — KEV-listed"),
     ("Cisco ASA / AnyConnect", ["/+CSCOE+/", "/CSCOE/index.html", "/webvpn.html", "/+CSCOE+/portal.html"],
      ["Cisco", "CSCOE", "AnyConnect", "webvpn"], "high",
      "CVE-2020-3452 file read, CVE-2018-0101 RCE"),
     ("VMware vCenter / ESXi", ["/ui/", "/vsphere-client/", "/sdk/"],
      ["VMware", "vCenter", "vSphere", "ESXi"], "critical",
-     "CVE-2021-21972 RCE, CVE-2021-21985 RCE Ã¢â‚¬â€ KEV-listed"),
+     "CVE-2021-21972 RCE, CVE-2021-21985 RCE — KEV-listed"),
     ("Microsoft Exchange OWA", ["/owa/", "/owa/auth/logon.aspx", "/ecp/", "/autodiscover/"],
      ["Outlook Web", "Exchange", "owa", "Outlook Web App"], "high",
-     "ProxyShell, ProxyLogon, ProxyNotShell Ã¢â‚¬â€ multiple KEV-listed CVEs"),
+     "ProxyShell, ProxyLogon, ProxyNotShell — multiple KEV-listed CVEs"),
     ("Jenkins", ["/jenkins/", "/jenkins/login", "/script"],
      ["Jenkins", "jenkins"], "medium",
      "CVE-2024-23897 file read, CVE-2018-1000861 RCE"),
     ("Apache Tomcat", ["/manager/html", "/host-manager/html"],
      ["Tomcat", "Apache Tomcat", "Web Application Manager"], "medium",
-     "CVE-2025-24813 path traversal RCE Ã¢â‚¬â€ KEV-listed"),
+     "CVE-2025-24813 path traversal RCE — KEV-listed"),
     ("Jupyter", ["/tree", "/lab", "/login?next=%2Ftree%3F"],
      ["Jupyter", "jupyter", "JupyterLab"], "medium",
      "Often unauthenticated; grants interactive Python shell"),
@@ -2064,7 +2064,7 @@ def run_vendor_fingerprint(hosts: list) -> dict:
                 except Exception:
                     pass
         except concurrent.futures.TimeoutError:
-            pass  # timeout Ã¢â‚¬â€ return partial results collected so far
+            pass  # timeout — return partial results collected so far
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
@@ -2106,7 +2106,7 @@ def run_headers_bulk(hosts: list, max_hosts: int = 200) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Typosquatting Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Typosquatting ──
 
 # Major ccTLDs + gTLDs for domain permutation scanning
 _TLD_SWAPS = {
@@ -2174,7 +2174,7 @@ def _typo_variants(domain: str) -> list[str]:
     variants: set = set()
     current_tld = f".{tld}"
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 1. Keyboard adjacency (replacement) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 1. Keyboard adjacency (replacement) ──
     kb_adj = {
         'a':'sq','b':'vghn','c':'xdfv','d':'erfcs','e':'wrds','f':'rtgv',
         'g':'tyhbf','h':'yujng','i':'uojk','j':'ikhnu','k':'jiol','l':'kop',
@@ -2186,21 +2186,21 @@ def _typo_variants(domain: str) -> list[str]:
         for sub in kb_adj.get(ch, ""):
             variants.add(f"{name[:i]}{sub}{name[i+1:]}.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 2. Omission (missing character) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 2. Omission (missing character) ──
     for i in range(len(name)):
         variants.add(f"{name[:i]}{name[i+1:]}.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 3. Repetition (doubled character) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 3. Repetition (doubled character) ──
     for i, ch in enumerate(name):
         variants.add(f"{name[:i]}{ch}{ch}{name[i+1:]}.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 4. Transposition (adjacent swap) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 4. Transposition (adjacent swap) ──
     for i in range(len(name) - 1):
         s = list(name)
         s[i], s[i+1] = s[i+1], s[i]
         variants.add(f"{''.join(s)}.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 5. Insertion (extra char at every position) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 5. Insertion (extra char at every position) ──
     alphabet = "abcdefghijklmnopqrstuvwxyz"
     for i in range(len(name) + 1):
         for ch in alphabet:
@@ -2209,14 +2209,14 @@ def _typo_variants(domain: str) -> list[str]:
             if candidate != f"{name}{ch}.{tld}":
                 variants.add(candidate)
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 6. Addition (append digit/char at end / prepend at start) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 6. Addition (append digit/char at end / prepend at start) ──
     for ch in "0123456789":
         variants.add(f"{name}{ch}.{tld}")
         variants.add(f"{ch}{name}.{tld}")
     for ch in alphabet:
         variants.add(f"{name}{ch}.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 7. Vowel swap Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 7. Vowel swap ──
     vowels = "aeiou"
     for i, ch in enumerate(name):
         if ch in vowels:
@@ -2224,7 +2224,7 @@ def _typo_variants(domain: str) -> list[str]:
                 if v != ch:
                     variants.add(f"{name[:i]}{v}{name[i+1:]}.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 8. Bitsquatting (single-bit flip, result must be printable ASCII) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 8. Bitsquatting (single-bit flip, result must be printable ASCII) ──
     valid_chars = set("abcdefghijklmnopqrstuvwxyz0123456789-")
     for i, ch in enumerate(name):
         for bit in range(8):
@@ -2232,31 +2232,31 @@ def _typo_variants(domain: str) -> list[str]:
             if flipped in valid_chars and flipped != ch:
                 variants.add(f"{name[:i]}{flipped}{name[i+1:]}.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 9. Homoglyph Ã¢â‚¬â€ Unicode IDN lookalikes (generates xn-- punycode) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    # Maps Latin char Ã¢â€ â€™ list of Unicode homoglyphs
+    # ── 9. Homoglyph — Unicode IDN lookalikes (generates xn-- punycode) ──
+    # Maps Latin char → list of Unicode homoglyphs
     _HOMOGLYPHS: dict[str, list[str]] = {
-        "a": ["ÃÂ°", "Ã‰â€˜"],          # Cyrillic ÃÂ°, Latin Ã‰â€˜
-        "c": ["ÃÂ²", "Ã‘Â"],          # Greek ÃÂ², Cyrillic Ã‘Â
-        "d": ["Ã”Â"],                    # Cyrillic Ã”Â
-        "e": ["ÃÂµ", "Ã’Â½"],          # Cyrillic ÃÂµ, Ã’Â½
-        "g": ["Ã‰Â¡"],                    # Latin Ã‰Â¡
-        "h": ["Ã’Â»"],                    # Cyrillic Ã’Â»
-        "i": ["Ã‘â€“", "Ã“Â", "1"],     # Cyrillic Ã‘â€“, Ã“Â, digit 1
-        "j": ["Ã‘Ëœ"],                    # Cyrillic Ã‘Ëœ
-        "l": ["Ã“Â", "1", "1"],     # Cyrillic Ã“Â, digit
-        "m": ["ÃÂ¼"],                    # Cyrillic ÃÂ¼
-        "n": ["Ã•Â¸"],                    # Armenian Ã•Â¸
-        "o": ["ÃÂ¾", "ÃŽÂ¿", "0"],     # Cyrillic ÃÂ¾, Greek ÃŽÂ¿, digit 0
-        "p": ["Ã‘â‚¬", "ÃÂ"],          # Cyrillic Ã‘â‚¬, Greek ÃÂ
-        "q": ["Ã•Â£"],                    # Armenian Ã•Â£
-        "r": ["ÃÂ³"],                    # Cyrillic ÃÂ³
-        "s": ["Ã‘â€¢", "5"],               # Cyrillic Ã‘â€¢
-        "u": ["ÃÂ²"],                    # Cyrillic ÃÂ²
-        "v": ["ÃŽÂ½"],                    # Greek ÃŽÂ½
-        "w": ["Ã‘Â¡"],                    # Cyrillic Ã‘Â¡
-        "x": ["Ã‘â€¦"],                    # Cyrillic Ã‘â€¦
-        "y": ["Ã‘Æ’", "Ã’Â¯"],          # Cyrillic Ã‘Æ’, Ã’Â¯
-        "z": ["ÃŠÂ"],                    # Latin ÃŠÂ
+        "a": ["Ð°", "É‘"],          # Cyrillic Ð°, Latin É‘
+        "c": ["Ï²", "Ñ"],          # Greek Ï², Cyrillic Ñ
+        "d": ["Ô"],                    # Cyrillic Ô
+        "e": ["Ðµ", "Ò½"],          # Cyrillic Ðµ, Ò½
+        "g": ["É¡"],                    # Latin É¡
+        "h": ["Ò»"],                    # Cyrillic Ò»
+        "i": ["Ñ–", "Ó", "1"],     # Cyrillic Ñ–, Ó, digit 1
+        "j": ["Ñ˜"],                    # Cyrillic Ñ˜
+        "l": ["Ó", "1", "1"],     # Cyrillic Ó, digit
+        "m": ["Ð¼"],                    # Cyrillic Ð¼
+        "n": ["Õ¸"],                    # Armenian Õ¸
+        "o": ["Ð¾", "Î¿", "0"],     # Cyrillic Ð¾, Greek Î¿, digit 0
+        "p": ["Ñ€", "Ï"],          # Cyrillic Ñ€, Greek Ï
+        "q": ["Õ£"],                    # Armenian Õ£
+        "r": ["Ð³"],                    # Cyrillic Ð³
+        "s": ["Ñ•", "5"],               # Cyrillic Ñ•
+        "u": ["Ð²"],                    # Cyrillic Ð²
+        "v": ["Î½"],                    # Greek Î½
+        "w": ["Ñ¡"],                    # Cyrillic Ñ¡
+        "x": ["Ñ…"],                    # Cyrillic Ñ…
+        "y": ["Ñƒ", "Ò¯"],          # Cyrillic Ñƒ, Ò¯
+        "z": ["Ê"],                    # Latin Ê
     }
     for i, ch in enumerate(name):
         for glyph in _HOMOGLYPHS.get(ch, []):
@@ -2267,37 +2267,37 @@ def _typo_variants(domain: str) -> list[str]:
             except (UnicodeError, UnicodeDecodeError):
                 pass
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 10. Hyphenation (insert hyphen between each adjacent pair) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 10. Hyphenation (insert hyphen between each adjacent pair) ──
     for i in range(1, len(name)):
         variants.add(f"{name[:i]}-{name[i:]}.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 11. TLD swaps Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 11. TLD swaps ──
     for alt in _TLD_SWAPS.get(current_tld, []):
         variants.add(f"{name}{alt}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 12. Cross-TLD sweep Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 12. Cross-TLD sweep ──
     for cc_tld in _CC_TLDS:
         if cc_tld != current_tld:
             variants.add(f"{name}{cc_tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 13. Common prefixes/suffixes Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 13. Common prefixes/suffixes ──
     for pfx in ["www", "m", "app", "portal", "login", "secure", "mail", "vpn"]:
         variants.add(f"{pfx}-{name}.{tld}")
         variants.add(f"{pfx}{name}.{tld}")
     for sfx in ["-br", "-brasil", "-online", "-digital", "-bank", "-app"]:
         variants.add(f"{name}{sfx}.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 14. ASCII homograph (digit/symbol substitutions) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 14. ASCII homograph (digit/symbol substitutions) ──
     for orig, fakes in [("o", "0"), ("i", "1l"), ("e", "3"), ("a", "@4"), ("s", "5$")]:
         for fake in fakes:
             for i, ch in enumerate(name):
                 if ch == orig:
                     variants.add(f"{name[:i]}{fake}{name[i+1:]}.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 15. Plural Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 15. Plural ──
     variants.add(f"{name}s.{tld}")
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ 16. Combosquatting Ã¢â‚¬â€ brand + sector keywords Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── 16. Combosquatting — brand + sector keywords ──
     _SECTOR_WORDS = [
         "auto", "vida", "saude", "residencial", "banco", "bank", "seguros",
         "seguranca", "sinistro", "apolice", "previdencia", "corretor",
@@ -2341,7 +2341,7 @@ _BROKER_NS = frozenset({
 def _check_typo(domain: str) -> dict:
     ips = _resolve_domain(domain)
 
-    # NS lookup Ã¢â‚¬â€ catches domains with NS but no A (e.g. .uy ccTLDs)
+    # NS lookup — catches domains with NS but no A (e.g. .uy ccTLDs)
     ns_raw = ""
     try:
         r = subprocess.run(["dig", "+short", domain, "NS"],
@@ -2358,7 +2358,7 @@ def _check_typo(domain: str) -> dict:
 
     result["risk"] = "medium"
 
-    # MX record check Ã¢â‚¬â€ domain capable of receiving email Ã¢â€ â€™ phishing escalation
+    # MX record check — domain capable of receiving email → phishing escalation
     try:
         r = subprocess.run(["dig", "+short", domain, "MX"],
                            capture_output=True, text=True, timeout=4)
@@ -2369,7 +2369,7 @@ def _check_typo(domain: str) -> dict:
     except Exception:
         pass
 
-    # Broker NS fingerprint Ã¢â‚¬â€ catches squatters even without HTTP (302-only domains)
+    # Broker NS fingerprint — catches squatters even without HTTP (302-only domains)
     if ns_raw and any(b in ns_raw for b in _BROKER_NS):
         result["risk"]   = "high"
         result["status"] = "broker_listed"
@@ -2379,7 +2379,7 @@ def _check_typo(domain: str) -> dict:
         result["status"] = "registered_no_ip"
         return result
 
-    # SSL certificate check Ã¢â‚¬â€ brand keyword in cert = full phishing setup
+    # SSL certificate check — brand keyword in cert = full phishing setup
     try:
         import ssl as _ssl, socket as _socket
         ctx = _ssl.create_default_context()
@@ -2399,7 +2399,7 @@ def _check_typo(domain: str) -> dict:
     except Exception:
         pass
 
-    # HTTP check Ã¢â‚¬â€ follow redirects, detect broker/sale landing pages
+    # HTTP check — follow redirects, detect broker/sale landing pages
     try:
         status_code, raw, hdrs = http_get(f"http://{domain}", timeout=5, retries=1)
         if status_code:
@@ -2437,7 +2437,7 @@ def _check_typo(domain: str) -> dict:
 
 
 def _whois_registrant(domain: str) -> dict:
-    """Extract registrant email + org from WHOIS. Rate-limited Ã¢â‚¬â€ use sparingly."""
+    """Extract registrant email + org from WHOIS. Rate-limited — use sparingly."""
     try:
         w = subprocess.run(["whois", domain],
                            capture_output=True, text=True, timeout=10)
@@ -2454,7 +2454,7 @@ def _whois_registrant(domain: str) -> dict:
                     ("registrant org", "registrant name", "owner:", "org-name")):
                 info["org"] = val[:80]
         # Detect company-owned domains by registrant
-        _co_kw = ["porto seguro", "portoseguro", "averbeporto", "itaÃƒÂº", "itau unibanco"]
+        _co_kw = ["porto seguro", "portoseguro", "averbeporto", "itaú", "itau unibanco"]
         owned_text = (info.get("email", "") + " " + info.get("org", "")).lower()
         if any(k in owned_text for k in _co_kw):
             info["company_owned"] = True
@@ -2484,7 +2484,7 @@ def run_typosquatting(domain: str, max_variants: int = 1200,
 
     registered = [r for r in results if r["registered"]]
 
-    # WHOIS enrichment Ã¢â‚¬â€ only for active/broker domains, max 30 to avoid rate-limiting
+    # WHOIS enrichment — only for active/broker domains, max 30 to avoid rate-limiting
     _risk_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     enrich_targets = sorted(
         [r for r in registered if r.get("status") in ("active", "broker_listed")],
@@ -2537,7 +2537,7 @@ def run_opensquat_monitor(keywords: list[str], work_dir: str = "/tmp") -> dict:
             capture_output=True, text=True, timeout=300,
         )
     except FileNotFoundError:
-        # opensquat not installed Ã¢â‚¬â€ try pip-installed path
+        # opensquat not installed — try pip-installed path
         try:
             r = subprocess.run(
                 ["python3", "-m", "opensquat", "-k", kw_file, "--ct",
@@ -2583,7 +2583,7 @@ def run_opensquat_monitor(keywords: list[str], work_dir: str = "/tmp") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Cloud Asset Discovery Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Cloud Asset Discovery ──
 
 def _org_name_variants(org_name: str, domains: list) -> list[str]:
     """Generate bucket name candidates from org name and domains."""
@@ -2618,7 +2618,7 @@ def _org_name_variants(org_name: str, domains: list) -> list[str]:
 
 
 def _curl_check(url: str) -> tuple[int, str]:
-    """HTTP GET via curl, returning (status_code, response_body) Ã¢â‚¬â€ body capped at ~4KB by curl's
+    """HTTP GET via curl, returning (status_code, response_body) — body capped at ~4KB by curl's
     own read; safe for read-only enumeration (no writes/uploads are ever performed)."""
     try:
         r = subprocess.run(
@@ -2640,7 +2640,7 @@ def _curl_check(url: str) -> tuple[int, str]:
 
 
 # Anonymous-readable ACL grants that indicate over-permissive bucket policies.
-# These checks are read-only (HTTP GET on the bucket's `?acl` sub-resource) Ã¢â‚¬â€
+# These checks are read-only (HTTP GET on the bucket's `?acl` sub-resource) —
 # no objects are ever written, modified, or deleted.
 _PUBLIC_GRANTEES = re.compile(
     r'(AllUsers|AuthenticatedUsers|http://acs\.amazonaws\.com/groups/global/AllUsers|'
@@ -2692,7 +2692,7 @@ def _check_s3_bucket(name: str) -> dict | None:
             if sensitive_files:
                 access_detail = "public_read_sensitive"
 
-            # Read-only ACL probe Ã¢â‚¬â€ checks for AllUsers/AuthenticatedUsers
+            # Read-only ACL probe — checks for AllUsers/AuthenticatedUsers
             # WRITE/FULL_CONTROL grants without writing anything.
             acl = _check_anonymous_acl(url + "?acl")
             if acl and acl.get("public_write_perms"):
@@ -2701,7 +2701,7 @@ def _check_s3_bucket(name: str) -> dict | None:
             desc = (f"S3 bucket {name} is publicly readable ({obj_count} objects listed" +
                     (f", including {len(sensitive_files)} sensitive files: {', '.join(sensitive_files[:3])}" if sensitive_files else "") + ")")
             if acl and acl.get("public_write_perms"):
-                desc += f". ACL grants anonymous {'/'.join(acl['public_write_perms'])} access Ã¢â‚¬â€ bucket can likely be written to or have its ACL modified by anyone."
+                desc += f". ACL grants anonymous {'/'.join(acl['public_write_perms'])} access — bucket can likely be written to or have its ACL modified by anyone."
 
             return {"name": name, "provider": "AWS S3", "url": url,
                     "access": access_detail, "severity": "critical",
@@ -2712,7 +2712,7 @@ def _check_s3_bucket(name: str) -> dict | None:
                     "acl": acl,
                     "desc": desc}
         if status == 403:
-            # Bucket exists but listing is denied Ã¢â‚¬â€ still probe the ACL read-only,
+            # Bucket exists but listing is denied — still probe the ACL read-only,
             # since some buckets block listing but expose a writable ACL.
             acl = _check_anonymous_acl(urls[0] + "?acl")
             if acl and acl.get("public_write_perms"):
@@ -2721,7 +2721,7 @@ def _check_s3_bucket(name: str) -> dict | None:
                         "snippet": "", "object_count": 0, "sample_objects": [],
                         "sensitive_files": [], "acl": acl,
                         "desc": f"S3 bucket {name} blocks listing but its ACL grants anonymous "
-                                f"{'/'.join(acl['public_write_perms'])} access Ã¢â‚¬â€ bucket can likely be "
+                                f"{'/'.join(acl['public_write_perms'])} access — bucket can likely be "
                                 f"written to or have its ACL modified by anyone."}
             return {"name": name, "provider": "AWS S3", "url": urls[0],
                     "access": "exists_private", "severity": "info", "snippet": ""}
@@ -2782,7 +2782,7 @@ def _check_gcp_bucket(name: str) -> dict | None:
         desc = (f"GCP bucket {name} is publicly readable ({obj_count} objects listed)" +
                 (f", including {len(sensitive_files)} sensitive files: {', '.join(sensitive_files[:3])}" if sensitive_files else ""))
         if acl and acl.get("public_write_perms"):
-            desc += f". ACL grants anonymous {'/'.join(acl['public_write_perms'])} access Ã¢â‚¬â€ bucket can likely be written to or have its ACL modified by anyone."
+            desc += f". ACL grants anonymous {'/'.join(acl['public_write_perms'])} access — bucket can likely be written to or have its ACL modified by anyone."
 
         return {"name": name, "provider": "GCP Storage", "url": url,
                 "access": access_detail, "severity": "critical",
@@ -2800,7 +2800,7 @@ def _check_gcp_bucket(name: str) -> dict | None:
                     "snippet": "", "object_count": 0, "sample_objects": [],
                     "sensitive_files": [], "acl": acl,
                     "desc": f"GCP bucket {name} blocks listing but its ACL grants anonymous "
-                            f"{'/'.join(acl['public_write_perms'])} access Ã¢â‚¬â€ bucket can likely be "
+                            f"{'/'.join(acl['public_write_perms'])} access — bucket can likely be "
                             f"written to or have its ACL modified by anyone."}
         return {"name": name, "provider": "GCP Storage", "url": url,
                 "access": "exists_private", "severity": "info", "snippet": ""}
@@ -2867,7 +2867,7 @@ def run_cloud_assets(domains: list, org_name: str = "") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ GitHub Org Repository Discovery Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── GitHub Org Repository Discovery ──
 
 def run_github_repos(domains: list, token: str = "") -> dict:
     """
@@ -2979,10 +2979,10 @@ def run_github_repos(domains: list, token: str = "") -> dict:
     for sf in sensitive_files:
         findings.append({
             "type":     "github_sensitive_file",
-            "title":    f"Arquivo sensÃƒÂ­vel em repo pÃƒÂºblico: {sf['file']} ({sf['repo']})",
+            "title":    f"Arquivo sensível em repo público: {sf['file']} ({sf['repo']})",
             "severity": sf["severity"],
             "category": "leaks",
-            "desc":     f"Arquivo `{sf['file']}` encontrado no repositÃƒÂ³rio pÃƒÂºblico `{sf['repo']}`. Pode conter segredos ou configuraÃƒÂ§ÃƒÂµes internas.",
+            "desc":     f"Arquivo `{sf['file']}` encontrado no repositório público `{sf['repo']}`. Pode conter segredos ou configurações internas.",
             "url":      sf["url"],
             "value":    sf["url"],
             "host":     domains[0] if domains else "",
@@ -2990,10 +2990,10 @@ def run_github_repos(domains: list, token: str = "") -> dict:
     for sf in secrets_found:
         findings.append({
             "type":     "github_secret_pattern",
-            "title":    f"PadrÃƒÂ£o de segredo em GitHub: {sf['query']} ({sf['repo']})",
+            "title":    f"Padrão de segredo em GitHub: {sf['query']} ({sf['repo']})",
             "severity": "critical",
             "category": "leaks",
-            "desc":     f"GitHub code search encontrou padrÃƒÂ£o '{sf['query']}' em `{sf['file']}` do repo `{sf['repo']}`.",
+            "desc":     f"GitHub code search encontrou padrão '{sf['query']}' em `{sf['file']}` do repo `{sf['repo']}`.",
             "url":      sf["url"],
             "value":    sf["url"],
             "host":     domains[0] if domains else "",
@@ -3010,10 +3010,10 @@ def run_github_repos(domains: list, token: str = "") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ DNSSEC Check Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── DNSSEC Check ──
 
 def run_dnssec_check(domains: list) -> dict:
-    """Check DNSSEC for up to 10 domains Ã¢â‚¬â€ single DNS batch call."""
+    """Check DNSSEC for up to 10 domains — single DNS batch call."""
     findings, results = [], []
 
     for domain in domains[:10]:
@@ -3032,13 +3032,13 @@ def run_dnssec_check(domains: list) -> dict:
             info["nsec_type"] = "NSEC"
             info["issues"].append("NSEC zone walking possible")
 
-        # NSEC3 check (only if DNSSEC enabled Ã¢â‚¬â€ one more batch)
+        # NSEC3 check (only if DNSSEC enabled — one more batch)
         if info["dnssec_enabled"]:
             b2 = _dns_batch([(domain, "NSEC3PARAM", [])])
             if b2.get((domain, "NSEC3PARAM")):
                 info["nsec_type"] = "NSEC3"
 
-        # AD flag check (needs different flags, separate call Ã¢â‚¬â€ but faster)
+        # AD flag check (needs different flags, separate call — but faster)
         try:
             r = _subp(["dig", "+dnssec", "+time=2", "+tries=1", domain, "A"],
                       capture_output=True, text=True, timeout=8)
@@ -3052,14 +3052,14 @@ def run_dnssec_check(domains: list) -> dict:
             findings.append({
                 "type": "dnssec", "title": f"DNSSEC: {domain}",
                 "severity": "medium", "category": "dns",
-                "desc": f"`{domain}` sem DNSSEC Ã¢â‚¬â€ respostas DNS podem ser forjadas.",
+                "desc": f"`{domain}` sem DNSSEC — respostas DNS podem ser forjadas.",
                 "host": domain, "value": domain, "module": "dnssec",
             })
         elif info["nsec_type"] == "NSEC":
             findings.append({
                 "type": "dnssec", "title": f"NSEC zone walking: {domain}",
                 "severity": "low", "category": "dns",
-                "desc": f"`{domain}` usa NSEC Ã¢â‚¬â€ permite enumerar subdomÃƒÂ­nios.",
+                "desc": f"`{domain}` usa NSEC — permite enumerar subdomínios.",
                 "host": domain, "value": domain, "module": "dnssec",
             })
         results.append(info)
@@ -3068,7 +3068,7 @@ def run_dnssec_check(domains: list) -> dict:
             "scanned_at": datetime.now().isoformat(timespec="seconds")}
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Related Domain Discovery Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Related Domain Discovery ──
 
 _BRAND_TLDS = [
     # Brazil
@@ -3116,7 +3116,7 @@ def _related_crtsh_org(domain: str) -> set:
     parts = domain.split(".")
     base_name = parts[0]  # e.g. "portoseguro" from "portoseguro.com.br"
 
-    # Method A: wildcard by brand name Ã¢â‚¬â€ finds sister domains with same name, different TLD
+    # Method A: wildcard by brand name — finds sister domains with same name, different TLD
     try:
         import urllib.parse as _up
         url = f"https://crt.sh/?q=%25{_up.quote(base_name)}%25&output=json"
@@ -3141,7 +3141,7 @@ def _related_crtsh_org(domain: str) -> set:
     except Exception:
         pass
 
-    # Method B: org-name search Ã¢â‚¬â€ parse Subject O= from cert HTML, then search by org
+    # Method B: org-name search — parse Subject O= from cert HTML, then search by org
     try:
         import urllib.parse as _up, re as _re
         _ca_noise = {"let's encrypt", "digicert", "sectigo", "geotrust",
@@ -3223,7 +3223,7 @@ def _related_crtsh_org(domain: str) -> set:
                                     continue
                                 if root != domain:
                                     candidates.add(root)
-                break  # org found and processed Ã¢â‚¬â€ stop trying more probe hosts
+                break  # org found and processed — stop trying more probe hosts
     except Exception:
         pass
 
@@ -3308,7 +3308,7 @@ def run_related_domains(domain: str) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Reverse WHOIS Ã¢â‚¬â€ Asset Attribution (ASM) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Reverse WHOIS — Asset Attribution (ASM) ──
 
 def _rdap_registrant(domain: str) -> dict:
     """Extract registrant org/email from public RDAP (free, no key). Often redacted."""
@@ -3349,7 +3349,7 @@ def run_reverse_whois(domain: str, whoisxml_key: str = "") -> dict:
     - If a WhoisXML API key is configured, its Reverse WHOIS API returns the full
       list of domains registered with the same org/e-mail.
 
-    Sibling apexes are reported for attribution only Ã¢â‚¬â€ they are intentionally NOT
+    Sibling apexes are reported for attribution only — they are intentionally NOT
     fed into the active host pool (avoids scanning out-of-scope third-party orgs).
     """
     whoisxml_key = whoisxml_key or os.environ.get("WHOISXML_KEY", "")
@@ -3368,7 +3368,7 @@ def run_reverse_whois(domain: str, whoisxml_key: str = "") -> dict:
         return {
             "domain": domain, "registrant_org": org, "registrant_email": email,
             "sibling_domains": [], "found": [], "count": 0, "source": "rdap-only",
-            "note": "Sem WhoisXML key Ã¢â‚¬â€ apenas atribuiÃƒÂ§ÃƒÂ£o de registrante (RDAP). "
+            "note": "Sem WhoisXML key — apenas atribuição de registrante (RDAP). "
                     "Defina whoisxml_key nas Settings para reverse-whois completo.",
             "scanned_at": now,
         }
@@ -3377,7 +3377,7 @@ def run_reverse_whois(domain: str, whoisxml_key: str = "") -> dict:
         return {
             "domain": domain, "registrant_org": org, "registrant_email": email,
             "sibling_domains": [], "found": [], "count": 0, "source": "whoisxml",
-            "note": "Registrante redacted/privacy Ã¢â‚¬â€ sem termo utilizÃƒÂ¡vel para reverse-whois.",
+            "note": "Registrante redacted/privacy — sem termo utilizável para reverse-whois.",
             "scanned_at": now,
         }
 
@@ -3440,13 +3440,13 @@ def run_reverse_whois(domain: str, whoisxml_key: str = "") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ GitHub Code Search Ã¢â‚¬â€ Subdomain Discovery (Bug Bounty) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── GitHub Code Search — Subdomain Discovery (Bug Bounty) ──
 
 def run_github_subdomains(domains, github_token: str = "") -> dict:
     """
     Mine subdomains from public source code via GitHub code search. Distinct from
     the secret-oriented GitHub search (run_leaks_recon): here we extract any
-    `*.<domain>` hostname appearing in indexed code Ã¢â‚¬â€ CI configs, JS, docs, infra.
+    `*.<domain>` hostname appearing in indexed code — CI configs, JS, docs, infra.
 
     Code search requires authentication; without a token results are empty.
     Returned `subdomains` are auto-merged into the host pool by the pipeline.
@@ -3485,10 +3485,10 @@ def run_github_subdomains(domains, github_token: str = "") -> dict:
                 errors.append(f"{domain} p{page}: {exc}")
                 break
             if status == 401:
-                errors.append("GitHub auth requerida Ã¢â‚¬â€ configure github_token nas Settings")
+                errors.append("GitHub auth requerida — configure github_token nas Settings")
                 break
             if status == 403:
-                errors.append("GitHub rate limit (code search: ~10 req/min) Ã¢â‚¬â€ aguarde")
+                errors.append("GitHub rate limit (code search: ~10 req/min) — aguarde")
                 break
             if status == 422:
                 break   # no more results
@@ -3530,7 +3530,7 @@ def run_github_subdomains(domains, github_token: str = "") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Cloudflare / CDN Origin Discovery (Bug Bounty) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Cloudflare / CDN Origin Discovery (Bug Bounty) ──
 
 _ORIGIN_SUB_PREFIXES = [
     "direct", "origin", "origin-www", "direct-connect", "cpanel", "webmail",
@@ -3555,7 +3555,7 @@ def run_origin_discovery(domains, hosts=None, shodan_key: str = "") -> dict:
     and common non-proxied subdomains) and, when a Shodan key is set, from a
     certificate/hostname search. Each candidate is then verified by an HTTPS
     request carrying the target Host header and comparing the response title/status
-    to the CDN-fronted baseline. Origins are reported only Ã¢â‚¬â€ never auto-scanned.
+    to the CDN-fronted baseline. Origins are reported only — never auto-scanned.
 
     Note: TLS SNI follows the candidate IP, so virtual-host-by-SNI origins may not
     confirm; Host-header routing still catches the common case.
@@ -3572,7 +3572,7 @@ def run_origin_discovery(domains, hosts=None, shodan_key: str = "") -> dict:
         if not domain:
             continue
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ Baseline: is the apex fronted by Cloudflare/CDN? (headers are definitive) Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── Baseline: is the apex fronted by Cloudflare/CDN? (headers are definitive) ──
         base_status, base_body, base_hdrs = http_get(f"https://{domain}/", timeout=10, retries=1)
         hdr_blob = " ".join(f"{k}:{v}" for k, v in (base_hdrs or {}).items()).lower()
         base_title = _od_title(base_body)
@@ -3588,10 +3588,10 @@ def run_origin_discovery(domains, hosts=None, shodan_key: str = "") -> dict:
 
         if not fronted_by:
             results.append({"domain": domain, "fronted_by": "", "skipped": True,
-                            "reason": "nÃƒÂ£o estÃƒÂ¡ atrÃƒÂ¡s de CDN/WAF conhecido", "origins": []})
+                            "reason": "não está atrás de CDN/WAF conhecido", "origins": []})
             continue
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ Gather candidate origin IPs (excluding CDN ranges) Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── Gather candidate origin IPs (excluding CDN ranges) ──
         candidates = {}   # ip -> source
         def _add_ip(ip, src):
             ip = (ip or "").strip()
@@ -3640,7 +3640,7 @@ def run_origin_discovery(domains, hosts=None, shodan_key: str = "") -> dict:
             except Exception:
                 pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ Verify candidates via Host-header request Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── Verify candidates via Host-header request ──
         def _verify(item):
             ip, src = item
             st, bd = 0, b""
@@ -3689,7 +3689,7 @@ def run_origin_discovery(domains, hosts=None, shodan_key: str = "") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Mobile App Recon Ã¢â‚¬â€ Google Play discovery + apkleaks (Bug Bounty/ASM) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Mobile App Recon — Google Play discovery + apkleaks (Bug Bounty/ASM) ──
 
 def _discover_play_packages(brand: str, limit: int = 15) -> list:
     """Scrape Google Play search for Android package IDs matching the brand."""
@@ -3791,10 +3791,10 @@ def run_apk_recon(domains, company_name: str = "", apk_dir: str = "") -> dict:
                                  "secrets": len(parsed["secrets"])})
     else:
         if not apkleaks_bin:
-            notes.append("apkleaks nÃƒÂ£o instalado Ã¢â‚¬â€ sÃƒÂ³ discovery de pacotes (rode install_tools.sh)")
+            notes.append("apkleaks não instalado — só discovery de pacotes (rode install_tools.sh)")
         if not apk_files:
-            notes.append(f"Nenhum APK em {apk_dir or 'scans/<empresa>/apks'} Ã¢â‚¬â€ "
-                         "baixe os APKs dos pacotes listados para extraÃƒÂ§ÃƒÂ£o completa")
+            notes.append(f"Nenhum APK em {apk_dir or 'scans/<empresa>/apks'} — "
+                         "baixe os APKs dos pacotes listados para extração completa")
 
     return {
         "domains": domains, "brand": brand,
@@ -3806,7 +3806,7 @@ def run_apk_recon(domains, company_name: str = "", apk_dir: str = "") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Wayback / GAU Ã¢â‚¬â€ Historical URL Mining Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Wayback / GAU — Historical URL Mining ──
 
 _INTERESTING_EXT  = {".bak",".sql",".gz",".tar",".zip",".env",".log",
                      ".config",".conf",".xml",".yaml",".yml",".json",".key",".pem"}
@@ -3902,7 +3902,7 @@ def run_wayback(domain: str, limit: int = 5000, hosts: list = None) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Shodan Intelligence Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Shodan Intelligence ──
 
 def run_shodan(ips: list, api_key: str = None) -> dict:
     """Query Shodan for open ports, banners, and CVEs per IP."""
@@ -3910,7 +3910,7 @@ def run_shodan(ips: list, api_key: str = None) -> dict:
         # Try env
         api_key = os.environ.get("SHODAN_API_KEY","")
     if not api_key:
-        return {"error": "No Shodan API key Ã¢â‚¬â€ set SHODAN_API_KEY env var", "results": []}
+        return {"error": "No Shodan API key — set SHODAN_API_KEY env var", "results": []}
 
     results = []
     unique_ips = _extract_public_ips(ips)
@@ -3960,7 +3960,7 @@ def run_shodan(ips: list, api_key: str = None) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ WAF Detection Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── WAF Detection ──
 
 _WAF_SIGNATURES = {
     "Imperva Incapsula": ["incap_ses","visid_incap","_incap_","x-iinfo","x-cdn: imperva"],
@@ -4049,7 +4049,7 @@ def run_waf_detection(hosts: list) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ WAF / CDN challenge page detection (shared false-positive filter) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── WAF / CDN challenge page detection (shared false-positive filter) ──
 
 _WAF_CHALLENGE_SIGNATURES = [
     "just a moment...", "attention required! | cloudflare", "cf-browser-verification",
@@ -4079,7 +4079,7 @@ def _is_waf_challenge_body(body: str) -> bool:
     return any(sig in low for sig in _WAF_CHALLENGE_SIGNATURES)
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Subdomain Takeover Detection Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Subdomain Takeover Detection ──
 
 _TAKEOVER_SIGNATURES = {
     "GitHub Pages":       ["there isn't a github pages site here","for root domain"],
@@ -4160,7 +4160,7 @@ def _check_takeover(host: str) -> dict | None:
         return {
             "host": host, "cname": cname, "cname_target": cname_target,
             "severity": "critical",
-            "issue": f"NXDOMAIN Ã¢â‚¬â€ dangling CNAME to {cname_target} (unclaimed service)",
+            "issue": f"NXDOMAIN — dangling CNAME to {cname_target} (unclaimed service)",
             "takeover_possible": True,
         }
 
@@ -4180,7 +4180,7 @@ def _check_takeover(host: str) -> dict | None:
                     return {
                         "host": host, "cname": cname, "cname_target": cname_target,
                         "severity": "critical",
-                        "issue": f"Unclaimed {service} Ã¢â‚¬â€ takeover likely possible",
+                        "issue": f"Unclaimed {service} — takeover likely possible",
                         "takeover_possible": True,
                         "service": service,
                     }
@@ -4188,7 +4188,7 @@ def _check_takeover(host: str) -> dict | None:
     return {
         "host": host, "cname": cname, "cname_target": cname_target,
         "severity": "medium",
-        "issue": f"CNAME Ã¢â€ â€™ {cname_target} Ã¢â‚¬â€ verify service is active",
+        "issue": f"CNAME → {cname_target} — verify service is active",
         "takeover_possible": False,
     }
 
@@ -4214,7 +4214,7 @@ def run_takeover_check(hosts: list) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Credential / Breach Intelligence Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Credential / Breach Intelligence ──
 
 def _check_leakix(domain: str) -> list:
     """Query LeakIX (free tier) for domain leaks."""
@@ -4268,7 +4268,7 @@ def _check_dehashed(domain: str, api_key: str = None) -> dict:
 def _check_hibp_domain(domain: str, api_key: str = None) -> dict:
     """Query HaveIBeenPwned domain search (v3, requires paid key)."""
     if not api_key:
-        return {"results": [], "note": "No HIBP API key Ã¢â‚¬â€ domain search requires paid plan"}
+        return {"results": [], "note": "No HIBP API key — domain search requires paid plan"}
     try:
         url = f"https://haveibeenpwned.com/api/v3/breacheddomain/{domain}"
         status, body, _ = http_get(url, timeout=10,
@@ -4636,41 +4636,41 @@ def run_breach_check(domain: str, hibp_key: str = None,
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Port Scan (nmap/naabu wrapper) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Port Scan (nmap/naabu wrapper) ──
 
 _RISKY_PORTS = {
-    21:    "FTP Ã¢â‚¬â€ plaintext file transfer",
+    21:    "FTP — plaintext file transfer",
     22:    "SSH",
-    23:    "Telnet Ã¢â‚¬â€ plaintext protocol",
+    23:    "Telnet — plaintext protocol",
     25:    "SMTP",
     53:    "DNS",
     80:    "HTTP",
-    110:   "POP3 Ã¢â‚¬â€ plaintext email",
-    143:   "IMAP Ã¢â‚¬â€ plaintext email",
-    389:   "LDAP Ã¢â‚¬â€ directory service",
+    110:   "POP3 — plaintext email",
+    143:   "IMAP — plaintext email",
+    389:   "LDAP — directory service",
     443:   "HTTPS",
-    445:   "SMB Ã¢â‚¬â€ Windows file sharing",
-    512:   "rexec Ã¢â‚¬â€ remote exec (plaintext)",
-    513:   "rlogin Ã¢â‚¬â€ remote login (plaintext)",
-    514:   "rsh Ã¢â‚¬â€ remote shell (plaintext)",
+    445:   "SMB — Windows file sharing",
+    512:   "rexec — remote exec (plaintext)",
+    513:   "rlogin — remote login (plaintext)",
+    514:   "rsh — remote shell (plaintext)",
     636:   "LDAPS",
     1433:  "MSSQL",
     1521:  "Oracle DB",
-    2181:  "ZooKeeper Ã¢â‚¬â€ often unauthenticated",
-    2375:  "Docker API Ã¢â‚¬â€ plaintext (CRITICAL)",
+    2181:  "ZooKeeper — often unauthenticated",
+    2375:  "Docker API — plaintext (CRITICAL)",
     2376:  "Docker TLS API",
-    2379:  "etcd API Ã¢â‚¬â€ Kubernetes secrets",
+    2379:  "etcd API — Kubernetes secrets",
     3000:  "Grafana/dev server",
     3306:  "MySQL",
-    3389:  "RDP Ã¢â‚¬â€ Remote Desktop",
+    3389:  "RDP — Remote Desktop",
     4243:  "Docker API alt",
     4443:  "HTTPS-alt",
     4848:  "GlassFish Admin",
     5000:  "Dev server / Docker Registry",
     5432:  "PostgreSQL",
-    5601:  "Kibana Ã¢â‚¬â€ often unauthenticated",
-    5900:  "VNC Ã¢â‚¬â€ remote desktop",
-    6379:  "Redis Ã¢â‚¬â€ often unauthenticated",
+    5601:  "Kibana — often unauthenticated",
+    5900:  "VNC — remote desktop",
+    6379:  "Redis — often unauthenticated",
     7001:  "WebLogic Admin",
     7474:  "Neo4j Browser",
     8001:  "kubectl proxy",
@@ -4678,17 +4678,17 @@ _RISKY_PORTS = {
     8088:  "Hadoop YARN ResourceManager",
     8161:  "ActiveMQ Web Console",
     8443:  "HTTPS-alt",
-    8888:  "Jupyter Notebook Ã¢â‚¬â€ often unauthenticated",
+    8888:  "Jupyter Notebook — often unauthenticated",
     9000:  "SonarQube / Portainer",
-    9090:  "Prometheus Ã¢â‚¬â€ metrics exposed",
-    9092:  "Kafka Ã¢â‚¬â€ often unauthenticated",
-    9200:  "Elasticsearch Ã¢â‚¬â€ often unauthenticated",
+    9090:  "Prometheus — metrics exposed",
+    9092:  "Kafka — often unauthenticated",
+    9200:  "Elasticsearch — often unauthenticated",
     9300:  "Elasticsearch cluster",
-    10250: "Kubelet API Ã¢â‚¬â€ Kubernetes node",
+    10250: "Kubelet API — Kubernetes node",
     10255: "Kubelet read-only",
-    11211: "Memcached Ã¢â‚¬â€ often unauthenticated",
+    11211: "Memcached — often unauthenticated",
     15672: "RabbitMQ Management UI",
-    27017: "MongoDB Ã¢â‚¬â€ often unauthenticated",
+    27017: "MongoDB — often unauthenticated",
     27018: "MongoDB",
     50000: "Jenkins JNLP agent port",
     50070: "Hadoop NameNode",
@@ -4722,7 +4722,7 @@ def run_port_scan(hosts: list, ports: str = _DEFAULT_SCAN_PORTS,
         return {"error": "No public IPs to scan", "results": []}
 
     if tool == "auto":
-        # nmap first Ã¢â‚¬â€ works without root; masscan needs raw sockets (root only)
+        # nmap first — works without root; masscan needs raw sockets (root only)
         for candidate in ("naabu", "nmap", "masscan"):
             if shutil.which(candidate):
                 tool = candidate; break
@@ -4762,7 +4762,7 @@ def run_port_scan(hosts: list, ports: str = _DEFAULT_SCAN_PORTS,
 
     clean_ips = [ip for ip in unique_ips if not _is_waf_ip(ip)]
     if not clean_ips:
-        # All IPs are WAF proxies Ã¢â‚¬â€ scan anyway with a warning
+        # All IPs are WAF proxies — scan anyway with a warning
         clean_ips = unique_ips
 
     results = []
@@ -4874,7 +4874,7 @@ def run_port_scan(hosts: list, ports: str = _DEFAULT_SCAN_PORTS,
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ JavaScript Recon Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── JavaScript Recon ──
 
 # Secret patterns: (regex, type, severity)
 _JS_SECRET_PATTERNS = [
@@ -4897,8 +4897,8 @@ _JS_SECRET_PATTERNS = [
     (r'key-[a-z0-9]{32}',                                                                   "mailgun_key",       "high"),
     (r'(?i)bearer\s+eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+',               "jwt_bearer",        "high"),
     (r'eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}',                "jwt_token",         "medium"),
-    # API Gateway credentials Ã¢â‚¬â€ Sensedia, Kong, Apigee, MuleSoft, AWS API GW
-    # client_secret alone is high; client_id alone is medium (semi-public); both together Ã¢â€ â€™ critical (handled in _analyze_js_content)
+    # API Gateway credentials — Sensedia, Kong, Apigee, MuleSoft, AWS API GW
+    # client_secret alone is high; client_id alone is medium (semi-public); both together → critical (handled in _analyze_js_content)
     (r'(?i)(?:client[_-]?secret|clientSecret)\s*[=:]\s*["\']([A-Za-z0-9_\-\.@]{16,80})["\']',         "client_secret",   "high"),
     (r'(?i)(?<!["\w])client[_-]?id(?!["\w])\s*[=:]\s*["\']([A-Za-z0-9_\-\.@]{8,80})["\']',            "client_id",       "medium"),
     # Quoted-key style: {"client_id":"val"} / {"client-id":"val"} (Sensedia header injection)
@@ -4907,12 +4907,12 @@ _JS_SECRET_PATTERNS = [
     # OAuth2 consumer key/secret (Sensedia / Kong / Apigee also use these names)
     (r'(?i)consumer[_-]?key\s*[=:]\s*["\']([A-Za-z0-9_\-\.@]{16,80})["\']',                           "consumer_key",    "high"),
     (r'(?i)consumer[_-]?secret\s*[=:]\s*["\']([A-Za-z0-9_\-\.@]{16,80})["\']',                        "consumer_secret", "high"),
-    # Generic credentials Ã¢â‚¬â€ values must contain real entropy (mixed chars, not i18n keys or snake_case labels)
+    # Generic credentials — values must contain real entropy (mixed chars, not i18n keys or snake_case labels)
     # Exclude AIza* (already caught as google_api_key) and pure snake_case/SCREAMING_SNAKE_CASE labels
     (r'(?i)(?:api[_-]?key|apikey)\s*[=:]\s*["\'](?!AIza)([A-Za-z0-9_\-]{20,}[A-Za-z][0-9][A-Za-z0-9_\-]*)["\']', "api_key",      "high"),
     (r'(?i)(?:secret[_-]?key|secretkey)\s*[=:]\s*["\']([A-Za-z0-9_\-]{16,})["\']',                    "secret_key",      "high"),
     (r'(?i)(?:access[_-]?token|auth[_-]?token)\s*[=:]\s*["\']([A-Za-z0-9_\-\.]{20,})["\']',           "access_token",    "high"),
-    # Password: require value has real entropy Ã¢â‚¬â€ must contain digit OR special char, and NOT be an i18n key pattern
+    # Password: require value has real entropy — must contain digit OR special char, and NOT be an i18n key pattern
     (r'(?i)(?:password|passwd)\s*[=:]\s*["\']([^\'"]{8,64})["\']',                          "password",          "high"),
     (r'(?i)authorization\s*[=:]\s*["\']Basic\s+([A-Za-z0-9+/=]{8,})["\']',                 "basic_auth",        "high"),
     # Cloud storage
@@ -4920,7 +4920,7 @@ _JS_SECRET_PATTERNS = [
     (r'([a-z0-9\-]{3,})\.s3(?:\.[a-z0-9\-]+)?\.amazonaws\.com',                            "s3_bucket",         "medium"),
     (r'https?://[a-z0-9\-]+\.blob\.core\.windows\.net',                                     "azure_blob",        "medium"),
     (r'gs://([a-z0-9\-_\.]+)',                                                               "gcs_bucket",        "medium"),
-    # Internal network Ã¢â‚¬â€ proper octet validation (0-255 only, prevents SVG coordinate false positives)
+    # Internal network — proper octet validation (0-255 only, prevents SVG coordinate false positives)
     (r'(?<!["\'\w.])(10\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d))(?!["\'\w.])', "internal_ip", "low"),
     (r'(?<!["\'\w.])(192\.168\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d))(?!["\'\w.])',                                     "internal_ip", "low"),
     (r'(?<!["\'\w.])(172\.(?:1[6-9]|2\d|3[01])\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d))(?!["\'\w.])',                   "internal_ip", "low"),
@@ -4930,7 +4930,7 @@ _JS_SECRET_PATTERNS = [
     (r'https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+',    "slack_webhook",     "critical"),
     (r'https://discord\.com/api/webhooks/\d+/[A-Za-z0-9_-]+',                               "discord_webhook",   "critical"),
     (r'https://discordapp\.com/api/webhooks/\d+/[A-Za-z0-9_-]+',                            "discord_webhook",   "critical"),
-    # Email addresses in JS (contact, support, noreply Ã¢â‚¬â€ still PII/OSINT useful)
+    # Email addresses in JS (contact, support, noreply — still PII/OSINT useful)
     (r'[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}',                                                       "email_address",     "low"),
     # oauth2/token endpoint with client credentials
     (r'(?i)oauth2?/token[^\n]{0,80}client_id[^\n]{0,40}',                                    "oauth_endpoint",    "medium"),
@@ -4938,7 +4938,7 @@ _JS_SECRET_PATTERNS = [
     (r'(?i)(?:mongodb|mysql|postgresql|redis)://[a-zA-Z0-9_]+:[^@\s]+@',                    "db_connection",     "critical"),
 ]
 
-# LinkFinder regex Ã¢â‚¬â€ matches the same multi-group pattern as the original tool
+# LinkFinder regex — matches the same multi-group pattern as the original tool
 _ENDPOINT_RE = re.compile(
     r"""(?:"|')"""
     r"""("""
@@ -4954,7 +4954,7 @@ _ENDPOINT_RE = re.compile(
     r"""(?:"|')""",
     re.VERBOSE | re.MULTILINE,
 )
-# Imperva / WAF bot-challenge JS URL patterns Ã¢â‚¬â€ these look like real JS files but aren't
+# Imperva / WAF bot-challenge JS URL patterns — these look like real JS files but aren't
 _WAF_CHALLENGE_URL_RE = re.compile(
     r'/(?:[a-z]{1,4}-)?(?:[A-Z][a-z]+-){3,}|'   # CamelCase word-slug paths
     r'\?d=[\w.\-]+\.[a-z]{2,}$|'                  # Imperva ?d=domain fingerprint
@@ -5055,7 +5055,7 @@ def _decode_jwt_unverified(token: str) -> dict | None:
 
 def _jwt_finding_detail(value: str, default_sev: str) -> tuple[str, str]:
     """Re-grade a discovered JWT based on its actual claims/header to cut down
-    on noise â€” most client-side JWTs are normal session tokens, not 'secrets'."""
+    on noise — most client-side JWTs are normal session tokens, not 'secrets'."""
     dec = _decode_jwt_unverified(value)
     if not dec:
         return default_sev, ""
@@ -5066,7 +5066,7 @@ def _jwt_finding_detail(value: str, default_sev: str) -> tuple[str, str]:
 
     if alg in ("none", ""):
         severity = "high"
-        notes.append("alg=none â€” signature not verifiable/forgeable")
+        notes.append("alg=none — signature not verifiable/forgeable")
 
     exp = payload.get("exp")
     if isinstance(exp, (int, float)):
@@ -5076,7 +5076,7 @@ def _jwt_finding_detail(value: str, default_sev: str) -> tuple[str, str]:
             notes.append("active token, has expiry")
     else:
         severity = "medium" if severity == "low" else severity
-        notes.append("no 'exp' claim â€” token may never expire")
+        notes.append("no 'exp' claim — token may never expire")
 
     sensitive = [k for k in ("password", "secret", "client_secret", "private_key") if k in payload]
     if sensitive:
@@ -5087,7 +5087,7 @@ def _jwt_finding_detail(value: str, default_sev: str) -> tuple[str, str]:
     if auth_claims:
         if severity == "low":
             severity = "medium"
-        notes.append(f"authorization claims in payload: {', '.join(auth_claims)} â€” verify server re-checks them")
+        notes.append(f"authorization claims in payload: {', '.join(auth_claims)} — verify server re-checks them")
 
     return severity, "; ".join(notes)
 
@@ -5347,7 +5347,7 @@ def _analyze_source_map(map_url: str, data: dict) -> dict:
 def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
     """
     Use Playwright headless Chromium to capture runtime JS URLs and XHR/fetch
-    network calls for each target.  Targets are processed in parallel Ã¢â‚¬â€ each
+    network calls for each target.  Targets are processed in parallel — each
     worker thread owns its own browser instance so Playwright's sync API is
     thread-safe.
 
@@ -5541,7 +5541,7 @@ def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
             pass
         return host_js, host_calls[:200], js_bodies
 
-    # Run all targets in parallel Ã¢â‚¬â€ cap workers so we don't OOM the box
+    # Run all targets in parallel — cap workers so we don't OOM the box
     max_workers = min(len(targets), 8)
     runtime_js:       set  = set()
     network_map:      dict = {}
@@ -5585,7 +5585,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
     getjs_bin  = shutil.which("getJS")
     gau_bin    = shutil.which("gau")
 
-    # Build target list Ã¢â‚¬â€ prefer HTTPS, fall back to HTTP, include all live hosts
+    # Build target list — prefer HTTPS, fall back to HTTP, include all live hosts
     targets = []
     seen_hosts: set = set()
     for h in hosts:
@@ -5610,8 +5610,8 @@ def run_js_recon(domains: list, hosts: list) -> dict:
 
     raw_js_urls: set = set()
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Discovery Phase Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    # 1) katana Ã¢â‚¬â€ deep crawl, JS-aware (parses inline + external scripts)
+    # ── Discovery Phase ──
+    # 1) katana — deep crawl, JS-aware (parses inline + external scripts)
     if katana_bin and targets:
         try:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
@@ -5630,7 +5630,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
         except Exception:
             pass
 
-    # 2) subjs Ã¢â‚¬â€ extracts <script src> tags from each host
+    # 2) subjs — extracts <script src> tags from each host
     if subjs_bin and targets:
         try:
             r = _subp(
@@ -5645,7 +5645,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
         except Exception:
             pass
 
-    # 3) getJS Ã¢â‚¬â€ another script tag extractor
+    # 3) getJS — another script tag extractor
     if getjs_bin and targets:
         try:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
@@ -5662,7 +5662,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
         except Exception:
             pass
 
-    # 4) gau Ã¢â‚¬â€ historical JS URLs from Wayback/OTX/CommonCrawl
+    # 4) gau — historical JS URLs from Wayback/OTX/CommonCrawl
     if gau_bin and domains:
         try:
             for d in domains[:3]:
@@ -5678,7 +5678,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
         except Exception:
             pass
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Playwright Runtime Capture Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Playwright Runtime Capture ──
     # Visit all live hosts that are likely frontend web apps.
     # Exclude: pure API gateways, hosts with error/redirect-only titles.
     _API_HOST_RE = re.compile(
@@ -5736,7 +5736,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
     # Filter out WAF bot-challenge URLs before analysis
     js_url_list = [u for u in raw_js_urls if not _WAF_CHALLENGE_URL_RE.search(u)]
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Analysis Phase Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Analysis Phase ──
     js_files = []
     total_secrets   = 0
     total_endpoints = 0
@@ -5915,7 +5915,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Screenshots Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Screenshots ──
 
 def _gowitness_v3_to_url(stem: str) -> str:
     """Reconstruct a URL from a gowitness v3 JPEG filename stem.
@@ -6021,7 +6021,7 @@ def run_screenshots(hosts: list, domains: list, output_dir: str = "") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ DNS Brute-force with Permutations Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── DNS Brute-force with Permutations ──
 
 def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict:
     """
@@ -6060,7 +6060,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
 
     permutations = []
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Wordlist-based permutations (external file, tiered) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Wordlist-based permutations (external file, tiered) ──
     try:
         from tools import load_wordlist
         # Map pipeline mode to wordlist size
@@ -6073,14 +6073,14 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
     except ImportError:
         pass
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Method 0: alterx pattern-based permutations (primary, most effective) Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Method 0: alterx pattern-based permutations (primary, most effective) ──
     if alterx_bin and len(seeds) > 1:
         try:
             capped_seeds = sorted(seeds, key=len)[:200]
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
                 tf.write("\n".join(capped_seeds))
                 tf_path = tf.name
-            # alterx learns patterns from existing subdomains (e.g. api-v2-prod Ã¢â€ â€™ api-v3-prod)
+            # alterx learns patterns from existing subdomains (e.g. api-v2-prod → api-v3-prod)
             # -enrich adds enrichment words, -limit caps output to avoid explosion
             alterx_limit = min(perm_cap * 2, 100000)
             gen_result = _subp(
@@ -6094,7 +6094,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
         except Exception:
             pass
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Method 1: dnsgen permutations from known seeds Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Method 1: dnsgen permutations from known seeds ──
     if dnsgen_bin and len(seeds) > 1:
         try:
             capped_seeds = sorted(seeds, key=len)[:50]
@@ -6111,7 +6111,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
         except Exception:
             pass
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Method 2: altdns mutations from known seeds Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Method 2: altdns mutations from known seeds ──
     if altdns_bin and len(seeds) > 1:
         try:
             capped = sorted(seeds, key=len)[:100]
@@ -6134,7 +6134,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
         except Exception:
             pass
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Fallback: hardcoded common prefixes Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Fallback: hardcoded common prefixes ──
     if not permutations:
         COMMON = [
             "www","mail","smtp","ftp","vpn","remote","api","dev","staging","test","uat",
@@ -6161,10 +6161,10 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
     if not permutations:
         return {"error": "No permutations generated", "findings": []}
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Deduplicate + cap Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Deduplicate + cap ──
     permutations = sorted(set(p for p in permutations if p.endswith(domain) and len(p) < 200))[:perm_cap]
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Resolve with best available tool Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Resolve with best available tool ──
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
         tf.write("\n".join(permutations))
         perms_file = tf.name
@@ -6220,7 +6220,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
         except Exception:
             pass
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Python socket fallback (threaded, uses system resolver Ã¢â‚¬â€ works behind VPN) Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Python socket fallback (threaded, uses system resolver — works behind VPN) ──
     if not resolved and resolver_used == "none":
         import socket as _socket
         from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
@@ -6244,7 +6244,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
 
     Path(perms_file).unlink(missing_ok=True)
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Filter out already known hosts Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Filter out already known hosts ──
     known_hosts = {h.get("host","") for h in hosts}
     new_findings = [
         {"type": "subdomain", "value": r["host"], "host": r["host"],
@@ -6266,12 +6266,12 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ API & Panel Exposure (Nuclei-based) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── API & Panel Exposure (Nuclei-based) ──
 
 def run_api_exposure(hosts: list, domains: list) -> dict:
     """
     Detect exposed API panels, docs and misconfigurations using nuclei:
-    - Spring Boot Actuators (/actuator/env, /heapdump, /beansÃ¢â‚¬Â¦)
+    - Spring Boot Actuators (/actuator/env, /heapdump, /beans…)
     - Swagger / OpenAPI / Redoc UI
     - GraphQL Introspection
     - CORS Misconfiguration
@@ -6309,7 +6309,7 @@ def run_api_exposure(hosts: list, domains: list) -> dict:
         tf.write("\n".join(dict.fromkeys(targets)))
         tfile = tf.name
 
-    # Nuclei template sets to run Ã¢â‚¬â€ paths validated against actual template install
+    # Nuclei template sets to run — paths validated against actual template install
     TEMPLATE_SETS = [
         # Spring Boot misconfiguration (correct path)
         ("springboot", [
@@ -6408,7 +6408,7 @@ def run_api_exposure(hosts: list, domains: list) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ CertStream Monitor (one-shot snapshot) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── CertStream Monitor (one-shot snapshot) ──
 
 def run_certstream_snapshot(domains: list, duration_sec: int = 60) -> dict:
     """
@@ -6522,13 +6522,13 @@ def run_certstream_snapshot(domains: list, duration_sec: int = 60) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Virtual Host Discovery Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Virtual Host Discovery ──
 
 def run_vhost_discovery(hosts: list, domains: list, wordlist: str = "") -> dict:
     """
     Discover virtual hosts on each IP by fuzzing the Host header.
     Uses ffuf (primary) or gobuster vhost (fallback).
-    Capped at 5 IPs Ãƒâ€” 200 wordlist entries Ãƒâ€” 30s per run to stay fast.
+    Capped at 5 IPs × 200 wordlist entries × 30s per run to stay fast.
     """
     import shutil, tempfile, urllib.request
 
@@ -6580,7 +6580,7 @@ def run_vhost_discovery(hosts: list, domains: list, wordlist: str = "") -> dict:
             ips_to_scan.append({"ip": ip, "host": h.get("host",""), "ports": h.get("ports",[])})
 
     if not ips_to_scan:
-        return {"error": "No IPs found Ã¢â‚¬â€ run a scan first", "findings": []}
+        return {"error": "No IPs found — run a scan first", "findings": []}
 
     # Write wordlist to temp file
     wl_path = wordlist
@@ -6727,7 +6727,7 @@ def run_vhost_discovery(hosts: list, domains: list, wordlist: str = "") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ CVE Lookup via NVD API v2 Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── CVE Lookup via NVD API v2 ──
 
 # Products that are CDNs, WAFs, cloud infra, or third-party client-side services
 # CVEs for these are not directly exploitable on the target's own systems
@@ -6756,7 +6756,7 @@ _CVE_SKIP_PRODUCTS = {
     "redirect", "recaptcha", "disqus",
 }
 
-# Maps common tech display names Ã¢â€ â€™ CPE 2.3 product component for virtualMatchString queries.
+# Maps common tech display names → CPE 2.3 product component for virtualMatchString queries.
 # Only products with a reliable CPE mapping are listed; others fall back to keyword search.
 _CPE_PRODUCT_NAMES: dict[str, str] = {
     # Web servers
@@ -6837,7 +6837,7 @@ _CPE_PRODUCT_NAMES: dict[str, str] = {
     "cpanel":                    "cpanel",
 }
 
-# CISA KEV catalog cache Ã¢â‚¬â€ loaded once per process
+# CISA KEV catalog cache — loaded once per process
 _KEV_CACHE:   dict[str, bool] = {}
 _KEV_LOADED:  bool = False
 
@@ -6889,12 +6889,12 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
     Cross-reference detected technologies with NVD CVE database.
 
     Strategy per product:
-    1. Versioned + CPE mapping: query NVD virtualMatchString Ã¢â‚¬â€ exact product:version
+    1. Versioned + CPE mapping: query NVD virtualMatchString — exact product:version
        match in affected configurations (no false positives from description mentions).
     2. Versioned, CPE returns 0: keyword fallback, filter to CVEs with CPE config match.
     3. Unversioned: keyword search, min_year=2020, filter by CPE config presence.
     4. Enrich all results with EPSS scores (FIRST.org) and CISA KEV flags.
-    5. Sort: KEV-listed first, then EPSSÃƒâ€”CVSS descending.
+    5. Sort: KEV-listed first, then EPSS×CVSS descending.
     """
     from urllib.parse import urlencode
     import time as _time
@@ -6954,7 +6954,7 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
     def _version_in_range(detected: str, nodes: list) -> bool:
         """Return True if detected version is within at least one vulnerable range in the CPE nodes."""
         if not detected or not nodes:
-            return True  # no info Ã¢â€ â€™ don't filter
+            return True  # no info → don't filter
         dv = _ver_tuple(detected)
         for node in nodes:
             for match in node.get("cpeMatch", []):
@@ -6981,7 +6981,7 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
         ph = product_hint.lower()
         configs = item.get("cve", {}).get("configurations", [])
         if not configs:
-            return True  # unanalyzed CVE Ã¢â‚¬â€ let it through
+            return True  # unanalyzed CVE — let it through
         for cfg in configs:
             for node in cfg.get("nodes", []):
                 for match in node.get("cpeMatch", []):
@@ -6990,7 +6990,7 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
         return False
 
     def _query_cpe(cpe_name: str, version: str, product: str) -> list[dict]:
-        """Query NVD virtualMatchString Ã¢â‚¬â€ returns only CVEs where product:version is in configs."""
+        """Query NVD virtualMatchString — returns only CVEs where product:version is in configs."""
         vms = f"cpe:2.3:a:*:{cpe_name}:{version}:*:*:*:*:*:*:*"
         if vms in queries_done:
             return []
@@ -7093,7 +7093,7 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
                 cves = _query_cpe(cpe_name, version, product)
                 _time.sleep(rate_delay)
                 if not cves:
-                    # CPE returned nothing (version not yet in NVD) Ã¢â‚¬â€ keyword fallback
+                    # CPE returned nothing (version not yet in NVD) — keyword fallback
                     cves = _query_keyword(f"{product} {version}", product, min_year=2010)
                     _time.sleep(rate_delay)
             else:
@@ -7109,7 +7109,7 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
             c["affected_hosts"]   = affected[:10]
         findings.extend(cves)
 
-    # Deduplicate by CVE ID Ã¢â‚¬â€ merge affected_hosts, keep highest score
+    # Deduplicate by CVE ID — merge affected_hosts, keep highest score
     seen: dict[str, dict] = {}
     for f in findings:
         cid = f["cve_id"]
@@ -7135,7 +7135,7 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
     for f in all_unique:
         f["kev"] = _KEV_CACHE.get(f["cve_id"], False)
 
-    # Sort: KEV first, then EPSSÃƒâ€”CVSS descending
+    # Sort: KEV first, then EPSS×CVSS descending
     all_findings = sorted(
         all_unique,
         key=lambda x: (0 if x["kev"] else 1, -(x["epss"] * x["score"]), -x["score"]),
@@ -7161,7 +7161,7 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ CORS Misconfiguration Scanner Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── CORS Misconfiguration Scanner ──
 
 def run_cors_scan(hosts: list) -> dict:
     """Test CORS misconfigurations: origin reflection, null origin, prefix/suffix bypasses."""
@@ -7219,7 +7219,7 @@ def run_cors_scan(hosts: list) -> dict:
                 reflected = acao == origin or acao == "*"
                 if not reflected:
                     continue
-                # Skip generic WAF/CDN challenge pages Ã¢â‚¬â€ a reflected ACAO on a
+                # Skip generic WAF/CDN challenge pages — a reflected ACAO on a
                 # block page is not the application's real CORS policy.
                 if _is_waf_challenge_body(body_snip):
                     continue
@@ -7266,7 +7266,7 @@ def run_cors_scan(hosts: list) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Kubernetes / Docker / etcd Infrastructure Exposure Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Kubernetes / Docker / etcd Infrastructure Exposure ──
 
 def run_infra_exposure(hosts: list) -> dict:
     """Detect exposed container orchestration and registry infrastructure."""
@@ -7591,7 +7591,7 @@ def run_waf_bypass_test(hosts: list) -> dict:
                     "desc": (
                         f"Header `{header_name}: {list(extra_h.values())[0]}` changed response "
                         f"from {base_status}/{base_len}B to {status}/{body_len}B. "
-                        f"WAF may be bypassed Ã¢â‚¬â€ direct access to origin possible."
+                        f"WAF may be bypassed — direct access to origin possible."
                     ),
                     "url": url,
                     "metadata": {
@@ -7674,20 +7674,20 @@ def run_smtp_probe(hosts: list) -> dict:
                     issues.append(f"Version disclosure: {version}")
                     sev = "medium"
                 if not has_starttls and port in (25, 587):
-                    issues.append("STARTTLS not offered Ã¢â‚¬â€ email in cleartext")
+                    issues.append("STARTTLS not offered — email in cleartext")
                     sev = "high"
                 if port == 25 and "VRFY" in ehlo_resp.upper():
-                    issues.append("VRFY command enabled Ã¢â‚¬â€ user enumeration possible")
+                    issues.append("VRFY command enabled — user enumeration possible")
                     sev = "medium" if sev == "info" else sev
                 if port == 25 and "EXPN" in ehlo_resp.upper():
-                    issues.append("EXPN command enabled Ã¢â‚¬â€ mailing list disclosure")
+                    issues.append("EXPN command enabled — mailing list disclosure")
                     sev = "medium" if sev == "info" else sev
 
                 if issues:
                     findings.append({
                         "type": "smtp_exposure",
                         "host": host_name,
-                        "title": f"SMTP Issue on {host_name}:{port} Ã¢â‚¬â€ {issues[0]}",
+                        "title": f"SMTP Issue on {host_name}:{port} — {issues[0]}",
                         "severity": sev,
                         "category": "services",
                         "desc": f"Port {port}: {banner[:120]}. Issues: {'; '.join(issues)}",
@@ -8127,7 +8127,7 @@ def run_s3_write_check(cloud_findings: list) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ GraphQL Discovery Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── GraphQL Discovery ──
 
 def run_graphql_discovery(hosts: list, domains: list) -> dict:
     """Discover GraphQL endpoints and test introspection + playground exposure."""
@@ -8237,7 +8237,7 @@ def run_graphql_discovery(hosts: list, domains: list) -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Postman Collections Exposure Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Postman Collections Exposure ──
 
 # Regex patterns to detect secrets inside Postman collection JSON
 _POSTMAN_SECRET_PATTERNS = [
@@ -8540,7 +8540,7 @@ def run_postman_collections(domain: str, company_name: str = "",
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Run all for a company Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Run all for a company ──
 
 def run_all(company: dict, hosts: list, findings: list,
             github_token: str = None, shodan_key: str = None,
@@ -8553,38 +8553,38 @@ def run_all(company: dict, hosts: list, findings: list,
 
     _v = lambda msg: print(f"  [*] {msg}") if verbose else None
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Fast passive modules Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    _v(f"Email Security Ã¢â‚¬â€ {domain}")
+    # ── Fast passive modules ──
+    _v(f"Email Security — {domain}")
     results["email"] = run_email_recon(domain)
 
-    _v(f"Full DNS Records Ã¢â‚¬â€ {domain}")
+    _v(f"Full DNS Records — {domain}")
     results["dns"] = dns_records(domain)
 
-    _v(f"Certificate Transparency Ã¢â‚¬â€ {domain}")
+    _v(f"Certificate Transparency — {domain}")
     results["certs"] = run_cert_recon(domain, hosts)
 
     _v(f"ASN / IP Intelligence")
     results["asn"] = run_asn_recon(hosts)
 
-    _v(f"Typosquatting Ã¢â‚¬â€ {domain}")
+    _v(f"Typosquatting — {domain}")
     results["typosquat"] = run_typosquatting(domain)
 
-    _v(f"Related Domains Ã¢â‚¬â€ {domain}")
+    _v(f"Related Domains — {domain}")
     results["related"] = run_related_domains(domain)
 
-    _v(f"Cloud Asset Discovery Ã¢â‚¬â€ {org}")
+    _v(f"Cloud Asset Discovery — {org}")
     results["cloud"] = run_cloud_assets(domains, org)
 
-    _v(f"Wayback / GAU URL mining Ã¢â‚¬â€ {domain}")
+    _v(f"Wayback / GAU URL mining — {domain}")
     results["wayback"] = run_wayback(domain)
 
-    _v(f"Breach / Credential Intelligence Ã¢â‚¬â€ {domain}")
+    _v(f"Breach / Credential Intelligence — {domain}")
     results["breach"] = run_breach_check(domain, hibp_key)
 
     _v(f"Leaks & Secrets")
     results["leaks"] = run_leaks_recon(domain, hosts, github_token)
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Active network modules Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Active network modules ──
     _v(f"Security Headers (up to 30 live hosts)")
     results["headers"] = run_headers_bulk(hosts)
 
@@ -8611,41 +8611,41 @@ def run_all(company: dict, hosts: list, findings: list,
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
     }
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ API-dependent modules Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── API-dependent modules ──
     if shodan_key:
         _v(f"Shodan Intelligence")
         results["shodan"] = run_shodan(hosts, shodan_key)
 
     if nvd_key or True:   # NVD works without key (rate limited)
-        _v(f"CVE Lookup Ã¢â‚¬â€ tech stack vs NVD")
+        _v(f"CVE Lookup — tech stack vs NVD")
         results["cve"] = run_cve_lookup(hosts, nvd_key or "")
 
-    _v(f"JavaScript Recon Ã¢â‚¬â€ crawl + secret extraction")
+    _v(f"JavaScript Recon — crawl + secret extraction")
     results["js"] = run_js_recon(domains, hosts)
 
-    _v(f"DNS Brute-force & Permutations Ã¢â‚¬â€ {domain}")
+    _v(f"DNS Brute-force & Permutations — {domain}")
     results["dns_brute"] = run_dns_bruteforce(domain, hosts)
 
-    _v(f"API/Panel Exposure Ã¢â‚¬â€ nuclei scan")
+    _v(f"API/Panel Exposure — nuclei scan")
     results["api_panels"] = run_api_exposure(hosts, domains)
 
-    _v(f"CertStream Ã¢â‚¬â€ new certificate monitoring")
+    _v(f"CertStream — new certificate monitoring")
     results["certstream"] = run_certstream_snapshot(domains, duration_sec=60)
 
-    _v(f"Screenshots Ã¢â‚¬â€ visual inventory")
+    _v(f"Screenshots — visual inventory")
     results["screenshot"] = run_screenshots(hosts, domains)
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Risk scoring Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Risk scoring ──
     _v(f"Risk scoring hosts")
     results["host_scores"] = {h["host"]: score_host(h, findings) for h in hosts}
 
     return results
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ CLI entry Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── CLI entry ──
 
 if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser(description="ASM Recon Platform Ã¢â‚¬â€ modular recon engine")
+    ap = argparse.ArgumentParser(description="ASM Recon Platform — modular recon engine")
     ap.add_argument("module", choices=[
         "email","certs","asn","services","leaks","dns",
         "headers","typosquat","cloud","related","wayback",
@@ -8721,7 +8721,7 @@ if __name__ == "__main__":
                                  verbose=True), indent=2))
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Content Discovery via ffuf + Wordlists Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Content Discovery via ffuf + Wordlists ──
 # Uses project-bundled wordlists for: directories, files, API routes, parameters.
 # Runs ffuf against live hosts with smart rate limiting per mode.
 
@@ -8738,7 +8738,7 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
     if not ffuf_bin:
         return {"error": "ffuf not found", "findings": []}
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Load wordlists Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Load wordlists ──
     try:
         from tools import load_wordlist
     except ImportError:
@@ -8759,7 +8759,7 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
     if not any([dirs_wl, files_wl, api_wl, param_wl]):
         return {"error": "No wordlists loaded", "findings": []}
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Build targets from live hosts Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Build targets from live hosts ──
     targets = []
     for h in hosts:
         host = h.get("host", "")
@@ -8784,7 +8784,7 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
     wl_files_created = []
 
     try:
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 1. Directory discovery Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 1. Directory discovery ──
         if dirs_wl:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as wf:
                 wf.write("\n".join(dirs_wl))
@@ -8820,7 +8820,7 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
                 except Exception:
                     pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 2. File/backup discovery Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 2. File/backup discovery ──
         if files_wl:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as wf:
                 wf.write("\n".join(files_wl))
@@ -8855,7 +8855,7 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
                 except Exception:
                     pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 3. API route fuzzing Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 3. API route fuzzing ──
         if api_wl:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as wf:
                 wf.write("\n".join(api_wl))
@@ -8891,7 +8891,7 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
                     except Exception:
                         pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 4. Parameter fuzzing Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 4. Parameter fuzzing ──
         if param_wl:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as wf:
                 wf.write("\n".join(param_wl))
@@ -8946,7 +8946,7 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
     }
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Browser Deep Recon via Playwright Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Browser Deep Recon via Playwright ──
 # Uses the playwright venv at /home/kali/.asm-playwright (upstream pip, not Kali pkg).
 # Falls back gracefully if unavailable.
 
@@ -9040,7 +9040,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
         )
         page = context.new_page()
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ Network interception Ã¢â‚¬â€ captures ALL requests at browser level Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── Network interception — captures ALL requests at browser level ──
         def _on_request(req):
             u = req.url
             rt = req.resource_type
@@ -9081,13 +9081,13 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
             except Exception:
                 return ""
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ Title Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── Title ──
         try:
             result["title"] = page.title() or ""
         except Exception:
             pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 1. Source maps Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 1. Source maps ──
         try:
             js_urls = _eval(
                 "Array.from(document.querySelectorAll('script[src]')).map(s=>s.src)"
@@ -9099,7 +9099,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
         except Exception:
             pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 2. Inline secrets Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 2. Inline secrets ──
         secret_patterns = [
             ("apiKey",      r'(?:api_key|apiKey|apikey|API_KEY)\s*[:=]\s*["\']([^"\'&]{8,80})["\']'),
             ("token",       r'(?:token|access_token|auth_token|bearer)\s*[:=]\s*["\']([^"\'&]{12,200})["\']'),
@@ -9126,7 +9126,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
         except Exception:
             pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 3. Third-party services Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 3. Third-party services ──
         known_services = {
             "google-analytics.com": "Google Analytics", "googletagmanager.com": "Google Tag Manager",
             "googleapis.com": "Google APIs",            "firebaseio.com": "Firebase",
@@ -9156,7 +9156,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
         except Exception:
             pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 4. Technology detection Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 4. Technology detection ──
         tech_sigs = {
             "react": "React", "vue": "Vue.js", "angular": "Angular", "jquery": "jQuery",
             "bootstrap": "Bootstrap", "tailwind": "Tailwind CSS", "next": "Next.js",
@@ -9185,7 +9185,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
         except Exception:
             pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 5. JS Deep Analysis Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 5. JS Deep Analysis ──
         js_deep = result.setdefault("js_analysis", {
             "webpack_modules": 0, "webpack_chunks": [],
             "storage_keys": {"localStorage": [], "sessionStorage": []},
@@ -9302,22 +9302,22 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
 
         # Observations from JS analysis
         if js_deep["webpack_modules"] > 0:
-            result["observations"].append(f"Webpack: {js_deep['webpack_modules']} modules, {len(js_deep['webpack_chunks'])} chunks Ã¢â‚¬â€ source exposure possible")
+            result["observations"].append(f"Webpack: {js_deep['webpack_modules']} modules, {len(js_deep['webpack_chunks'])} chunks — source exposure possible")
         if js_deep["framework_routes"]:
             result["observations"].append(f"Framework components: {', '.join(js_deep['framework_routes'][:8])}")
         if js_deep["storage_keys"]["localStorage"]:
             ls = js_deep["storage_keys"]["localStorage"]
-            result["observations"].append(f"localStorage: {len(ls)} keys Ã¢â‚¬â€ {', '.join(ls[:5])}")
+            result["observations"].append(f"localStorage: {len(ls)} keys — {', '.join(ls[:5])}")
         if js_deep["storage_keys"]["sessionStorage"]:
-            result["observations"].append(f"sessionStorage: {len(js_deep['storage_keys']['sessionStorage'])} keys Ã¢â‚¬â€ possible auth tokens")
+            result["observations"].append(f"sessionStorage: {len(js_deep['storage_keys']['sessionStorage'])} keys — possible auth tokens")
         if js_deep["service_workers"]:
             result["observations"].append(f"Service Workers: {', '.join(s['scope'] for s in js_deep['service_workers'][:3])}")
         if js_deep["global_variables"]:
             result["observations"].append(f"Custom globals: {', '.join(js_deep['global_variables'][:6])}")
         if js_deep["inline_event_handlers"] > 5:
-            result["observations"].append(f"Inline event handlers: {js_deep['inline_event_handlers']} Ã¢â‚¬â€ possible DOM XSS surface")
+            result["observations"].append(f"Inline event handlers: {js_deep['inline_event_handlers']} — possible DOM XSS surface")
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 6. Security headers Ã¢â‚¬â€ read from nav_headers captured at response time Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 6. Security headers — read from nav_headers captured at response time ──
         sec_headers = [
             "content-security-policy", "x-frame-options",
             "x-content-type-options", "strict-transport-security",
@@ -9334,11 +9334,11 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                 nav_headers.get("access-control-allow-credentials", "").lower() == "true"
             )
             if acao == "*":
-                result["observations"].append("CORS wildcard (*) Ã¢â‚¬â€ overly permissive")
+                result["observations"].append("CORS wildcard (*) — overly permissive")
             if result["cors_config"].get("allow_credentials") and acao == "*":
-                result["observations"].append("DANGER: CORS * + credentials=true Ã¢â‚¬â€ credential theft possible")
+                result["observations"].append("DANGER: CORS * + credentials=true — credential theft possible")
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 7. Developer comments / TODOs Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 7. Developer comments / TODOs ──
         try:
             comments = _eval(
                 "Array.from(document.querySelectorAll('*'))"
@@ -9353,7 +9353,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
         except Exception:
             pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 8. Login forms Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 8. Login forms ──
         try:
             forms = _eval(
                 "Array.from(document.querySelectorAll('form')).map(f=>({"
@@ -9365,12 +9365,12 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                 for f in forms:
                     if isinstance(f, dict) and f.get("hasPassword"):
                         result["observations"].append(
-                            f"Login form at {f.get('action','(page)')} Ã¢â‚¬â€ {len(f.get('inputs',[]))} inputs"
+                            f"Login form at {f.get('action','(page)')} — {len(f.get('inputs',[]))} inputs"
                         )
         except Exception:
             pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 9. Cookies Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 9. Cookies ──
         try:
             cookies = context.cookies()
             result["cookies"] = [
@@ -9388,14 +9388,14 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
             insecure = [c for c in result["cookies"] if not c["httpOnly"] or not c["secure"]]
             if insecure:
                 result["observations"].append(
-                    f"{len(insecure)} cookies with insecure flags Ã¢â‚¬â€ "
+                    f"{len(insecure)} cookies with insecure flags — "
                     f"{sum(1 for c in insecure if not c['httpOnly'])} missing HttpOnly, "
                     f"{sum(1 for c in insecure if not c['secure'])} missing Secure"
                 )
         except Exception:
             result["cookies"] = []
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ 10. Screenshot Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── 10. Screenshot ──
         try:
             safe = re.sub(r'[^a-zA-Z0-9]', '_', target_url)[:60]
             fname = f"browser_{safe}.png"
@@ -9405,26 +9405,26 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
         except Exception:
             pass
 
-        # Ã¢â€â‚¬Ã¢â€â‚¬ Security header observations Ã¢â€â‚¬Ã¢â€â‚¬
+        # ── Security header observations ──
         if "content-security-policy" in result["security_headers"]["missing"]:
-            result["observations"].append("Missing CSP Ã¢â‚¬â€ XSS risk")
+            result["observations"].append("Missing CSP — XSS risk")
         if "strict-transport-security" in result["security_headers"]["missing"]:
-            result["observations"].append("Missing HSTS Ã¢â‚¬â€ no TLS enforcement")
+            result["observations"].append("Missing HSTS — no TLS enforcement")
         if "x-frame-options" in result["security_headers"]["missing"]:
-            result["observations"].append("Missing X-Frame-Options Ã¢â‚¬â€ clickjacking possible")
+            result["observations"].append("Missing X-Frame-Options — clickjacking possible")
         if result["source_maps"]:
-            result["observations"].append(f"Source maps exposed ({len(result['source_maps'])}) Ã¢â‚¬â€ source code recoverable")
+            result["observations"].append(f"Source maps exposed ({len(result['source_maps'])}) — source code recoverable")
         if len(result["api_endpoints"]) > 5:
-            result["observations"].append(f"{len(result['api_endpoints'])} API endpoints captured Ã¢â‚¬â€ check for unauth access")
+            result["observations"].append(f"{len(result['api_endpoints'])} API endpoints captured — check for unauth access")
         if result["secrets_found"]:
-            result["observations"].append(f"{len(result['secrets_found'])} potential secrets in inline JS Ã¢â‚¬â€ rotate immediately")
+            result["observations"].append(f"{len(result['secrets_found'])} potential secrets in inline JS — rotate immediately")
 
         browser.close()
 
     return result
 
 
-# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Browser Crawler Ã¢â‚¬â€ Playwright multi-page crawl across ALL subdomains Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+# ── Browser Crawler — Playwright multi-page crawl across ALL subdomains ──
 
 def run_browser_crawl(hosts, domains, max_hosts: int = 150,
                       max_pages_per_host: int = 8, timeout: int = 20,
@@ -9446,7 +9446,7 @@ def run_browser_crawl(hosts, domains, max_hosts: int = 150,
     now = datetime.now().isoformat(timespec="seconds")
     from urllib.parse import urlparse as _up
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Build target URLs from live hosts (dedup by host) Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Build target URLs from live hosts (dedup by host) ──
     LIVE = {200, 301, 302, 401, 403}
     seen_hosts, targets = set(), []
     for h in hosts or []:
@@ -9550,7 +9550,7 @@ def run_browser_crawl(hosts, domains, max_hosts: int = 150,
         for r in pool.map(_crawl_one, targets):
             results.append(r)
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Aggregate Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Aggregate ──
     all_urls, all_api, subdomains = set(), [], set()
     total_forms = 0
     for r in results:
@@ -9578,9 +9578,9 @@ def run_browser_crawl(hosts, domains, max_hosts: int = 150,
     }
 
 
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-# GAP 3  Ã¢â‚¬â€ Container Registry Scanning (Docker Hub, GHCR, ECR Public, Quay)
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+# â•â•Â──
+# GAP 3  — Container Registry Scanning (Docker Hub, GHCR, ECR Public, Quay)
+# â•â•Â──
 
 _CONTAINER_REGISTRIES = [
     {"name": "Docker Hub",      "api": "https://hub.docker.com/v2/repositories/{org}/",      "key_header": None},
@@ -9688,9 +9688,9 @@ def run_container_registry_scan(domains, company_name: str = "",
     }
 
 
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-# GAP 9  Ã¢â‚¬â€ Internet-Wide Scan Dataset Ingestion (Censys bulk, Shodan bulk)
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+# â•â•Â──
+# GAP 9  — Internet-Wide Scan Dataset Ingestion (Censys bulk, Shodan bulk)
+# â•â•Â──
 
 def run_bulk_dataset_scan(hosts: list, domains: list,
                            shodan_key: str = "", censys_id: str = "",
@@ -9698,7 +9698,7 @@ def run_bulk_dataset_scan(hosts: list, domains: list,
     bulk_findings = []
     domain_names = [d for d in (domains or []) if d]
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Shodan InternetDB (free, no key required) Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Shodan InternetDB (free, no key required) ──
     for h in hosts[:50]:
         ip = h.get("ip", "")
         if not ip:
@@ -9729,7 +9729,7 @@ def run_bulk_dataset_scan(hosts: list, domains: list,
         except Exception:
             pass
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Censys Search API (requires id/secret) Ã¢â€â‚¬Ã¢â€â‚¬
+    # ── Censys Search API (requires id/secret) ──
     if censys_id and censys_secret:
         import base64
         auth = base64.b64encode(f"{censys_id}:{censys_secret}".encode()).decode()
@@ -9773,9 +9773,9 @@ def run_bulk_dataset_scan(hosts: list, domains: list,
     }
 
 
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-# GAP 11 Ã¢â‚¬â€ Database Enumeration: MySQL, PostgreSQL, MSSQL, Oracle active probes
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+# â•â•Â──
+# GAP 11 — Database Enumeration: MySQL, PostgreSQL, MSSQL, Oracle active probes
+# â•â•Â──
 
 def _check_mysql(ip, port=3306):
     try:
@@ -9798,7 +9798,7 @@ def _check_mysql(ip, port=3306):
                     version = desc[0] if desc else ""
                     auth_detail = "no auth (got greeting)"
                     sev = "high"
-                    return {"auth": False, "detail": f"MySQL {version} Ã¢â‚¬â€ {auth_detail}", "severity": sev, "version": version}
+                    return {"auth": False, "detail": f"MySQL {version} — {auth_detail}", "severity": sev, "version": version}
     except Exception:
         pass
     return None
@@ -9811,18 +9811,18 @@ def _check_postgresql(ip, port=5432):
         if s.connect_ex((ip, port)) != 0:
             s.close()
             return None
-        # PostgreSQL StartupMessage Ã¢â‚¬â€ send SSLRequest first
+        # PostgreSQL StartupMessage — send SSLRequest first
         # SSLRequest: length 8, protocol 80877103
         ssl_req = b'\x00\x00\x00\x08\x04\xd2\x16\x2f'
         s.send(ssl_req)
         resp = s.recv(1)
         s.close()
         if resp == b'S':
-            return {"auth": "unknown", "detail": "PostgreSQL SSL supported Ã¢â‚¬â€ no auth probe", "severity": "medium"}
+            return {"auth": "unknown", "detail": "PostgreSQL SSL supported — no auth probe", "severity": "medium"}
         elif resp == b'N':
-            return {"auth": "unknown", "detail": "PostgreSQL SSL refused Ã¢â‚¬â€ no auth probe", "severity": "medium"}
+            return {"auth": "unknown", "detail": "PostgreSQL SSL refused — no auth probe", "severity": "medium"}
         elif len(resp) > 0:
-            return {"auth": "unknown", "detail": "PostgreSQL responded Ã¢â‚¬â€ no auth probe", "severity": "medium"}
+            return {"auth": "unknown", "detail": "PostgreSQL responded — no auth probe", "severity": "medium"}
     except Exception:
         pass
     return None
@@ -9835,7 +9835,7 @@ def _check_mssql(ip, port=1433):
         if s.connect_ex((ip, port)) != 0:
             s.close()
             return None
-        # TDS Pre-Login Ã¢â‚¬â€ send empty prelogin packet
+        # TDS Pre-Login — send empty prelogin packet
         prelogin = (
             b'\x12\x01\x00\x34\x00\x00\x00\x00\x00\x00\x15\x00\x06\x01\x00\x1b'
             b'\x00\x01\x02\x00\x1c\x00\x0c\x03\x00\x28\x00\x04\xff\x08\x00\x01'
@@ -9846,7 +9846,7 @@ def _check_mssql(ip, port=1433):
         data = s.recv(256)
         s.close()
         if len(data) > 8:
-            return {"auth": "unknown", "detail": "MSSQL TDS responded Ã¢â‚¬â€ no auth probe", "severity": "medium"}
+            return {"auth": "unknown", "detail": "MSSQL TDS responded — no auth probe", "severity": "medium"}
     except Exception:
         pass
     return None
@@ -9876,7 +9876,7 @@ def _check_oracle(ip, port=1521):
             # Extract version string from TNS response
             raw = data.decode("latin-1", "ignore")
             body = raw[8:] if len(raw) > 8 else raw
-            return {"auth": "unknown", "detail": f"Oracle TNS responded Ã¢â‚¬â€ version probe: {body[:80]}", "severity": "medium"}
+            return {"auth": "unknown", "detail": f"Oracle TNS responded — version probe: {body[:80]}", "severity": "medium"}
     except Exception:
         pass
     return None
@@ -9891,7 +9891,7 @@ _DB_PROBES_EXTRA = [
 
 
 def run_database_enum_extra(hosts: list) -> dict:
-    """Active probe for MySQL, PostgreSQL, MSSQL, Oracle Ã¢â‚¬â€ complements run_default_creds."""
+    """Active probe for MySQL, PostgreSQL, MSSQL, Oracle — complements run_default_creds."""
     findings = []
     tested = set()
     for h in hosts[:60]:
@@ -9925,9 +9925,9 @@ def run_database_enum_extra(hosts: list) -> dict:
     }
 
 
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-# GAP 13 Ã¢â‚¬â€ Service Version Detection (banner grabbing on open TCP ports)
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+# â•â•Â──
+# GAP 13 — Service Version Detection (banner grabbing on open TCP ports)
+# â•â•Â──
 
 _SERVICE_PROBES = {
     21:   ("FTP",    b""),
@@ -10032,9 +10032,9 @@ def run_service_version_detect(hosts: list) -> dict:
     }
 
 
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-# GAP 14 Ã¢â‚¬â€ UDP Port Scanning
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+# â•â•Â──
+# GAP 14 — UDP Port Scanning
+# â•â•Â──
 
 _UDP_SCAN_PORTS = (
     "53,67,68,69,111,123,137,138,161,162,500,514,520,1194,1701,"
@@ -10144,9 +10144,9 @@ def run_udp_port_scan(hosts: list) -> dict:
     }
 
 
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-# GAP 15 Ã¢â‚¬â€ API Discovery (kiterunner-based, with fallback to swagger/openapi probes)
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+# â•â•Â──
+# GAP 15 — API Discovery (kiterunner-based, with fallback to swagger/openapi probes)
+# â•â•Â──
 
 _API_PATHS = [
     "/swagger.json", "/swagger/v1/swagger.json", "/swagger/v2/swagger.json",
@@ -10266,9 +10266,9 @@ def run_api_discovery_extra(hosts: list, domains: list) -> dict:
     }
 
 
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-# GAP 16 Ã¢â‚¬â€ Screenshot Visual Diffing Between Historical Versions
-# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+# â•â•Â──
+# GAP 16 — Screenshot Visual Diffing Between Historical Versions
+# â•â•Â──
 
 def _image_similarity(path_a: str, path_b: str) -> float | None:
     """Compare two images using pixel hashing. Returns similarity 0.0-1.0 or None."""
@@ -10330,7 +10330,7 @@ def run_screenshot_diff(hosts: list, output_dir: str,
                 "type": "screenshot_diff",
                 "host": re.sub(r"https?_?|_?\.png", "", fname).replace("_", ".")[:120],
                 "change": "new_host",
-                "detail": "new screenshot Ã¢â‚¬â€ host not in previous run",
+                "detail": "new screenshot — host not in previous run",
                 "severity": "info",
                 "file": fname,
             })
@@ -10373,7 +10373,7 @@ def run_screenshot_diff(hosts: list, output_dir: str,
     }
 
 
-# â”€â”€ NEW MODULES: gitleaks, jwt_tool, S3Scanner, XSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── NEW MODULES: gitleaks, jwt_tool, S3Scanner, XSS ────────────────────────────
 
 def run_git_leaks(hosts: list, domains: list, github_token: str = None) -> dict:
     """Scan exposed .git directories and git history for secrets using gitleaks."""
@@ -10497,7 +10497,7 @@ def run_s3_scanner(domains: list, company_name: str = "") -> dict:
     }
 
 
-# â”€â”€ SALESFORCE RECON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── SALESFORCE RECON ──────────────────────────────────────────────────────────
 
 _SALESFORCE_PATTERNS = [
     r"\.my\.salesforce\.com$",
@@ -10555,7 +10555,7 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
     scanned = 0
     discovered = 0
 
-    # â”€â”€ Phase 1: DISCOVERY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Phase 1: DISCOVERY ─────────────────────────────────────────────────
     sf_hosts = [h for h in hosts if _is_salesforce_host(h.get("host", ""))]
 
     # Probe common Salesforce subdomain patterns for each target domain
@@ -10642,7 +10642,7 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
 
     sf_hosts = sf_hosts[:30]  # cap
 
-    # â”€â”€ Phase 2: ANALYSIS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Phase 2: ANALYSIS ────────────────────────────────────────────────
     for h in sf_hosts:
         host = h.get("host", "")
         scheme = "https"
@@ -10737,7 +10737,7 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
                     findings.append({
                         "type": "salesforce_logout_open_redirect",
                         "severity": "medium",
-                        "title": f"Salesforce logout page â€” potential open redirect via retURL parameter: {host}",
+                        "title": f"Salesforce logout page — potential open redirect via retURL parameter: {host}",
                         "host": host,
                         "url": url,
                         "module": "salesforce_recon",
@@ -10823,7 +10823,7 @@ def run_jwt_analysis(hosts: list, js_files: list = None) -> dict:
                     findings.append({
                         "type": "jwt_none_alg",
                         "severity": "critical",
-                        "title": f"JWT with 'none' algorithm â€” bypass authentication",
+                        "title": f"JWT with 'none' algorithm — bypass authentication",
                         "value": token[:60] + "...",
                         "module": "jwt_analysis",
                     })
@@ -10831,7 +10831,7 @@ def run_jwt_analysis(hosts: list, js_files: list = None) -> dict:
                     findings.append({
                         "type": "jwt_hs_weak",
                         "severity": "medium",
-                        "title": f"JWT uses HMAC-SHA â€” potential key brute-force",
+                        "title": f"JWT uses HMAC-SHA — potential key brute-force",
                         "value": token[:60] + "...",
                         "metadata": {"alg": alg, "kid": header_json.get("kid", "")},
                         "module": "jwt_analysis",
