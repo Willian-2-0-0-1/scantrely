@@ -1905,8 +1905,8 @@ class TestCircuitBreaker:
         from core import recon as recon_mod
 
         reset_all()
-        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
-        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        monkeypatch.setattr("core.reconlib.base._CFFI_AVAILABLE", False)
+        monkeypatch.setattr("core.reconlib.base._rate_wait", lambda domain: None)
         calls = {"n": 0}
 
         class _Resp:
@@ -1937,8 +1937,8 @@ class TestCircuitBreaker:
         from core import recon as recon_mod
 
         reset_all()
-        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
-        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        monkeypatch.setattr("core.reconlib.base._CFFI_AVAILABLE", False)
+        monkeypatch.setattr("core.reconlib.base._rate_wait", lambda domain: None)
         br = breaker_for("dead.example")
         for _ in range(5):
             br.failure()
@@ -1982,8 +1982,8 @@ class TestCircuitBreaker:
         from core import recon as recon_mod
 
         reset_all()
-        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
-        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        monkeypatch.setattr("core.reconlib.base._CFFI_AVAILABLE", False)
+        monkeypatch.setattr("core.reconlib.base._rate_wait", lambda domain: None)
         br = breaker_for("dead-json.example")
         for _ in range(5):
             br.failure()
@@ -2003,8 +2003,8 @@ class TestCircuitBreaker:
         from core import recon as recon_mod
 
         reset_all()
-        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
-        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        monkeypatch.setattr("core.reconlib.base._CFFI_AVAILABLE", False)
+        monkeypatch.setattr("core.reconlib.base._rate_wait", lambda domain: None)
 
         class _Resp:
             status = 200
@@ -2028,8 +2028,8 @@ class TestCircuitBreaker:
         from core import recon as recon_mod
 
         reset_all()
-        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
-        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        monkeypatch.setattr("core.reconlib.base._CFFI_AVAILABLE", False)
+        monkeypatch.setattr("core.reconlib.base._rate_wait", lambda domain: None)
         br = breaker_for("cavalier.hudsonrock.com")
         for _ in range(5):
             br.failure()
@@ -2127,8 +2127,8 @@ class TestCircuitBreaker:
         from core import recon as recon_mod
 
         reset_all()
-        monkeypatch.setattr(recon_mod, "_CFFI_AVAILABLE", False)
-        monkeypatch.setattr(recon_mod, "_rate_wait", lambda domain: None)
+        monkeypatch.setattr("core.reconlib.base._CFFI_AVAILABLE", False)
+        monkeypatch.setattr("core.reconlib.base._rate_wait", lambda domain: None)
         br = breaker_for("cors-dead.example")
         for _ in range(5):
             br.failure()
@@ -3071,7 +3071,7 @@ class TestJsScan:
             called["n"] += 1
             raise AssertionError("jwt_analysis must not re-fetch JS")
 
-        monkeypatch.setattr("core.recon.http_get", _boom)
+        monkeypatch.setattr("core.reconlib.salesforce.http_get", _boom)
         out = run_jwt_analysis([], [{
             "url": "https://www.portoplus.com.br/static/js/main.js",
             "secrets": [{"type": "jwt_token", "value": token, "severity": "high"}],

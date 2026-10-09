@@ -1,5 +1,8 @@
 # ASM Platform — Architecture & Maintenance Guide
 
+> **Atualização 1.4.0 — `core/recon.py` dividido.** O arquivo de ~11 mil linhas virou um índice (~550 linhas: reexporta tudo e mantém `run_all` e o CLI). A implementação está em `core/reconlib/<assunto>.py` (`base`, `dnsutil`, `certs`, `typosquat`, `jsrecon`, `browser`, `breach`, `cve`, `infra`, …). Continue importando de `core.recon`; ao testar com `monkeypatch`, aponte para o módulo onde a função vive (ex.: `core.reconlib.base._rate_wait`). O subprocess "gated" é uma instância única em `core.reconlib.base`.
+
+
 ## Índice
 
 1. [Visão Geral](#visão-geral)

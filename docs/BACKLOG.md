@@ -10,7 +10,6 @@
 | # | Prioridade | Descrição |
 |---|-----------|-----------|
 | P1 | 🔴 | Front das abas Vulnerabilidades/Hosts passar a usar `/findings` e `/hosts` paginados (hoje ainda baixam a empresa inteira em `/api/data/company/<id>`). |
-| P2 | 🟡 | Dividir `core/recon.py` (~11 mil linhas) por fase em `core/recon/`; manter `core.recon` como reexport. |
 | P4 | 🟡 | Dividir `static/js/dashboard.js` (~12 mil linhas) por aba; remover estilos inline. |
 | P6 | 🟢 | Marcar achados "não vistos no último scan" como resolvidos em vez de mantê-los. |
 
