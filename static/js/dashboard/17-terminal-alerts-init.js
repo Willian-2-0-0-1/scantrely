@@ -618,7 +618,7 @@ window.addEventListener("resize", () => {
 //  HOST DETAIL DRAWER
 // ════════════════════════════════════════════════════════════════════════
 
-function openHostDrawer(hostname) {
+function openHostDrawer(hostname, section) {
   const overlay = document.getElementById('host-drawer-overlay');
   const drawer = document.getElementById('host-drawer');
   const titleEl = document.getElementById('hd-title');
@@ -674,7 +674,25 @@ function openHostDrawer(hostname) {
       </a></div>`
     : '';
 
+  const det = co && typeof hostDetails === "function" ? hostDetails(co, hostname) : {findings: [], cves: [], endpoints: [], secrets: []};
+  const sevChip = sv => `<span class="am-sev am-${esc(sv)}" style="min-width:auto;padding:0 6px;height:18px;font-size:.62rem">${esc(String(sv || "info").slice(0, 4).toUpperCase())}</span>`;
+  const sect = (id, title, n, inner) => n ? `<div class="hd-section" id="hd-sec-${id}"><div class="hd-section-title">${esc(title)} (${n})</div>${inner}</div>` : "";
+  const findingsHtml = sect("findings", "Achados", det.findings.length,
+    det.findings.slice(0, 40).map(f => `<div class="hd-row" style="align-items:flex-start;gap:8px">${sevChip(f.severity)}<span class="hd-v" style="text-align:left;flex:1">${esc(f.title || f.type || "Achado")}${f.desc ? `<div style="color:var(--text3);font-size:.64rem;margin-top:2px">${esc(String(f.desc).slice(0, 160))}</div>` : ""}</span></div>`).join("")
+    + (det.findings.length > 40 ? `<div style="color:var(--text3);font-size:.66rem;margin-top:6px">+${det.findings.length - 40} no total — veja a aba Vulnerabilidades</div>` : ""));
+  const cveHtml = sect("cve", "CVE", det.cves.length,
+    det.cves.slice(0, 20).map(f => `<div class="hd-row">${sevChip(f.severity)}<span class="hd-v">${esc(f.title || f.value || "")}${f.kev ? ' <b style="color:#fb7185">KEV</b>' : ""}</span></div>`).join(""));
+  const secretsHtml = sect("secrets", "Secrets", det.secrets.length,
+    det.secrets.slice(0, 20).map(x => `<div class="hd-row"><span class="hd-k">${esc(x.type || "secret")}</span><span class="hd-v" style="font-family:var(--mono)">${esc(maskSecret(x.value))}</span></div>`).join(""));
+  const endpointsHtml = sect("endpoints", "Endpoints", det.endpoints.length,
+    det.endpoints.slice(0, 25).map(ep => `<div class="hd-row"><span class="hd-k">${esc(ep.method || "GET")}</span><span class="hd-v" style="font-family:var(--mono);word-break:break-all">${esc(ep.url || "")}</span></div>`).join("")
+    + (det.endpoints.length > 25 ? `<div style="color:var(--text3);font-size:.66rem;margin-top:6px">+${det.endpoints.length - 25} — veja Ativos → Endpoints</div>` : ""));
+
   bodyEl.innerHTML = `
+    ${findingsHtml}
+    ${cveHtml}
+    ${secretsHtml}
+    ${endpointsHtml}
     <div class="hd-section">
       <div class="hd-section-title">Identity</div>
       <div class="hd-row"><span class="hd-k">Host</span><span class="hd-v hi">${h.host ? originHostChip(h.host, "origin-link") : "—"}</span></div>
@@ -694,6 +712,8 @@ function openHostDrawer(hostname) {
   drawer.classList.add('open');
   overlay.classList.add('show');
   document.body.style.overflow = 'hidden';
+  const target = section && document.getElementById('hd-sec-' + section);
+  if (target) target.scrollIntoView({block: 'start'}); else bodyEl.scrollTop = 0;
 }
 
 function closeHostDrawer() {

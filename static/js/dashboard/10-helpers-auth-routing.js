@@ -272,3 +272,15 @@ function showPage(page) {
     if (typeof ASM !== 'undefined' && ASM.updateHash) ASM.updateHash('exposure');
   }
 }
+
+// Baixa um texto como arquivo (usado pelas exportações CSV/JSON). Antes não existia: os botões CSV/JSON falhavam em silêncio.
+function _downloadBlob(content, filename, mime) {
+  const blob = new Blob([content], {type: (mime || "text/plain") + ";charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}

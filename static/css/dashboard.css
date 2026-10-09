@@ -4229,3 +4229,13 @@ a.op-chip.origin-link:hover { text-decoration: underline; }
 .am-cols .co-menu-list { right:0; min-width:150px; padding:8px 10px; gap:4px; }
 .am-colopt { display:flex; gap:8px; align-items:center; font-size:.76rem; color:var(--text2); padding:3px 2px; cursor:pointer; }
 .ai-table td { vertical-align: middle; }
+
+/* ── Matriz: contagens clicáveis, cabeçalho fixo, gaveta mais larga ──── */
+button.am-sev, button.am-count { border:0; cursor:pointer; }
+button.am-sev:hover, button.am-count:hover { filter:brightness(1.25); }
+.host-drawer { width: 520px; }
+.ai-table-wrap { max-height: calc(100vh - 230px); overflow: auto; }
+.ai-table thead th { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+.ai-table td:first-child, .ai-table th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.ai-table thead th:first-child { z-index: 3; }
+.ai-table-wrap .pager { position: sticky; left: 0; bottom: 0; background: var(--surface); }

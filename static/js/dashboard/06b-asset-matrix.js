@@ -16,6 +16,15 @@ function _hostFromAny(value) {
   return /^[a-z0-9._-]+\.[a-z]{2,}$/i.test(raw.split("/")[0]) ? _normalizeScopeDomain(raw) : "";
 }
 
+// Hosts a que um achado se refere (host, domínio, URL e lista de afetados).
+function _findingHostSet(f) {
+  const hosts = new Set();
+  (Array.isArray(f.affected_hosts) ? f.affected_hosts : []).forEach(h => hosts.add(_hostFromAny(h)));
+  [f.host, f.domain, f.url].forEach(v => hosts.add(_hostFromAny(v)));
+  hosts.delete("");
+  return hosts;
+}
+
 // Agregados por host: achados por severidade, CVEs, secrets e endpoints. Cacheado por empresa.
 function _assetAgg(co) {
   const stamp = [(co.findings || []).length, (co.cve_findings || []).length, _epDataStamp(co)].join(":");
@@ -29,12 +38,7 @@ function _assetAgg(co) {
   };
   (co.findings || []).forEach(f => {
     const sev = String(f.severity || "info").toLowerCase();
-    const hosts = new Set();
-    (Array.isArray(f.affected_hosts) ? f.affected_hosts : []).forEach(h => hosts.add(_hostFromAny(h)));
-    hosts.add(_hostFromAny(f.host));
-    hosts.add(_hostFromAny(f.domain));
-    hosts.add(_hostFromAny(f.url));
-    hosts.forEach(h => {
+    _findingHostSet(f).forEach(h => {
       const a = slot(h);
       if (!a) return;
       if (_SEV_KEYS.includes(sev)) { a.sev[sev]++; a.findings++; }
@@ -60,14 +64,16 @@ const _EMPTY_AGG = {sev: {critical: 0, high: 0, medium: 0, low: 0}, findings: 0,
 const _aggOf = h => h._agg || _EMPTY_AGG;
 const _dash = '<span class="ai-dash">—</span>';
 
-function _countCell(n, cls) {
-  return n > 0 ? `<span class="am-count ${cls}">${n}</span>` : _dash;
+function _countCell(n, cls, host, section) {
+  return n > 0
+    ? `<button type="button" class="am-count ${cls}" title="Ver detalhes" onclick="event.stopPropagation();openHostDrawer('${escAttr(host)}','${section}')">${n}</button>`
+    : _dash;
 }
 
 function _findingsCell(h) {
   const a = _aggOf(h);
   const chips = _SEV_KEYS.filter(s => a.sev[s] > 0)
-    .map(s => `<span class="am-sev am-${s}" title="${a.sev[s]} ${_SEV_PT[s]}">${a.sev[s]}</span>`).join("");
+    .map(s => `<button type="button" class="am-sev am-${s}" title="${a.sev[s]} ${_SEV_PT[s]}" onclick="event.stopPropagation();openHostDrawer('${escAttr(h.host)}','findings')">${a.sev[s]}</button>`).join("");
   return chips ? `<div class="am-sev-row">${chips}</div>` : _dash;
 }
 
@@ -95,9 +101,9 @@ const _ASSET_COLS = [
   }},
   {key: "domain", label: "Domínio", val: h => h._domain || "", td: h => `<td class="ai-ip">${h._domain ? esc(h._domain) : _dash}</td>`},
   {key: "findings", label: "Achados", on: true, val: h => _aggOf(h).score, td: h => `<td>${_findingsCell(h)}</td>`},
-  {key: "cve", label: "CVE", on: true, val: h => _aggOf(h).cve, td: h => `<td class="am-num">${_countCell(_aggOf(h).cve, "am-cve")}</td>`},
-  {key: "secrets", label: "Secrets", on: true, val: h => _aggOf(h).secrets, td: h => `<td class="am-num">${_countCell(_aggOf(h).secrets, "am-secret")}</td>`},
-  {key: "endpoints", label: "Endpoints", on: true, val: h => _aggOf(h).endpoints, td: h => `<td class="am-num">${_countCell(_aggOf(h).endpoints, "am-ep")}</td>`},
+  {key: "cve", label: "CVE", on: true, val: h => _aggOf(h).cve, td: h => `<td class="am-num">${_countCell(_aggOf(h).cve, "am-cve", h.host, "cve")}</td>`},
+  {key: "secrets", label: "Secrets", on: true, val: h => _aggOf(h).secrets, td: h => `<td class="am-num">${_countCell(_aggOf(h).secrets, "am-secret", h.host, "secrets")}</td>`},
+  {key: "endpoints", label: "Endpoints", on: true, val: h => _aggOf(h).endpoints, td: h => `<td class="am-num">${_countCell(_aggOf(h).endpoints, "am-ep", h.host, "endpoints")}</td>`},
   {key: "ports", label: "Portas", on: true, val: h => _hostOpenPorts(h).length, td: (h, ctx) => `<td class="ai-cl">${_fmtHostPorts(h, ctx.running)}</td>`},
   {key: "infra", label: "Infra", on: true, val: h => String(h.waf || "Direct"), td: h => {
     const chips = _hostInfraSignals(h).map(s => _infraChip(s.label, s.cls, s.title)).join("");
@@ -232,4 +238,30 @@ function _assetExtraFilterHtml(hosts) {
     ${doms.length > 1 ? `<select class="ai-drop" id="sub-dom" onchange="_subApplyFilter()" aria-label="Domínio">
       <option value="">Domínio</option>${doms.map(d => `<option value="${escAttr(d)}">${esc(d)}</option>`).join("")}
     </select>` : ""}`;
+}
+
+
+// Detalhe de um host (gaveta lateral): achados, secrets e endpoints que pertencem a ele.
+function hostDetails(co, host) {
+  const sevRank = {critical: 0, high: 1, medium: 2, low: 3, info: 4};
+  const findings = (co.findings || []).filter(f => _findingHostSet(f).has(host))
+    .sort((a, b) => (sevRank[a.severity] ?? 5) - (sevRank[b.severity] ?? 5));
+  try { buildUnifiedEndpoints(co); } catch (e) {}
+  const endpoints = (co._unifiedEndpoints || []).filter(ep => (_hostFromAny(ep.host) || _hostFromAny(ep.url)) === host);
+  const secrets = (co._unifiedSecrets || []).filter(x => (_hostFromAny(x.host) || _hostFromAny(x.url)) === host);
+  return {findings, cves: findings.filter(f => f.type === "cve"), endpoints, secrets};
+}
+
+// Exportação respeita os filtros ativos e leva todas as colunas de assunto.
+function _assetExportRows(hosts) {
+  return hosts.map(h => {
+    const a = _aggOf(h);
+    return {
+      host: h.host, url: _urlOf(h), status: h.status_code ?? "", domain: h._domain || "", ip: h.ip || "", title: h.title || "",
+      critical: a.sev.critical, high: a.sev.high, medium: a.sev.medium, low: a.sev.low,
+      cve: a.cve, secrets: a.secrets, endpoints: a.endpoints,
+      ports: _hostOpenPorts(h).map(p => p.port).join("|"), waf: h.waf || "Direct", cloud: h.cloud_provider || "",
+      technologies: (h.technologies || []).join("|"),
+    };
+  });
 }

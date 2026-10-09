@@ -525,19 +525,17 @@ async function renderVulnsTab(co) {
 }
 
 function exportHosts(fmt) {
-  const hosts = _sub_hosts || _co_hosts || [];
+  // Exporta o que está na tela: respeita os filtros ativos da matriz de ativos.
+  const hosts = typeof _subFiltered === "function" && _sub_hosts && _sub_hosts.length ? _subFiltered() : (_sub_hosts || _co_hosts || []);
+  const rows = typeof _assetExportRows === "function" ? _assetExportRows(hosts) : hosts.map(h => ({host: h.host, ip: h.ip, waf: h.waf}));
   const cid = state.currentId || "export";
   const ts = new Date().toISOString().slice(0,10);
-  if(fmt === "json") {
-    _downloadBlob(JSON.stringify(hosts, null, 2), `${cid}_hosts_${ts}.json`, "application/json");
+  if (fmt === "json") {
+    _downloadBlob(JSON.stringify(rows, null, 2), `${cid}_ativos_${ts}.json`, "application/json");
   } else {
-    const header = "host,ip,waf,technologies,ports\n";
-    const rows = hosts.map(h => [
-      h.host||"", h.ip||"", h.waf||"",
-      (h.technologies||[]).join("|"),
-      (h.ports||[]).join("|")
-    ].map(v=>`"${v}"`).join(",")).join("\n");
-    _downloadBlob(header + rows, `${cid}_hosts_${ts}.csv`, "text/csv");
+    const cols = rows.length ? Object.keys(rows[0]) : ["host"];
+    const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    _downloadBlob(cols.join(",") + "\n" + rows.map(r => cols.map(c => q(r[c])).join(",")).join("\n"), `${cid}_ativos_${ts}.csv`, "text/csv");
   }
 }
 
