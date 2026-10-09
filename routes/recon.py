@@ -6,6 +6,8 @@ Recon and pipeline Flask routes.
 from __future__ import annotations
 
 import json
+import logging as _logging
+_log = _logging.getLogger('scantrely.recon')
 import os
 import threading
 import time
@@ -426,7 +428,7 @@ def create_recon_blueprint(
                 reason="pipeline stopped",
             )
         except Exception:
-            pass
+            _log.debug('recon.py:428 erro ignorado', exc_info=True)
         if db is not None:
             try:
                 cancelled = db.cancel_pending_jobs(company_id=cid, job_type="pipeline")
@@ -438,12 +440,12 @@ def create_recon_blueprint(
                         "msg": f"Cancelled {total} pending queued jobs (pipeline + playwright)",
                     })
             except Exception:
-                pass
+                _log.debug('recon.py:440 erro ignorado', exc_info=True)
         if base_dir:
             try:
                 persist_pipeline_state_file(base_dir, cid, state)
             except Exception:
-                pass
+                _log.debug('recon.py:445 erro ignorado', exc_info=True)
         return jsonify({"ok": True, "company_id": cid})
 
     @bp.route("/api/recon/<cid>/pipeline/<module>", methods=["DELETE"])
@@ -515,19 +517,19 @@ def create_recon_blueprint(
                         reason="pipeline stopped",
                     )
                 except Exception:
-                    pass
+                    _log.debug('recon.py:517 erro ignorado', exc_info=True)
                 if base_dir:
                     try:
                         persist_pipeline_state_file(base_dir, cid, ps)
                     except Exception:
-                        pass
+                        _log.debug('recon.py:522 erro ignorado', exc_info=True)
                 cancelled_cids.append(cid)
         db_cancelled = 0
         if db is not None:
             try:
                 db_cancelled = db.cancel_all_pending_jobs()
             except Exception:
-                pass
+                _log.debug('recon.py:529 erro ignorado', exc_info=True)
         return jsonify({"ok": True, "stopped": len(cancelled_cids), "db_cancelled": db_cancelled, "cids": cancelled_cids})
 
     @bp.route("/api/recon/scan-all", methods=["POST"])
@@ -982,7 +984,7 @@ def create_recon_blueprint(
                 from utils.command_runner import live_clear
                 live_clear(cid)
             except Exception:
-                pass
+                _log.debug('recon.py:984 erro ignorado', exc_info=True)
             # Remove every scan artifact for this company from disk: checkpoints,
             # screenshots, scan history, Playwright output, and pipeline_state.
             if base_dir:

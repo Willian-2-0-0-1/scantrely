@@ -2,6 +2,8 @@
 """ASM Tool Registry — unified interface for CLI tools + API-based recon modules."""
 
 import json, subprocess as _subprocess_real, time, os, sys, shutil, re as _re, threading, platform, tempfile, urllib.request, zipfile
+import logging as _logging
+_log = _logging.getLogger('scantrely.tools')
 from pathlib import Path
 from enum import Enum
 from dataclasses import dataclass, field
@@ -452,11 +454,11 @@ def load_wordlist(category: str, mode: str = "large", count: int = 50000) -> lis
                         try:
                             items.append(stripped.decode("utf-8", errors="ignore"))
                         except Exception:
-                            pass
+                            _log.debug('tools.py:454 erro ignorado', exc_info=True)
                     if len(items) >= count:
                         break
     except Exception:
-        pass
+        _log.debug('tools.py:458 erro ignorado', exc_info=True)
     return items
 
 
@@ -523,7 +525,8 @@ class SubfinderTool(CommandTool):
         res = super().run(target, opts)
         if hasattr(self, "_tmp_cfg") and os.path.exists(self._tmp_cfg):
             try: os.unlink(self._tmp_cfg)
-            except: pass
+            except:
+                _log.debug('tools.py:526 erro ignorado', exc_info=True)
         return res
 
     def parse(self, stdout: str, stderr: str, target: str) -> list[Finding]:
@@ -555,7 +558,7 @@ class AmassTool(CommandTool):
                     capture_output=True, timeout=12
                 )
             except Exception:
-                pass
+                _log.debug('tools.py:557 erro ignorado', exc_info=True)
         if resolvers.exists() and resolvers.stat().st_size > 100:
             cmd += ["-rf", str(resolvers)]
         return cmd
@@ -1266,7 +1269,8 @@ class ArjunTool(CommandTool):
         result.duration = time.time() - t0
         if os.path.exists("/tmp/arjun_output.json"):
             try: os.unlink("/tmp/arjun_output.json")
-            except: pass
+            except:
+                _log.debug('tools.py:1269 erro ignorado', exc_info=True)
         return result
 
 
@@ -1482,7 +1486,8 @@ class SubjackTool(CommandTool):
         output_file = getattr(self, "_output_file", f"/tmp/subjack_{target.replace('.','_')}.json")
         if os.path.exists(output_file):
             try: os.unlink(output_file)
-            except: pass
+            except:
+                _log.debug('tools.py:1485 erro ignorado', exc_info=True)
         return result
 
 

@@ -12,6 +12,7 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 - Abas da empresa de 10 para 5; cabeçalho com menus Exportar e ⋯.
 - **API paginada**: `/api/data/company/<id>/findings` e `/hosts` sobre tabelas de índice (`finding_index`, `host_index`) derivadas do JSON.
 - `/api/data/company/<id>` respeita o escopo do admin.
+- ~200 `except Exception: pass` viraram `_log.debug(..., exc_info=True)` (ligue com `ASM_LOG_LEVEL=DEBUG`); shims da raiz removidos.
 - Docs movidos para `docs/`, README curto e backlog único.
 
 ## [1.3.11] - 2026-10-08

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import logging as _logging
+_log = _logging.getLogger('scantrely.command_runner')
 import subprocess
 import threading
 import time
@@ -171,7 +173,7 @@ def run(
                     proc.stdin.write(input)
                     proc.stdin.close()
                 except Exception:
-                    pass
+                    _log.debug('command_runner.py:173 erro ignorado', exc_info=True)
 
             # Real-time stdout/stderr readers
             stdout_lines = []
@@ -253,4 +255,4 @@ def run(
                         stderr_tail=stderr_acc[-MAX_CAPTURE_CHARS:],
                     )
                 except Exception:
-                    pass
+                    _log.debug('command_runner.py:255 erro ignorado', exc_info=True)

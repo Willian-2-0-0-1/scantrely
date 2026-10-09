@@ -6,6 +6,8 @@ Usage:
     python3 server.py [--port 5000]
 """
 import json, sys, os, threading, uuid, time, re, subprocess
+import logging as _logging
+_log = _logging.getLogger('scantrely.server')
 import hashlib, secrets, base64, hmac
 import faulthandler, signal
 import logging
@@ -14,7 +16,7 @@ import logging
 try:
     faulthandler.register(signal.SIGUSR1)
 except Exception:
-    pass
+    _log.debug('server.py:16 erro ignorado', exc_info=True)
 from functools import wraps
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -70,7 +72,7 @@ def _install_signal_handlers() -> None:
         signal.signal(signal.SIGTERM, _on_term)
         signal.signal(signal.SIGINT, _on_term)
     except Exception:
-        pass
+        _log.debug('server.py:72 erro ignorado', exc_info=True)
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 BASE          = Path(__file__).parent.resolve()
@@ -126,7 +128,7 @@ _sessions: dict[str, dict] = {}
 try:
     _sessions = DB.load_sessions()
 except Exception:
-    pass
+    _log.debug('server.py:128 erro ignorado', exc_info=True)
 
 
 def _hash_pw(password: str) -> str:
@@ -189,7 +191,7 @@ def _get_session() -> dict | None:
             _sessions.update(loaded)
             sess = _sessions.get(token)
         except Exception:
-            pass
+            _log.debug('server.py:191 erro ignorado', exc_info=True)
     if not sess:
         return None
     if time.time() > sess["expires_at"]:
@@ -546,7 +548,7 @@ def _audit(action: str, target: str = "", details: str = ""):
     try:
         DB.append_audit_log(entry)
     except Exception:
-        pass
+        _log.debug('server.py:548 erro ignorado', exc_info=True)
 
 
 # ─── ASM data helpers ─────────────────────────────────────────────────────────
@@ -779,7 +781,7 @@ def _scheduler_loop():
                     scheds[cid] = cfg
             _save_schedules(scheds)
         except Exception:
-            pass
+            _log.debug('server.py:781 erro ignorado', exc_info=True)
 
 
 if os.environ.get("ASM_ENABLE_SCHEDULED_SCANS", "0") == "1":
@@ -1019,7 +1021,7 @@ def _safe_run_playwright_recon(cid: str, co: dict, options: dict):
                 session = json.loads(session_path.read_text(encoding="utf-8"))
                 _runner.merge_playwright_findings(cid, session)
         except Exception:
-            pass
+            _log.debug('server.py:1021 erro ignorado', exc_info=True)
         return result
     except Exception:
         raise

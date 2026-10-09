@@ -10,6 +10,8 @@ older scripts that read them directly.
 from __future__ import annotations
 
 import json
+import logging as _logging
+_log = _logging.getLogger('scantrely.database')
 import os
 import sqlite3
 import threading
@@ -292,25 +294,25 @@ class ASMDatabase:
             try:
                 conn.execute("ALTER TABLE admins ADD COLUMN scoped_companies TEXT NOT NULL DEFAULT '[]'")
             except Exception:
-                pass  # column already exists
+                _log.debug('database.py:294 erro ignorado', exc_info=True) # column already exists
             # Migration v3 → v4: add name to alert_rules
             try:
                 conn.execute("ALTER TABLE alert_rules ADD COLUMN name TEXT NOT NULL DEFAULT ''")
             except Exception:
-                pass  # column already exists
+                _log.debug('database.py:299 erro ignorado', exc_info=True) # column already exists
             # Migration v4 → v5: 2FA, alert severity, invites, push
             try:
                 conn.execute("ALTER TABLE admins ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''")
             except Exception:
-                pass
+                _log.debug('database.py:304 erro ignorado', exc_info=True)
             try:
                 conn.execute("ALTER TABLE admins ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0")
             except Exception:
-                pass
+                _log.debug('database.py:308 erro ignorado', exc_info=True)
             try:
                 conn.execute("ALTER TABLE alert_rules ADD COLUMN min_severity TEXT NOT NULL DEFAULT 'info'")
             except Exception:
-                pass
+                _log.debug('database.py:312 erro ignorado', exc_info=True)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS invites (
@@ -403,7 +405,7 @@ class ASMDatabase:
                 data = json.loads(row["data_json"])
                 result[row["token"]] = data
             except Exception:
-                pass
+                _log.debug('database.py:405 erro ignorado', exc_info=True)
         return result
 
     def save_session(self, token: str, data: dict) -> None:
@@ -2044,7 +2046,7 @@ class ASMDatabase:
             try:
                 backup.write_text(payload)
             except Exception:
-                pass
+                _log.debug('database.py:2046 erro ignorado', exc_info=True)
 
     def _sync_admins_file(self) -> None:
         if self.admins_file:

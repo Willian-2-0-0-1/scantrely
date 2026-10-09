@@ -6,6 +6,8 @@ Scan lifecycle and scan artifact Flask routes.
 from __future__ import annotations
 
 import json
+import logging as _logging
+_log = _logging.getLogger('scantrely.scans')
 import os
 import re
 import shutil
@@ -261,7 +263,7 @@ def create_scan_blueprint(
                         score = cvss.get("baseScore", 0)
                         sev = cvss.get("baseSeverity", "info").lower()
                 except Exception:
-                    pass
+                    _log.debug('scans.py:263 erro ignorado', exc_info=True)
                 published = c.get("published", "")
                 date_str = published[:10] if published else ""
                 if cid_val and desc:
@@ -305,9 +307,9 @@ def create_scan_blueprint(
                             event = json.loads(line)
                             types[event.get("type", "?")] += 1
                         except Exception:
-                            pass
+                            _log.debug('scans.py:307 erro ignorado', exc_info=True)
                 except Exception:
-                    pass
+                    _log.debug('scans.py:309 erro ignorado', exc_info=True)
                 history.append({
                     "name": scan_dir.name,
                     "path": str(scan_dir),
@@ -398,7 +400,7 @@ def create_scan_blueprint(
                     if hostname:
                         host_meta[hostname] = h
         except Exception:
-            pass
+            _log.debug('scans.py:400 erro ignorado', exc_info=True)
 
         shots = []
         # Support both flat files and gowitness v3 directory-per-host structure
@@ -672,7 +674,8 @@ def create_scan_blueprint(
                                 "title": (item.get("title") or "")[:80],
                                 "ip": (item.get("a") or [""])[0] if item.get("a") else "",
                             }
-                    except: pass
+                    except:
+                        _log.debug('scans.py:675 erro ignorado', exc_info=True)
                 
                 for h in sample:
                     hostname = h.get("host", "")
@@ -705,7 +708,8 @@ def create_scan_blueprint(
                         }
                         break
                 save_asm_data(data)
-            except: pass
+            except:
+                _log.debug('scans.py:708 erro ignorado', exc_info=True)
 
         return jsonify(results)
 

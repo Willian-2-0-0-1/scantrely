@@ -6,6 +6,8 @@ custom Nuclei templates, DefectDojo push.
 from __future__ import annotations
 
 import json
+import logging as _logging
+_log = _logging.getLogger('scantrely.extras')
 import os
 import re
 import secrets
@@ -96,7 +98,7 @@ def create_extras_blueprint(
             try:
                 audit(action, target, details)
             except Exception:
-                pass
+                _log.debug('extras.py:98 erro ignorado', exc_info=True)
 
     @bp.route("/api/openapi.json", methods=["GET"])
     @require_auth
@@ -234,7 +236,7 @@ a{color:#00e5ff}pre{background:#1e293b;padding:16px;border-radius:8px;overflow:a
             if expires and datetime.fromisoformat(expires) < datetime.now():
                 return jsonify({"error": "Invite expired"}), 410
         except Exception:
-            pass
+            _log.debug('extras.py:236 erro ignorado', exc_info=True)
         body = request.get_json(force=True) or {}
         password = body.get("password") or ""
         if len(password) < 8:

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import threading
+import logging as _logging
+_log = _logging.getLogger('scantrely.jobs')
 import time
 import traceback
 import os
@@ -33,14 +35,14 @@ def _mem_available_mb() -> int:
                 if line.startswith("MemAvailable:"):
                     return int(line.split()[1]) // 1024
     except Exception:
-        pass
+        _log.debug('jobs.py:35 erro ignorado', exc_info=True)
     # Non-Linux fallback (Windows dev boxes, etc.) so the memory watchdog
     # isn't silently a no-op outside of Linux containers.
     try:
         import psutil  # type: ignore
         return int(psutil.virtual_memory().available // (1024 * 1024))
     except Exception:
-        pass
+        _log.debug('jobs.py:42 erro ignorado', exc_info=True)
     try:
         import ctypes
 
@@ -62,7 +64,7 @@ def _mem_available_mb() -> int:
         if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):  # type: ignore[attr-defined]
             return int(stat.ullAvailPhys // (1024 * 1024))
     except Exception:
-        pass
+        _log.debug('jobs.py:64 erro ignorado', exc_info=True)
     return 999999
 
 
@@ -298,7 +300,7 @@ class JobScheduler:
                             if hasattr(self.db, "release_safety_hold"):
                                 self.db.release_safety_hold()
                         except Exception:
-                            pass
+                            _log.debug('jobs.py:300 erro ignorado', exc_info=True)
                         for cid, state in list(self.pipeline_state.items()):
                             if isinstance(state, dict) and state.get("status") == "stopped":
                                 reason_log = str(state.get("log", [{}])[-1].get("msg", ""))
@@ -309,7 +311,7 @@ class JobScheduler:
                                         try:
                                             self.save_pipeline_state(cid)
                                         except Exception:
-                                            pass
+                                            _log.debug('jobs.py:311 erro ignorado', exc_info=True)
                 else:
                     _consecutive_ok = 0
                 self._trim_pipeline_logs()
@@ -349,7 +351,7 @@ class JobScheduler:
             if hasattr(self.db, "safety_hold_jobs"):
                 self.db.safety_hold_jobs(reason=hold_reason)
         except Exception:
-            pass
+            _log.debug('jobs.py:351 erro ignorado', exc_info=True)
         now = datetime.now().isoformat(timespec="seconds")
         for cid, state in list(self.pipeline_state.items()):
             if isinstance(state, dict) and state.get("status") in {"queued", "running"}:
@@ -360,7 +362,7 @@ class JobScheduler:
                     try:
                         self.save_pipeline_state(cid)
                     except Exception:
-                        pass
+                        _log.debug('jobs.py:362 erro ignorado', exc_info=True)
 
     def _execute(self, job: dict) -> None:
         job_id = job["id"]

@@ -9,6 +9,8 @@ tool gates, and watchdog thresholds. Explicit environment variables still win.
 from __future__ import annotations
 
 import os
+import logging as _logging
+_log = _logging.getLogger('scantrely.resource_profile')
 
 
 def _meminfo_mb() -> dict[str, int]:
@@ -19,7 +21,7 @@ def _meminfo_mb() -> dict[str, int]:
                 key, value = line.split(":", 1)
                 out[key] = int(value.strip().split()[0]) // 1024
     except Exception:
-        pass
+        _log.debug('resource_profile.py:21 erro ignorado', exc_info=True)
     return out
 
 

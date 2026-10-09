@@ -7,6 +7,8 @@ TTL: duration of the scan (cache cleared on new scan)
 """
 
 import sqlite3, hashlib, json, time, os
+import logging as _logging
+_log = _logging.getLogger('scantrely.http_cache')
 from pathlib import Path
 from typing import Any
 from urllib.request import Request
@@ -57,7 +59,7 @@ class HttpCache:
                     with open(body_path, "rb") as f:
                         body = f.read()
                 except Exception:
-                    pass
+                    _log.debug('http_cache.py:59 erro ignorado', exc_info=True)
             return {
                 "status": status,
                 "headers": json.loads(headers_json) if headers_json else {},

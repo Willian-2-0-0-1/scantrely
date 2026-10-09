@@ -23,6 +23,8 @@ Usage as CLI:
   python3 recon.py all           portoseguro.com.br  [--token ghp_xxx]
 """
 import subprocess as _subprocess_real
+import logging as _logging
+_log = _logging.getLogger('scantrely.recon')
 import socket, ssl, json, re, time, sys, os
 import shutil, tempfile, base64
 import gzip, random, threading, urllib.request, urllib.error
@@ -63,7 +65,7 @@ class _GatedSubprocess:
             first = cmd[0] if isinstance(cmd, (list, tuple)) and cmd else str(cmd).split()[0]
             tool = os.path.basename(str(first)) or "recon"
         except Exception:
-            pass
+            _log.debug('recon.py:65 erro ignorado', exc_info=True)
         run_id = None
         db = getattr(_SUBPROCESS_CONTEXT, "db", None)
         company_id = getattr(_SUBPROCESS_CONTEXT, "cid", "")
@@ -123,7 +125,7 @@ class _GatedSubprocess:
                             stderr_tail=str(stderr)[-12000:],
                         )
                     except Exception:
-                        pass
+                        _log.debug('recon.py:125 erro ignorado', exc_info=True)
 
 
 subprocess = _GatedSubprocess()
@@ -364,7 +366,7 @@ def http_get(url: str, timeout: int = 10, retries: int = 3,
                 try:
                     body = gzip.decompress(body)
                 except Exception:
-                    pass
+                    _log.debug('recon.py:366 erro ignorado', exc_info=True)
             return status, body, resp_h
 
         except urllib.error.HTTPError as e:
@@ -440,7 +442,7 @@ def dns_records(domain: str) -> dict:
                 if rtype in RECORD_TYPES:
                     out.setdefault(rtype, []).append(value)
     except Exception:
-        pass
+        _log.debug('recon.py:442 erro ignorado', exc_info=True)
     return out
 
 
@@ -472,7 +474,7 @@ def _dns_batch(queries: list[tuple]) -> dict:
                 value = " ".join(parts[4:]).rstrip(".")
                 result.setdefault((name, rtype), []).append(value)
     except Exception:
-        pass
+        _log.debug('recon.py:474 erro ignorado', exc_info=True)
     return result
 
 def _dns_batch_short(queries: list[tuple]) -> dict:
@@ -498,7 +500,7 @@ def _dns_batch_short(queries: list[tuple]) -> dict:
                 pos += 1
             result[(domain, rtype)] = values
     except Exception:
-        pass
+        _log.debug('recon.py:500 erro ignorado', exc_info=True)
     return result
 
 
@@ -722,7 +724,7 @@ def run_supply_chain_scan(hosts: list, nvd_key: str = "") -> dict:
                     "affected_hosts": affected_hosts[:10],
                 })
         except Exception:
-            pass
+            _log.debug('recon.py:724 erro ignorado', exc_info=True)
 
         _time.sleep(rate_delay)
 
@@ -847,7 +849,7 @@ def check_bimi(domain: str) -> dict:
             if "v=bimi1" in line.lower():
                 return {"record": line.strip().strip('"'), "present": True}
     except Exception:
-        pass
+        _log.debug('recon.py:849 erro ignorado', exc_info=True)
     return {"present": False}
 
 def check_dkim(domain: str) -> list:
@@ -868,11 +870,11 @@ def check_dkim(domain: str) -> list:
                         key_bytes = base64.b64decode(p_match.group(1) + "==")
                         key_bits = len(key_bytes) * 8
                     except Exception:
-                        pass
+                        _log.debug('recon.py:870 erro ignorado', exc_info=True)
                 return {"selector": sel, "record": rec, "key_bits": key_bits,
                         "weak": key_bits is not None and key_bits < 1024}
         except Exception:
-            pass
+            _log.debug('recon.py:874 erro ignorado', exc_info=True)
         return None
 
     with ThreadPoolExecutor(max_workers=10) as pool:
@@ -897,10 +899,10 @@ def check_mx(domain: str) -> list:
                         ip = info[4][0]
                         if ip not in ips: ips.append(ip)
                 except Exception:
-                    pass
+                    _log.debug('recon.py:899 erro ignorado', exc_info=True)
                 records.append({"priority": prio, "host": host, "ips": ips})
     except Exception:
-        pass
+        _log.debug('recon.py:902 erro ignorado', exc_info=True)
     return records
 
 def email_spoofability(spf: dict, dmarc: dict) -> str:
@@ -1033,7 +1035,7 @@ def _parse_cert_dates(not_after):
         expired       = days_left < 0
         expiring_soon = 0 <= days_left <= 30
     except Exception:
-        pass
+        _log.debug('recon.py:1035 erro ignorado', exc_info=True)
     return days_left, expired, expiring_soon
 
 
@@ -1102,7 +1104,7 @@ def _ct_from_certspotter(domain: str, limit: int) -> list:
                 "source":       "certspotter",
             })
     except Exception:
-        pass
+        _log.debug('recon.py:1104 erro ignorado', exc_info=True)
     return certs
 
 def _ct_from_shodan(domain: str, limit: int = 500) -> list:
@@ -1136,7 +1138,7 @@ def _ct_from_shodan(domain: str, limit: int = 500) -> list:
                 if isinstance(not_before, (int, float)) and not_before > 0:
                     nb_str = datetime.utcfromtimestamp(not_before).strftime("%Y-%m-%d")
             except Exception:
-                pass
+                _log.debug('recon.py:1138 erro ignorado', exc_info=True)
 
             certs.append({
                 "id":           c.get("hash", ""),
@@ -1152,7 +1154,7 @@ def _ct_from_shodan(domain: str, limit: int = 500) -> list:
                 "source":       "shodan_ctl",
             })
     except Exception:
-        pass
+        _log.debug('recon.py:1154 erro ignorado', exc_info=True)
     return certs
 
 def _cn(dn: str) -> str:
@@ -1246,7 +1248,7 @@ def get_ssl_info(host: str, port: int = 443) -> dict:
                 result.update({"days_left": days, "expired": days < 0, "expiring_soon": 0 <= days <= 30})
                 break
             except Exception:
-                pass
+                _log.debug('recon.py:1248 erro ignorado', exc_info=True)
 
         issues = []
         if result.get("expired"):        issues.append("Certificate EXPIRED")
@@ -1334,7 +1336,7 @@ def get_asn_prefixes(asn_num: str) -> list:
             for p in data.get("data",{}).get("prefixes",[]):
                 prefixes.append(p.get("prefix",""))
     except Exception:
-        pass
+        _log.debug('recon.py:1336 erro ignorado', exc_info=True)
     if prefixes:
         return prefixes
     # Fallback: BGPView
@@ -1346,7 +1348,7 @@ def get_asn_prefixes(asn_num: str) -> list:
             for p in data.get("data",{}).get("ipv4_prefixes",[]):
                 prefixes.append(p.get("prefix",""))
     except Exception:
-        pass
+        _log.debug('recon.py:1348 erro ignorado', exc_info=True)
     return prefixes
 
 
@@ -1485,7 +1487,7 @@ def run_asn_recon(hosts: list, domain: str = "") -> dict:
                 if _IP_RE.match(ip) and not ip.startswith(_PRIVATE_PREFIXES):
                     ips.append(ip)
         except Exception:
-            pass
+            _log.debug('recon.py:1487 erro ignorado', exc_info=True)
 
     ip_data: dict[str,dict] = {}
     with ThreadPoolExecutor(max_workers=15) as pool:
@@ -1795,7 +1797,7 @@ def search_codebase_leaks(domain: str) -> dict:
                 results.append({"source":"hackertarget","type":"subdomain",
                                  "host": host.strip(), "ip": ip.strip()})
     except Exception:
-        pass
+        _log.debug('recon.py:1797 erro ignorado', exc_info=True)
     return {"results": results}
 
 def check_exposed_git(hosts: list) -> list:
@@ -2062,7 +2064,7 @@ def run_vendor_fingerprint(hosts: list) -> dict:
                 try:
                     results.extend(fut.result())
                 except Exception:
-                    pass
+                    _log.debug('recon.py:2064 erro ignorado', exc_info=True)
         except concurrent.futures.TimeoutError:
             pass  # timeout — return partial results collected so far
     finally:
@@ -2348,7 +2350,7 @@ def _check_typo(domain: str) -> dict:
                            capture_output=True, text=True, timeout=4)
         ns_raw = r.stdout.strip().lower()
     except Exception:
-        pass
+        _log.debug('recon.py:2350 erro ignorado', exc_info=True)
 
     registered = len(ips) > 0 or bool(ns_raw)
     result = {"domain": domain, "registered": registered, "ips": ips, "risk": "low"}
@@ -2367,7 +2369,7 @@ def _check_typo(domain: str) -> dict:
             result["has_mx"]    = True
             result["mx_records"] = mx_lines[:3]
     except Exception:
-        pass
+        _log.debug('recon.py:2369 erro ignorado', exc_info=True)
 
     # Broker NS fingerprint — catches squatters even without HTTP (302-only domains)
     if ns_raw and any(b in ns_raw for b in _BROKER_NS):
@@ -2397,7 +2399,7 @@ def _check_typo(domain: str) -> dict:
                 if any(k in cert_text for k in _brand_kw):
                     result["ssl"]["brand_in_cert"] = True
     except Exception:
-        pass
+        _log.debug('recon.py:2399 erro ignorado', exc_info=True)
 
     # HTTP check — follow redirects, detect broker/sale landing pages
     try:
@@ -2853,7 +2855,7 @@ def run_cloud_assets(domains: list, org_name: str = "") -> dict:
         try:
             findings.extend(fut.result())
         except Exception:
-            pass
+            _log.debug('recon.py:2855 erro ignorado', exc_info=True)
 
     public  = [f for f in findings if "public" in f.get("access","")]
     private = [f for f in findings if "private" in f.get("access","")]
@@ -3045,7 +3047,7 @@ def run_dnssec_check(domains: list) -> dict:
             if "flags:" in r.stdout and " ad;" in r.stdout.lower():
                 info["validates"] = True
         except Exception:
-            pass
+            _log.debug('recon.py:3047 erro ignorado', exc_info=True)
 
         if not info["dnssec_enabled"]:
             info["issues"].append("DNSSEC not enabled")
@@ -3139,7 +3141,7 @@ def _related_crtsh_org(domain: str) -> set:
                         if root != domain:
                             candidates.add(root)
     except Exception:
-        pass
+        _log.debug('recon.py:3141 erro ignorado', exc_info=True)
 
     # Method B: org-name search — parse Subject O= from cert HTML, then search by org
     try:
@@ -3225,7 +3227,7 @@ def _related_crtsh_org(domain: str) -> set:
                                     candidates.add(root)
                 break  # org found and processed — stop trying more probe hosts
     except Exception:
-        pass
+        _log.debug('recon.py:3227 erro ignorado', exc_info=True)
 
     return candidates
 
@@ -3257,7 +3259,7 @@ def _related_reverse_ip(domain: str) -> set:
                         if root != domain:
                             candidates.add(root)
     except Exception:
-        pass
+        _log.debug('recon.py:3259 erro ignorado', exc_info=True)
     return candidates
 
 
@@ -3336,7 +3338,7 @@ def _rdap_registrant(domain: str) -> dict:
                         elif key == "email" and not email:
                             email = val
     except Exception:
-        pass
+        _log.debug('recon.py:3338 erro ignorado', exc_info=True)
     return {"org": org.strip(), "email": email.strip()}
 
 
@@ -3606,7 +3608,7 @@ def run_origin_discovery(domains, hosts=None, shodan_key: str = "") -> dict:
                 for ip in _resolve_domain(host):
                     _add_ip(ip, f"MX:{host}")
         except Exception:
-            pass
+            _log.debug('recon.py:3608 erro ignorado', exc_info=True)
 
         try:
             for m in (check_spf(domain).get("mechanisms", []) or []):
@@ -3618,7 +3620,7 @@ def run_origin_discovery(domains, hosts=None, shodan_key: str = "") -> dict:
                     for ip in _resolve_domain(host):
                         _add_ip(ip, f"SPF:{host}")
         except Exception:
-            pass
+            _log.debug('recon.py:3620 erro ignorado', exc_info=True)
 
         def _probe_sub(prefix):
             sub = f"{prefix}.{domain}"
@@ -3638,7 +3640,7 @@ def run_origin_discovery(domains, hosts=None, shodan_key: str = "") -> dict:
                     for match in (json.loads(b).get("matches", []) or []):
                         _add_ip(match.get("ip_str", ""), "Shodan:cert")
             except Exception:
-                pass
+                _log.debug('recon.py:3640 erro ignorado', exc_info=True)
 
         # ── Verify candidates via Host-header request ──
         def _verify(item):
@@ -3711,7 +3713,7 @@ def _discover_play_packages(brand: str, limit: int = 15) -> list:
                 if len(pkgs) >= limit:
                     break
     except Exception:
-        pass
+        _log.debug('recon.py:3713 erro ignorado', exc_info=True)
     return list(pkgs.values())
 
 def _parse_apkleaks_output(text: str) -> dict:
@@ -3779,7 +3781,8 @@ def run_apk_recon(domains, company_name: str = "", apk_dir: str = "") -> dict:
             finally:
                 if out_path and os.path.exists(out_path):
                     try: os.unlink(out_path)
-                    except Exception: pass
+                    except Exception:
+                        _log.debug('recon.py:3782 erro ignorado', exc_info=True)
             for link in parsed["links"]:
                 for rx in host_res:
                     for hm in rx.findall(link):
@@ -3828,7 +3831,7 @@ def _wayback_cdx_urls(domain: str, limit: int) -> list:
         if status == 200 and raw:
             return [u.strip() for u in raw.decode("utf-8", "ignore").splitlines() if u.strip()]
     except Exception:
-        pass
+        _log.debug('recon.py:3830 erro ignorado', exc_info=True)
     return []
 
 
@@ -3849,7 +3852,7 @@ def run_wayback(domain: str, limit: int = 5000, hosts: list = None) -> dict:
             )
             all_urls = [u.strip() for u in proc.stdout.strip().splitlines() if u.strip()][:limit]
         except Exception:
-            pass
+            _log.debug('recon.py:3851 erro ignorado', exc_info=True)
 
     # CDX wildcard query already covers all subdomains (*.domain)
     if not all_urls:
@@ -3881,7 +3884,7 @@ def run_wayback(domain: str, limit: int = 5000, hosts: list = None) -> dict:
                     "type": ext if ext in _INTERESTING_EXT else "path",
                 })
         except Exception:
-            pass
+            _log.debug('recon.py:3883 erro ignorado', exc_info=True)
 
     # Deduplicate by path pattern
     seen_paths = set()
@@ -4014,7 +4017,7 @@ def _detect_waf(host: str) -> dict:
                 wafw00f_result = matches
                 detected = list(set(detected + matches))
     except Exception:
-        pass
+        _log.debug('recon.py:4016 erro ignorado', exc_info=True)
 
     return {
         "host":    host,
@@ -4236,7 +4239,7 @@ def _check_leakix(domain: str) -> list:
                 "date":     event.get("time","")[:10],
             })
     except Exception:
-        pass
+        _log.debug('recon.py:4238 erro ignorado', exc_info=True)
     return findings
 
 
@@ -4310,9 +4313,9 @@ def _check_trufflehog_github(domain: str) -> list:
                     "verified":  item.get("Verified", False),
                 })
             except Exception:
-                pass
+                _log.debug('recon.py:4312 erro ignorado', exc_info=True)
     except Exception:
-        pass
+        _log.debug('recon.py:4314 erro ignorado', exc_info=True)
     return findings[:20]
 
 
@@ -4751,7 +4754,7 @@ def run_port_scan(hosts: list, ports: str = _DEFAULT_SCAN_PORTS,
         try:
             _waf_networks.append(_ipa.ip_network(_net, strict=False))
         except Exception:
-            pass
+            _log.debug('recon.py:4753 erro ignorado', exc_info=True)
 
     def _is_waf_ip(ip: str) -> bool:
         try:
@@ -4784,7 +4787,7 @@ def run_port_scan(hosts: list, ports: str = _DEFAULT_SCAN_PORTS,
                     results.append({"ip": ip, "port": port,
                                     "service": desc, "severity": sev})
                 except Exception:
-                    pass
+                    _log.debug('recon.py:4786 erro ignorado', exc_info=True)
 
         elif tool == "masscan":
             import tempfile as _tempfile, os as _os
@@ -4816,7 +4819,7 @@ def run_port_scan(hosts: list, ports: str = _DEFAULT_SCAN_PORTS,
                             results.append({"ip": ip, "port": port,
                                             "service": desc, "severity": sev})
                     except Exception:
-                        pass
+                        _log.debug('recon.py:4818 erro ignorado', exc_info=True)
             finally:
                 _os.unlink(hosts_file)
 
@@ -4855,7 +4858,7 @@ def run_port_scan(hosts: list, ports: str = _DEFAULT_SCAN_PORTS,
                                     results.append({"ip": current_ip, "port": port,
                                                     "service": desc, "severity": sev})
                                 except Exception:
-                                    pass
+                                    _log.debug('recon.py:4857 erro ignorado', exc_info=True)
             finally:
                 _os.unlink(hosts_file)
 
@@ -5217,7 +5220,7 @@ def _analyze_js_content(js_url: str, content: str) -> dict:
         from urllib.parse import urlparse
         host = urlparse(js_url).hostname or ""
     except Exception:
-        pass
+        _log.debug('recon.py:5219 erro ignorado', exc_info=True)
 
     # Skip well-known third-party library hosts — they never contain real secrets
     if _js_host_is_noise(host):
@@ -5380,7 +5383,7 @@ def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
             if _RANDOM_PATH_RE.match(urlparse(url).path):
                 return True
         except Exception:
-            pass
+            _log.debug('recon.py:5382 erro ignorado', exc_info=True)
         return False
 
     _BROWSER_ARGS = [
@@ -5442,7 +5445,7 @@ def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
                             if u.endswith(".js") or ".js?" in u or ".js#" in u:
                                 host_js.add(u)
                     except Exception:
-                        pass
+                        _log.debug('recon.py:5444 erro ignorado', exc_info=True)
 
                 page.on("request",  _on_request)
                 page.on("response", _on_response)
@@ -5454,9 +5457,9 @@ def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
                     try:
                         page.goto(target_url, wait_until="domcontentloaded", timeout=15_000)
                     except Exception:
-                        pass
+                        _log.debug('recon.py:5456 erro ignorado', exc_info=True)
                 except Exception:
-                    pass
+                    _log.debug('recon.py:5458 erro ignorado', exc_info=True)
 
                 # Scroll to trigger lazy-loaded chunks / infinite-scroll XHR
                 try:
@@ -5470,7 +5473,7 @@ def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
                     )
                     page.wait_for_timeout(1500)
                 except Exception:
-                    pass
+                    _log.debug('recon.py:5472 erro ignorado', exc_info=True)
 
                 # Collect webpack chunk URLs from JS globals
                 try:
@@ -5494,7 +5497,7 @@ def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
                             if isinstance(u, str) and u.startswith("http"):
                                 host_js.add(u)
                 except Exception:
-                    pass
+                    _log.debug('recon.py:5496 erro ignorado', exc_info=True)
 
                 # Fetch JS bodies via the browser's own fetch() — bypasses WAF/Imperva
                 # because the request originates from the already-authenticated browser session.
@@ -5533,12 +5536,12 @@ def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
                         if body and isinstance(body, str):
                             js_bodies[js_url] = body
                     except Exception:
-                        pass
+                        _log.debug('recon.py:5535 erro ignorado', exc_info=True)
 
                 page.close()
                 browser.close()
         except Exception:
-            pass
+            _log.debug('recon.py:5540 erro ignorado', exc_info=True)
         return host_js, host_calls[:200], js_bodies
 
     # Run all targets in parallel — cap workers so we don't OOM the box
@@ -5628,7 +5631,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
                 if url and (url.endswith(".js") or ".js?" in url or ".js#" in url):
                     raw_js_urls.add(url)
         except Exception:
-            pass
+            _log.debug('recon.py:5630 erro ignorado', exc_info=True)
 
     # 2) subjs — extracts <script src> tags from each host
     if subjs_bin and targets:
@@ -5643,7 +5646,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
                 if url:
                     raw_js_urls.add(url)
         except Exception:
-            pass
+            _log.debug('recon.py:5645 erro ignorado', exc_info=True)
 
     # 3) getJS — another script tag extractor
     if getjs_bin and targets:
@@ -5660,7 +5663,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
                 if url and ("http" in url):
                     raw_js_urls.add(url)
         except Exception:
-            pass
+            _log.debug('recon.py:5662 erro ignorado', exc_info=True)
 
     # 4) gau — historical JS URLs from Wayback/OTX/CommonCrawl
     if gau_bin and domains:
@@ -5676,7 +5679,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
                     if url and (url.endswith(".js") or ".js?" in url):
                         raw_js_urls.add(url)
         except Exception:
-            pass
+            _log.debug('recon.py:5678 erro ignorado', exc_info=True)
 
     # ── Playwright Runtime Capture ──
     # Visit all live hosts that are likely frontend web apps.
@@ -5830,7 +5833,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
                 })
                 _seen_pw_urls.add(pw_js_url)
         except Exception:
-            pass
+            _log.debug('recon.py:5832 erro ignorado', exc_info=True)
 
     # Sort: files with critical/high secrets first
     def _sort_key(f):
@@ -5876,9 +5879,9 @@ def run_js_recon(domains: list, hosts: list) -> dict:
                                 "sources_count": len(data.get("sources") or []),
                             })
                 except Exception:
-                    pass
+                    _log.debug('recon.py:5878 erro ignorado', exc_info=True)
         except Exception:
-            pass
+            _log.debug('recon.py:5880 erro ignorado', exc_info=True)
 
     # Flatten all XHR/fetch calls from Playwright into a deduplicated list
     all_network_calls: list = []
@@ -6092,7 +6095,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
                              if l.strip() and l.strip().endswith(domain)]
             permutations.extend(alterx_output)
         except Exception:
-            pass
+            _log.debug('recon.py:6094 erro ignorado', exc_info=True)
 
     # ── Method 1: dnsgen permutations from known seeds ──
     if dnsgen_bin and len(seeds) > 1:
@@ -6109,7 +6112,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
             dnsgen_output = [l.strip() for l in gen_result.stdout.splitlines() if l.strip()]
             permutations.extend(dnsgen_output)
         except Exception:
-            pass
+            _log.debug('recon.py:6111 erro ignorado', exc_info=True)
 
     # ── Method 2: altdns mutations from known seeds ──
     if altdns_bin and len(seeds) > 1:
@@ -6129,10 +6132,10 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
                 altdns_subs = [l.strip() for l in Path(out_path).read_text().splitlines() if l.strip()]
                 permutations.extend(altdns_subs)
             except Exception:
-                pass
+                _log.debug('recon.py:6131 erro ignorado', exc_info=True)
             Path(out_path).unlink(missing_ok=True)
         except Exception:
-            pass
+            _log.debug('recon.py:6134 erro ignorado', exc_info=True)
 
     # ── Fallback: hardcoded common prefixes ──
     if not permutations:
@@ -6202,7 +6205,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
             resolved = [{"host": h, "ip": ip, "source": "dns_bruteforce"} for h, ip in seen_hosts.items()]
             resolver_used = "dnsx"
         except Exception:
-            pass
+            _log.debug('recon.py:6204 erro ignorado', exc_info=True)
     elif puredns_bin and shutil.which("massdns"):
         try:
             result = _subp(
@@ -6218,7 +6221,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
             if resolved:
                 resolver_used = "puredns"
         except Exception:
-            pass
+            _log.debug('recon.py:6220 erro ignorado', exc_info=True)
 
     # ── Python socket fallback (threaded, uses system resolver — works behind VPN) ──
     if not resolved and resolver_used == "none":
@@ -6381,9 +6384,9 @@ def run_api_exposure(hosts: list, domains: list) -> dict:
                         "description": item.get("info",{}).get("description","")[:300],
                     })
                 except Exception:
-                    pass
+                    _log.debug('recon.py:6383 erro ignorado', exc_info=True)
         except Exception:
-            pass
+            _log.debug('recon.py:6385 erro ignorado', exc_info=True)
 
     Path(tfile).unlink(missing_ok=True)
 
@@ -6484,7 +6487,7 @@ def run_certstream_snapshot(domains: list, duration_sec: int = 60) -> dict:
                             "source":     "certstream",
                         })
             except Exception:
-                pass
+                _log.debug('recon.py:6486 erro ignorado', exc_info=True)
 
         t = threading.Thread(
             target=certstream.listen_for_events,
@@ -6662,7 +6665,7 @@ def run_vhost_discovery(hosts: list, domains: list, wordlist: str = "") -> dict:
                                 "severity": "medium" if status in (200,201,202) else "low",
                             })
                 except Exception:
-                    pass
+                    _log.debug('recon.py:6664 erro ignorado', exc_info=True)
                 finally:
                     try:
                         os.unlink(ffuf_out)
@@ -6697,7 +6700,7 @@ def run_vhost_discovery(hosts: list, domains: list, wordlist: str = "") -> dict:
                                 "severity": "medium" if status in (200,201,202) else "low",
                             })
                 except Exception:
-                    pass
+                    _log.debug('recon.py:6699 erro ignorado', exc_info=True)
 
         scanned_ips.append(ip)
 
@@ -6706,7 +6709,7 @@ def run_vhost_discovery(hosts: list, domains: list, wordlist: str = "") -> dict:
         try:
             Path(tmp_wl.name).unlink()
         except Exception:
-            pass
+            _log.debug('recon.py:6708 erro ignorado', exc_info=True)
 
     # Deduplicate by vhost
     seen_vhosts: dict[str, dict] = {}
@@ -6880,7 +6883,7 @@ def _fetch_epss(cve_ids: list[str]) -> dict[str, float]:
                 except (ValueError, TypeError):
                     pass
         except Exception:
-            pass
+            _log.debug('recon.py:6882 erro ignorado', exc_info=True)
     return scores
 
 
@@ -7182,7 +7185,7 @@ def run_cors_scan(hosts: list) -> dict:
             try:
                 port_nums.append(int(p["port"] if isinstance(p, dict) else p))
             except Exception:
-                pass
+                _log.debug('recon.py:7184 erro ignorado', exc_info=True)
         scheme = "https" if (443 in port_nums or 8443 in port_nums or not port_nums) else "http"
         base_url = f"{scheme}://{host}"
         parts = host.split(".")
@@ -7317,7 +7320,7 @@ def run_infra_exposure(hosts: list) -> dict:
                     if code and code < 500:
                         accessible_paths.append({"path": path, "status": code, "preview": (body or "")[:150]})
                 except Exception:
-                    pass
+                    _log.debug('recon.py:7319 erro ignorado', exc_info=True)
 
             if not paths or accessible_paths:
                 findings.append({
@@ -7386,7 +7389,7 @@ def run_default_creds(hosts: list) -> dict:
             if "+PONG" in resp or "+OK" in resp:
                 return {"auth": False, "detail": "PING responded without auth", "severity": "critical"}
         except Exception:
-            pass
+            _log.debug('recon.py:7388 erro ignorado', exc_info=True)
         return None
 
     def _check_mongo(ip, port=27017):
@@ -7404,7 +7407,7 @@ def run_default_creds(hosts: list) -> dict:
             if len(resp) > 16:  # got a real MongoDB response
                 return {"auth": False, "detail": "MongoDB responded without auth", "severity": "critical"}
         except Exception:
-            pass
+            _log.debug('recon.py:7406 erro ignorado', exc_info=True)
         return None
 
     def _check_http_admin(ip, port=8080, host=""):
@@ -7432,7 +7435,7 @@ def run_default_creds(hosts: list) -> dict:
                             return {"auth": "default", "detail": f"Default credentials {user}:{pw} accepted", "severity": "critical",
                                     "credentials": f"{user}:{pw}", "url": f"http://{ip}:{port}{path}"}
             except Exception:
-                pass
+                _log.debug('recon.py:7434 erro ignorado', exc_info=True)
         return None
 
     def _check_elastic(ip, port=9200):
@@ -7449,7 +7452,7 @@ def run_default_creds(hosts: list) -> dict:
                     return {"auth": False, "detail": "Elasticsearch API open (indices protected)", "severity": "high",
                             "url": f"http://{ip}:{port}/"}
         except Exception:
-            pass
+            _log.debug('recon.py:7451 erro ignorado', exc_info=True)
         return None
 
     def _check_jupyter(ip, port=8888):
@@ -7459,7 +7462,7 @@ def run_default_creds(hosts: list) -> dict:
                 return {"auth": False, "detail": "Jupyter Notebook API accessible without token", "severity": "critical",
                         "url": f"http://{ip}:{port}/"}
         except Exception:
-            pass
+            _log.debug('recon.py:7461 erro ignorado', exc_info=True)
         return None
 
     def _check_generic_open(ip, port, name):
@@ -7469,7 +7472,7 @@ def run_default_creds(hosts: list) -> dict:
                 return {"auth": "unknown", "detail": f"{name} web UI accessible (no auth check performed)", "severity": "medium",
                         "url": f"http://{ip}:{port}/"}
         except Exception:
-            pass
+            _log.debug('recon.py:7471 erro ignorado', exc_info=True)
         return None
 
     _CHECK_FN = {
@@ -7696,7 +7699,7 @@ def run_smtp_probe(hosts: list) -> dict:
                     })
 
             except Exception:
-                pass
+                _log.debug('recon.py:7698 erro ignorado', exc_info=True)
 
     return {
         "total_ips_tested": len(tested_ips),
@@ -7793,7 +7796,7 @@ def run_snmp_probe(hosts: list) -> dict:
                     "metadata": {"ip": ip, "community": "public", "output": output},
                 })
         except Exception:
-            pass
+            _log.debug('recon.py:7795 erro ignorado', exc_info=True)
 
     return {
         "total_ips_tested": len(tested_ips),
@@ -8016,7 +8019,7 @@ def run_open_redirect_check(hosts: list, urls: list | None = None) -> dict:
                 try:
                     br.failure()
                 except Exception:
-                    pass
+                    _log.debug('recon.py:8018 erro ignorado', exc_info=True)
                 continue
 
     return {
@@ -8095,13 +8098,13 @@ def run_s3_write_check(cloud_findings: list) -> dict:
                         with guarded_urlopen(del_req, timeout=10, name=host):
                             delete_ok = True
                     except Exception:
-                        pass
+                        _log.debug('recon.py:8097 erro ignorado', exc_info=True)
             except CircuitOpen:
                 pass
             except HTTPError:
                 pass
             except Exception:
-                pass
+                _log.debug('recon.py:8103 erro ignorado', exc_info=True)
 
         if write_ok:
             findings.append({
@@ -8156,7 +8159,7 @@ def run_graphql_discovery(hosts: list, domains: list) -> dict:
             try:
                 pnums.append(int(p["port"] if isinstance(p, dict) else p))
             except Exception:
-                pass
+                _log.debug('recon.py:8158 erro ignorado', exc_info=True)
         scheme = "https" if (443 in pnums or 8443 in pnums or not pnums) else "http"
         targets.append((f"{scheme}://{hhost}", hhost))
     for d in domains[:5]:
@@ -8192,7 +8195,7 @@ def run_graphql_discovery(hosts: list, domains: list) -> dict:
                             schema_types = [t.get("name", "") for t in types
                                             if not t.get("name", "").startswith("__")][:20]
                     except Exception:
-                        pass
+                        _log.debug('recon.py:8194 erro ignorado', exc_info=True)
                 if not (is_playground or introspection_works):
                     continue
                 parts = []
@@ -8227,7 +8230,7 @@ def run_graphql_discovery(hosts: list, domains: list) -> dict:
                 findings.extend(lf)
                 endpoints_found.extend(le)
             except Exception:
-                pass
+                _log.debug('recon.py:8229 erro ignorado', exc_info=True)
 
     return {
         "total_found": len(findings),
@@ -8334,7 +8337,7 @@ def _postman_public_search(query: str) -> list:
                     "url":    pub_url,
                 })
     except Exception:
-        pass
+        _log.debug('recon.py:8336 erro ignorado', exc_info=True)
     return results
 
 
@@ -8346,7 +8349,7 @@ def _postman_fetch_collection(user_id: str, col_id: str) -> bytes:
         if status == 200 and body and body.strip().startswith(b"{"):
             return body
     except Exception:
-        pass
+        _log.debug('recon.py:8348 erro ignorado', exc_info=True)
     return b""
 
 
@@ -8399,7 +8402,7 @@ def _github_postman_search(domain: str, company: str, token: str = None) -> list
                 })
             time.sleep(1.5)
         except Exception:
-            pass
+            _log.debug('recon.py:8401 erro ignorado', exc_info=True)
     return results
 
 
@@ -8453,7 +8456,7 @@ def run_postman_collections(domain: str, company_name: str = "",
                     all_secrets.extend(secrets)
                 time.sleep(1)
             except Exception:
-                pass
+                _log.debug('recon.py:8455 erro ignorado', exc_info=True)
 
     # 4. Build normalized findings list
     findings: list[dict] = []
@@ -8818,7 +8821,7 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
                             except (ValueError, IndexError):
                                 pass
                 except Exception:
-                    pass
+                    _log.debug('recon.py:8820 erro ignorado', exc_info=True)
 
         # ── 2. File/backup discovery ──
         if files_wl:
@@ -8853,7 +8856,7 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
                             except (ValueError, IndexError):
                                 pass
                 except Exception:
-                    pass
+                    _log.debug('recon.py:8855 erro ignorado', exc_info=True)
 
         # ── 3. API route fuzzing ──
         if api_wl:
@@ -8889,7 +8892,7 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
                                 except (ValueError, IndexError):
                                     pass
                     except Exception:
-                        pass
+                        _log.debug('recon.py:8891 erro ignorado', exc_info=True)
 
         # ── 4. Parameter fuzzing ──
         if param_wl:
@@ -8924,14 +8927,14 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
                             except (ValueError, IndexError):
                                 pass
                 except Exception:
-                    pass
+                    _log.debug('recon.py:8926 erro ignorado', exc_info=True)
 
     finally:
         for p in wl_files_created:
             try:
                 os.unlink(p)
             except Exception:
-                pass
+                _log.debug('recon.py:8933 erro ignorado', exc_info=True)
 
     return {
         "findings": findings[:500],
@@ -9056,7 +9059,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                     nav_headers = dict(resp.headers)
                     result["status"] = resp.status
             except Exception:
-                pass
+                _log.debug('recon.py:9058 erro ignorado', exc_info=True)
 
         page.on("request", _on_request)
         page.on("response", _on_response)
@@ -9085,7 +9088,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
         try:
             result["title"] = page.title() or ""
         except Exception:
-            pass
+            _log.debug('recon.py:9087 erro ignorado', exc_info=True)
 
         # ── 1. Source maps ──
         try:
@@ -9097,7 +9100,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                     if isinstance(u, str) and u.endswith(".map"):
                         result["source_maps"].append(u)
         except Exception:
-            pass
+            _log.debug('recon.py:9099 erro ignorado', exc_info=True)
 
         # ── 2. Inline secrets ──
         secret_patterns = [
@@ -9124,7 +9127,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                                 "value_hint": val[:8] + "..." if len(val) > 8 else val,
                             })
         except Exception:
-            pass
+            _log.debug('recon.py:9126 erro ignorado', exc_info=True)
 
         # ── 3. Third-party services ──
         known_services = {
@@ -9154,7 +9157,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                     label = next((v for k, v in known_services.items() if k in d), d)
                     result["third_party_services"].append(label)
         except Exception:
-            pass
+            _log.debug('recon.py:9156 erro ignorado', exc_info=True)
 
         # ── 4. Technology detection ──
         tech_sigs = {
@@ -9183,7 +9186,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                         if sig in sl and name not in result["technologies"]:
                             result["technologies"].append(name)
         except Exception:
-            pass
+            _log.debug('recon.py:9185 erro ignorado', exc_info=True)
 
         # ── 5. JS Deep Analysis ──
         js_deep = result.setdefault("js_analysis", {
@@ -9207,7 +9210,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                 js_deep["webpack_modules"] = wp.get("modules", 0)
                 js_deep["webpack_chunks"] = wp.get("chunks", [])
         except Exception:
-            pass
+            _log.debug('recon.py:9209 erro ignorado', exc_info=True)
 
         try:
             comps = _eval(
@@ -9225,7 +9228,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
             if isinstance(comps, list) and comps:
                 js_deep["framework_routes"] = comps
         except Exception:
-            pass
+            _log.debug('recon.py:9227 erro ignorado', exc_info=True)
 
         try:
             vue = _eval(
@@ -9241,7 +9244,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
             if isinstance(vue, list) and vue:
                 js_deep["framework_routes"].extend(vue)
         except Exception:
-            pass
+            _log.debug('recon.py:9243 erro ignorado', exc_info=True)
 
         try:
             storage = _eval(
@@ -9256,7 +9259,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                 js_deep["storage_keys"]["localStorage"] = storage.get("ls", [])
                 js_deep["storage_keys"]["sessionStorage"] = storage.get("ss", [])
         except Exception:
-            pass
+            _log.debug('recon.py:9258 erro ignorado', exc_info=True)
 
         try:
             globs = _eval(
@@ -9272,7 +9275,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
             if isinstance(globs, list):
                 js_deep["global_variables"] = globs
         except Exception:
-            pass
+            _log.debug('recon.py:9274 erro ignorado', exc_info=True)
 
         try:
             sws = _eval(
@@ -9285,7 +9288,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
             if isinstance(sws, list):
                 js_deep["service_workers"] = sws
         except Exception:
-            pass
+            _log.debug('recon.py:9287 erro ignorado', exc_info=True)
 
         try:
             eh_count = _eval(
@@ -9298,7 +9301,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
             if isinstance(eh_count, int):
                 js_deep["inline_event_handlers"] = eh_count
         except Exception:
-            pass
+            _log.debug('recon.py:9300 erro ignorado', exc_info=True)
 
         # Observations from JS analysis
         if js_deep["webpack_modules"] > 0:
@@ -9351,7 +9354,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                     if isinstance(c, str) and any(kw in c.lower() for kw in kws):
                         result["developer_notes"].append(c.strip()[:200])
         except Exception:
-            pass
+            _log.debug('recon.py:9353 erro ignorado', exc_info=True)
 
         # ── 8. Login forms ──
         try:
@@ -9368,7 +9371,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
                             f"Login form at {f.get('action','(page)')} — {len(f.get('inputs',[]))} inputs"
                         )
         except Exception:
-            pass
+            _log.debug('recon.py:9370 erro ignorado', exc_info=True)
 
         # ── 9. Cookies ──
         try:
@@ -9403,7 +9406,7 @@ def run_browser_recon(target_url: str, screenshot_dir: str = "/tmp", timeout: in
             page.screenshot(path=fpath, full_page=False)
             result["screenshot"] = fpath
         except Exception:
-            pass
+            _log.debug('recon.py:9405 erro ignorado', exc_info=True)
 
         # ── Security header observations ──
         if "content-security-policy" in result["security_headers"]["missing"]:
@@ -9528,7 +9531,7 @@ def run_browser_crawl(hosts, domains, max_hosts: int = 150,
                             if fr.get("action") and fr not in out["forms"] and len(out["forms"]) < 100:
                                 out["forms"].append(fr)
                     except Exception:
-                        pass
+                        _log.debug('recon.py:9530 erro ignorado', exc_info=True)
                     for ln in links:
                         if not isinstance(ln, str) or not ln.startswith("http"):
                             continue
@@ -9645,7 +9648,7 @@ def _check_container_registry(registry: dict, org: str, token: str = "") -> list
                     "severity": "medium",
                 })
     except Exception:
-        pass
+        _log.debug('recon.py:9647 erro ignorado', exc_info=True)
     return findings
 
 
@@ -9727,7 +9730,7 @@ def run_bulk_dataset_scan(hosts: list, domains: list,
                         "source": "shodan_internetdb",
                     })
         except Exception:
-            pass
+            _log.debug('recon.py:9729 erro ignorado', exc_info=True)
 
     # ── Censys Search API (requires id/secret) ──
     if censys_id and censys_secret:
@@ -9761,7 +9764,7 @@ def run_bulk_dataset_scan(hosts: list, domains: list,
                                     "source": "censys_bulk",
                                 })
             except Exception:
-                pass
+                _log.debug('recon.py:9763 erro ignorado', exc_info=True)
 
     return {
         "findings": bulk_findings,
@@ -9800,7 +9803,7 @@ def _check_mysql(ip, port=3306):
                     sev = "high"
                     return {"auth": False, "detail": f"MySQL {version} — {auth_detail}", "severity": sev, "version": version}
     except Exception:
-        pass
+        _log.debug('recon.py:9802 erro ignorado', exc_info=True)
     return None
 
 
@@ -9824,7 +9827,7 @@ def _check_postgresql(ip, port=5432):
         elif len(resp) > 0:
             return {"auth": "unknown", "detail": "PostgreSQL responded — no auth probe", "severity": "medium"}
     except Exception:
-        pass
+        _log.debug('recon.py:9826 erro ignorado', exc_info=True)
     return None
 
 
@@ -9848,7 +9851,7 @@ def _check_mssql(ip, port=1433):
         if len(data) > 8:
             return {"auth": "unknown", "detail": "MSSQL TDS responded — no auth probe", "severity": "medium"}
     except Exception:
-        pass
+        _log.debug('recon.py:9850 erro ignorado', exc_info=True)
     return None
 
 
@@ -9878,7 +9881,7 @@ def _check_oracle(ip, port=1521):
             body = raw[8:] if len(raw) > 8 else raw
             return {"auth": "unknown", "detail": f"Oracle TNS responded — version probe: {body[:80]}", "severity": "medium"}
     except Exception:
-        pass
+        _log.debug('recon.py:9880 erro ignorado', exc_info=True)
     return None
 
 
@@ -10103,7 +10106,7 @@ def run_udp_port_scan(hosts: list) -> dict:
                                     "type": "udp_port",
                                 })
                             except Exception:
-                                pass
+                                _log.debug('recon.py:10105 erro ignorado', exc_info=True)
             finally:
                 os.unlink(hosts_file)
         except Exception as e:
@@ -10223,11 +10226,11 @@ def _run_kiterunner_on_hosts(hosts: list, workers: int = 5) -> list:
                                 "source": "kiterunner",
                             })
                         except Exception:
-                            pass
+                            _log.debug('recon.py:10225 erro ignorado', exc_info=True)
                 finally:
                     os.unlink(target_file)
             except Exception:
-                pass
+                _log.debug('recon.py:10229 erro ignorado', exc_info=True)
 
     # Always also run swagger/openapi probes (lightweight)
     seen_hosts = set()
@@ -10468,7 +10471,7 @@ def run_s3_scanner(domains: list, company_name: str = "") -> dict:
                     })
                 scanned += 1
         except Exception:
-            pass
+            _log.debug('recon.py:10470 erro ignorado', exc_info=True)
         finally:
             Path(tf_path).unlink(missing_ok=True)
     else:
@@ -10487,7 +10490,7 @@ def run_s3_scanner(domains: list, company_name: str = "") -> dict:
                     })
                 scanned += 1
             except Exception:
-                pass
+                _log.debug('recon.py:10489 erro ignorado', exc_info=True)
 
     return {
         "findings": findings,
@@ -10593,7 +10596,7 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
                             "module": "salesforce_recon",
                         })
                 except Exception:
-                    pass
+                    _log.debug('recon.py:10595 erro ignorado', exc_info=True)
 
     # Also check non-SF hosts for DNS CNAME / HTTP redirect to Salesforce
     if not sf_hosts or len(sf_hosts) < 10:
@@ -10620,7 +10623,7 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
                             })
                             break
                 except Exception:
-                    pass
+                    _log.debug('recon.py:10622 erro ignorado', exc_info=True)
 
                 # HTTP redirect check
                 status, body, headers = http_get(f"https://{host}", timeout=5, retries=0)
@@ -10638,7 +10641,7 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
                             "module": "salesforce_recon",
                         })
             except Exception:
-                pass
+                _log.debug('recon.py:10640 erro ignorado', exc_info=True)
 
     sf_hosts = sf_hosts[:30]  # cap
 
@@ -10664,7 +10667,7 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
                         "module": "salesforce_recon",
                     })
         except Exception:
-            pass
+            _log.debug('recon.py:10666 erro ignorado', exc_info=True)
 
         # 2. Community guest user checks
         for check_path in _SALESFORCE_COMMUNITY_CHECKS[:6]:  # most important checks
@@ -10715,7 +10718,7 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
                         })
 
             except Exception:
-                pass
+                _log.debug('recon.py:10717 erro ignorado', exc_info=True)
 
         # 3. Admin/debug page checks
         for check_path in _SALESFORCE_ADMIN_CHECKS[:5]:
@@ -10754,7 +10757,7 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
                     })
 
             except Exception:
-                pass
+                _log.debug('recon.py:10756 erro ignorado', exc_info=True)
 
         # 4. CORS check
         try:
@@ -10770,7 +10773,7 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
                     "module": "salesforce_recon",
                 })
         except Exception:
-            pass
+            _log.debug('recon.py:10772 erro ignorado', exc_info=True)
 
     return {
         "findings": findings,
@@ -10806,7 +10809,7 @@ def run_jwt_analysis(hosts: list, js_files: list = None) -> dict:
                     for match in re.finditer(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", content):
                         tokens.add(match.group(0))
             except Exception:
-                pass
+                _log.debug('recon.py:10808 erro ignorado', exc_info=True)
 
     # Analyze each token
     for token in list(tokens)[:10]:
@@ -10845,7 +10848,7 @@ def run_jwt_analysis(hosts: list, js_files: list = None) -> dict:
                         "module": "jwt_analysis",
                     })
         except Exception:
-            pass
+            _log.debug('recon.py:10847 erro ignorado', exc_info=True)
 
     return {
         "findings": findings,
@@ -10895,7 +10898,7 @@ def run_xss_scan(hosts: list, mode: str = "balanced") -> dict:
                         pass
                 scanned += 1
             except Exception:
-                pass
+                _log.debug('recon.py:10897 erro ignorado', exc_info=True)
 
     # Quick XSStrike on a few hosts
     if xsstrike_bin and scanned < len(live):
@@ -10920,7 +10923,7 @@ def run_xss_scan(hosts: list, mode: str = "balanced") -> dict:
                         })
                 scanned += 1
             except Exception:
-                pass
+                _log.debug('recon.py:10922 erro ignorado', exc_info=True)
 
     return {
         "findings": findings,

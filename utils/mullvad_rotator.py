@@ -11,6 +11,8 @@ For simple single-pipeline usage, module-level helpers still work:
 """
 from __future__ import annotations
 import subprocess, time, random, re, logging, threading
+import logging as _logging
+_log = _logging.getLogger('scantrely.mullvad_rotator')
 
 log = logging.getLogger("mullvad_rotator")
 
@@ -126,24 +128,24 @@ class Rotator:
             try:
                 self.log_cb(msg)
             except Exception:
-                pass
+                _log.debug('mullvad_rotator.py:128 erro ignorado', exc_info=True)
         elif _global_log_cb:
             try:
                 _global_log_cb(msg)
             except Exception:
-                pass
+                _log.debug('mullvad_rotator.py:133 erro ignorado', exc_info=True)
 
     def _ip_update(self, ip: str) -> None:
         if self.ip_cb:
             try:
                 self.ip_cb(ip)
             except Exception:
-                pass
+                _log.debug('mullvad_rotator.py:140 erro ignorado', exc_info=True)
         elif _global_ip_cb:
             try:
                 _global_ip_cb(ip)
             except Exception:
-                pass
+                _log.debug('mullvad_rotator.py:145 erro ignorado', exc_info=True)
 
     def wait_connected(self, timeout: int = 15) -> str:
         deadline = time.time() + timeout

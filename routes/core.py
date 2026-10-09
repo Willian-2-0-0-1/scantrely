@@ -6,6 +6,8 @@ Core Flask routes for auth, admin management, presets, and settings.
 from __future__ import annotations
 
 import json
+import logging as _logging
+_log = _logging.getLogger('scantrely.core')
 import secrets
 import threading as _threading
 import time
@@ -131,7 +133,7 @@ def create_core_blueprint(
             try:
                 db.save_session(token, sess_data)
             except Exception:
-                pass
+                _log.debug('core.py:133 erro ignorado', exc_info=True)
 
         admin["last_login"] = datetime.now().isoformat(timespec="seconds")
         save_admins(admins)
@@ -158,7 +160,7 @@ def create_core_blueprint(
                 try:
                     db.delete_session(token)
                 except Exception:
-                    pass
+                    _log.debug('core.py:160 erro ignorado', exc_info=True)
         resp = jsonify({"ok": True})
         resp.delete_cookie("asm_token")
         return resp

@@ -7,6 +7,8 @@ Supports: JWT session tokens (dashboard) + API keys (external integrations) + OA
 from __future__ import annotations
 
 import hashlib
+import logging as _logging
+_log = _logging.getLogger('scantrely.rbac')
 import hmac
 import json
 import os
@@ -169,7 +171,7 @@ def require_auth(fn):
                                     return jsonify({"error": "Forbidden — company not in scope"}), 403
                         return fn(*args, **kwargs)
             except Exception:
-                pass
+                _log.debug('rbac.py:171 erro ignorado', exc_info=True)
 
         return jsonify({"error": "Unauthorized — please log in"}), 401
     return wrapper

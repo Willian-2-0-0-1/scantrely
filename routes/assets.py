@@ -6,6 +6,8 @@ Asset and tooling Flask routes for companies, tools, validation, and checkpoints
 from __future__ import annotations
 
 import re
+import logging as _logging
+_log = _logging.getLogger('scantrely.assets')
 import socket
 import threading
 import uuid
@@ -115,7 +117,7 @@ def create_asset_blueprint(
                 try:
                     _shutil.rmtree(company_scans)
                 except Exception:
-                    pass
+                    _log.debug('assets.py:117 erro ignorado', exc_info=True)
 
         return jsonify({"ok": True})
 
@@ -132,7 +134,7 @@ def create_asset_blueprint(
             for tool in data:
                 tool["gate"] = gates.get(tool["name"], {"limit": DEFAULT_TOOL_LIMIT, "active": 0, "queued": 0})
         except Exception:
-            pass
+            _log.debug('assets.py:134 erro ignorado', exc_info=True)
         if category:
             data = [tool for tool in data if tool["category"] == category]
         return jsonify(data)

@@ -18,6 +18,8 @@ Usage:
 """
 
 import argparse
+import logging as _logging
+_log = _logging.getLogger('scantrely.dep_confusion')
 import base64
 import json
 import re
@@ -131,7 +133,7 @@ def _gh_get(path: str, token: str) -> tuple[int, dict | list | None]:
         try:
             return status, json.loads(body)
         except Exception:
-            pass
+            _log.debug('dep_confusion.py:133 erro ignorado', exc_info=True)
     return status, None
 
 
@@ -406,7 +408,7 @@ def assess_risk(pkg: str, registry: str, info: dict, company_name: str) -> tuple
                     return "medium", (f"Package contains company name and was published {days_old}d ago "
                                       f"on {registry} — verify ownership")
             except Exception:
-                pass
+                _log.debug('dep_confusion.py:408 erro ignorado', exc_info=True)
         return "low", f"Package with company name exists on {registry} — verify it is yours"
 
     return "info", f"Package exists on {registry} (v{version})"
@@ -517,7 +519,7 @@ def parse_composer_json(content: str) -> list[tuple[str, str]]:
             for pkg_name in data.get(section, {}):
                 pkgs.append((pkg_name, "packagist"))
     except Exception:
-        pass
+        _log.debug('dep_confusion.py:519 erro ignorado', exc_info=True)
     return pkgs
 
 
@@ -831,7 +833,7 @@ def main():
             cfg = json.loads(settings_path.read_text())
             token = cfg.get("github_token", "")
         except Exception:
-            pass
+            _log.debug('dep_confusion.py:833 erro ignorado', exc_info=True)
 
     company_name = args.company or args.domains[0].split(".")[0].title()
 
