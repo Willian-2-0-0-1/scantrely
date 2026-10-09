@@ -106,3 +106,99 @@ def test_repair_deep_fixes_nested_strings():
     bad = "Ã¢â‚¬â€\x9d"
     data = {"a": [{"obs": f"X {bad} y"}], "b": f"k{bad}"}
     assert repair_deep(data) == {"a": [{"obs": "X — y"}], "b": "k—"}
+
+
+def test_git_exposed_html_is_false_positive_and_audited():
+    from core.finding_hygiene import tidy_findings
+    spa = {"key": "g1", "type": "git_exposed", "severity": "critical", "host": "a.x.com", "value": "/.git/config",
+           "title": ".git exposto em a.x.com/.git/config", "desc": "<!doctype html><html lang=\"en\"><head><base href=\"/\">"}
+    real = {"key": "g2", "type": "git_exposed", "severity": "critical", "host": "b.x.com", "value": "/.git/config",
+            "title": ".git exposto", "desc": "[core]\n\trepositoryformatversion = 0"}
+    co = {"leaks_data": {"git_exposed": [{"host": "a.x.com", "path": "/.git/config", "snippet": spa["desc"]},
+                                         {"host": "b.x.com", "path": "/.git/config", "snippet": real["desc"]}]}}
+    out = tidy_findings([spa, real], co)
+    assert [f["key"] for f in out] == ["g2"]
+    assert co["auto_dismissed"][0]["key"] == "g1" and "HTML" in co["auto_dismissed"][0]["reason"]
+    assert [g["host"] for g in co["leaks_data"]["git_exposed"]] == ["b.x.com"]
+    assert tidy_findings([spa], co) == [] and len(co["auto_dismissed"]) == 1   # idempotente, sem duplicar
+
+
+def test_verification_helpers():
+    from core.verification import classify_live, looks_like_git, looks_like_sensitive_file
+    assert not looks_like_git("/.git/config", b"<!DOCTYPE html><html>")
+    assert looks_like_git("/.git/HEAD", b"ref: refs/heads/main\n")
+    assert classify_live("/.git/config", 403, b"Forbidden") == {"live_status": 403, "verified": False}
+    assert classify_live("/.env", 200, b"DB_PASSWORD=x\n")["verified"] is True
+    assert not looks_like_sensitive_file("/backup.sql", b"<html><body>Not found</body></html>")
+
+
+def test_check_exposed_git_requires_git_content(monkeypatch):
+    from core.reconlib import leaks
+    pages = {"https://spa.x.com/.git/config": (200, b"<!doctype html><html></html>", {}),
+             "https://spa.x.com/.git/HEAD": (200, b"<html>", {}),
+             "https://real.x.com/.git/config": (200, b"[core]\n\trepositoryformatversion = 0\n", {})}
+    monkeypatch.setattr(leaks, "http_get", lambda url, **k: pages.get(url, (404, b"", {})))
+    out = leaks.check_exposed_git([{"host": "spa.x.com", "ports": ["443"]}, {"host": "real.x.com", "ports": ["443"]}])
+    assert [o["host"] for o in out] == ["real.x.com"] and out[0]["verified"] is True
+
+
+def test_wayback_marks_live_status(monkeypatch):
+    from core.reconlib import wayback
+    items = [{"url": "https://a.x.com/.git/config", "path": "/.git/config"}, {"url": "https://a.x.com/about", "path": "/about"}]
+    monkeypatch.setattr(wayback, "http_get", lambda url, **k: (403, b"Forbidden", {}))
+    wayback._verify_live(items)
+    assert items[0]["live_status"] == 403 and items[0]["verified"] is False
+    assert "live_status" not in items[1]   # caminho comum não é sondado
+
+
+# ── ciclo de vida: visto / não visto / resolvido ────────────────────────────
+def _hf(key, module="headers", **kw):
+    return {"key": key, "module": module, "type": "header", "severity": "medium", "title": key, "host": "a.x.com", **kw}
+
+
+def test_lifecycle_split_only_reevaluates_modules_that_ran():
+    from core.finding_lifecycle import split_prior
+    prior = [_hf("h1"), _hf("c1", module="cors_scan"), _hf("t1", module="typosquat")]
+    carry, reeval = split_prior(prior, lambda mod: mod == "headers")
+    assert set(reeval) == {"h1"} and {f["key"] for f in carry} == {"c1", "t1"}   # cors não rodou; typosquat não é autoritativo
+
+
+def test_lifecycle_not_seen_then_resolved_then_seen_again():
+    from core.finding_lifecycle import RESOLVE_AFTER, apply_lifecycle, is_active
+    old = {"h1": _hf("h1", first_seen="2026-10-01T00:00:00", last_seen="2026-10-05T00:00:00")}
+    cur = apply_lifecycle([], old, now="2026-10-09T00:00:00")
+    assert cur[0]["status"] == "not_seen" and cur[0]["miss_count"] == 1 and not is_active(cur[0])
+    assert cur[0]["last_seen"] == "2026-10-05T00:00:00"          # última vez em que foi visto
+    for _ in range(RESOLVE_AFTER - 1):
+        cur = apply_lifecycle([], {cur[0]["key"]: cur[0]}, now="2026-10-10T00:00:00")
+    assert cur[0]["status"] == "resolved"
+    back = apply_lifecycle([_hf("h1")], {"h1": cur[0]}, now="2026-10-11T00:00:00")
+    assert back[0].get("status") is None and back[0]["miss_count"] == 0 and back[0]["first_seen"] == "2026-10-01T00:00:00"
+    assert is_active(back[0])
+
+
+def test_inactive_findings_do_not_count_anywhere():
+    from core.asset_matrix import compute_aggregates
+    from core.finding_groups import build_groups
+    from core.finding_hygiene import count_by_severity
+    from core.priorities import build_priorities
+    fs = [_hf("a", severity="high", host="a.x.com", type="cors"), _hf("b", severity="high", host="a.x.com", type="cors", status="not_seen")]
+    assert count_by_severity(fs)["findings_high"] == 1
+    assert compute_aggregates({"findings": fs})["a.x.com"]["sev"]["high"] == 1
+    assert build_priorities({"findings": fs})["findings_total"] == 1
+    assert build_groups(fs)["confirmed_total"] == 1
+    st = build_groups(fs, view="stale")
+    assert st["confirmed_total"] == 1 and st["stale_total"] == 1 and st["groups"][0]["findings"][0]["key"] == "b"
+
+
+def test_cors_error_response_is_downgraded(monkeypatch):
+    from core.reconlib import cors
+    def fake(url, **k):
+        origin = (k.get("extra_headers") or {}).get("Origin", "")
+        return 403, b"Forbidden", {"access-control-allow-origin": origin, "access-control-allow-credentials": "true"}
+    monkeypatch.setattr(cors, "http_get", fake)
+    out = cors.run_cors_scan([{"host": "api.x.com", "status_code": 403, "ports": ["443"]}])
+    f = out["findings"][0]
+    assert f["severity"] == "high" and "HTTP 403" in f["desc"]          # crítico → alto quando a raiz responde 403
+    monkeypatch.setattr(cors, "http_get", lambda url, **k: (200, b"ok", {"access-control-allow-origin": (k.get("extra_headers") or {}).get("Origin", ""), "access-control-allow-credentials": "true"}))
+    assert cors.run_cors_scan([{"host": "api.x.com", "status_code": 200, "ports": ["443"]}])["findings"][0]["severity"] == "critical"

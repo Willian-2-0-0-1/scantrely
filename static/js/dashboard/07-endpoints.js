@@ -109,6 +109,17 @@ function buildUnifiedEndpoints(co) {
     if (!rawUrl || typeof rawUrl !== 'string') return;
     if (source === 'js' && isJsPathNoise(rawUrl)) return;
     const cls = _classifyUrlMemo(rawUrl);
+    // URL de arquivo histórico (Wayback/URLFinder) é só pista: sem confirmação ao vivo não pode ser crítica/alta
+    // (ex.: /.git/config que hoje responde 403). O risco por padrão de URL só vale para fontes ao vivo ou confirmadas.
+    let severity = meta.severity || cls.severity;
+    let evidence = '';
+    if (source === 'wayback' || source === 'urlfinder') {
+      if (meta.verified) evidence = 'confirmado ao vivo';
+      else {
+        if (severity === 'critical' || severity === 'high') severity = 'info';
+        evidence = meta.liveStatus ? `HTTP ${meta.liveStatus} agora` : 'histórico · não verificado';
+      }
+    }
     allEndpoints.push({
       url: rawUrl,
       method: String(method || 'GET').toUpperCase(),
@@ -116,7 +127,8 @@ function buildUnifiedEndpoints(co) {
       path: meta.path || '',
       source,
       type: meta.type || cls.type,
-      severity: meta.severity || cls.severity,
+      severity,
+      evidence,
       status: meta.status ?? null,
       jsFile: meta.jsFile || '',
     });
@@ -130,6 +142,8 @@ function buildUnifiedEndpoints(co) {
         host: typeof u === 'object' ? (u.host || '') : '',
         path: typeof u === 'object' ? (u.path || '') : '',
         status: typeof u === 'object' ? u.status : null,
+        verified: typeof u === 'object' ? !!u.verified : false,
+        liveStatus: typeof u === 'object' ? (u.live_status || 0) : 0,
       });
     });
     sources.push({ name: 'Wayback', count: co.wayback_data.interesting_count || 0, key: 'wayback' });
@@ -622,7 +636,7 @@ function _renderFlatTable(filtered) {
             <td><span class="url-type-badge" style="background:${sc.bg};color:${sc.color};border:1px solid ${sc.color}22">${esc(ep.type)}</span></td>
             <td>${ep.host ? originHostChip(ep.host, "url-cell-host origin-link") : '<span class="url-cell-host">\u2014</span>'}</td>
             <td><span class="source-chip" style="font-size:.6rem">${esc(ep.source)}</span></td>
-            <td><span class="url-risk-badge" style="background:${sc.bg};color:${sc.color};font-weight:700">${sc.labelShort}</span></td>
+            <td><span class="url-risk-badge" style="background:${sc.bg};color:${sc.color};font-weight:700">${sc.labelShort}</span>${ep.evidence ? `<div style="font-size:.58rem;color:var(--text3);margin-top:3px;white-space:nowrap">${esc(ep.evidence)}</div>` : ''}</td>
             <td><button class="url-copy-btn" onclick="copyToClipboard('${escAttr(ep.url).replace(/'/g,"\\'")}');event.stopPropagation()" title="${esc(typeof t === "function" ? (t("origin_copy") || "Copiar") : "Copiar")}">${icoHtml("clipboard",14)}</button></td>
           </tr>
           <tr class="ep-detail ep-detail-${idx}" style="display:none">
@@ -633,6 +647,7 @@ function _renderFlatTable(filtered) {
                 ${hasQuery ? `<div class="ep-detail-row"><span class="ep-detail-k">Query Params</span><code class="ep-detail-code">${esc(_extractQuery(ep.url))}</code></div>` : ''}
                 <div class="ep-detail-row"><span class="ep-detail-k">Host</span>${ep.host ? originHostChip(ep.host, "origin-link") : '<span style="color:var(--text2)">\u2014</span>'}</div>
                 <div class="ep-detail-row"><span class="ep-detail-k">Source</span><span class="source-chip" style="font-size:.62rem">${esc(ep.source)}</span></div>
+                ${ep.evidence ? `<div class="ep-detail-row"><span class="ep-detail-k">Evidência</span><span style="color:var(--text2)">${esc(ep.evidence)}</span></div>` : ''}
                 ${ep.status ? `<div class="ep-detail-row"><span class="ep-detail-k">Status</span><span style="color:var(--text2);font-family:var(--mono)">${ep.status}</span></div>` : ''}
                 ${ep.jsFile ? `<div class="ep-detail-row"><span class="ep-detail-k">JS File</span>${originLinkHtml(ep.jsFile, ep.jsFile, { host: ep.host, className: "origin-link origin-mono", title: _originTitle("js") })}</div>` : ''}
                 <div class="ep-detail-actions">

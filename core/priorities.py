@@ -74,7 +74,8 @@ def _hosts_of(f: dict) -> list[str]:
 
 def build_priorities(co: dict, limit: int = _MAX_ACTIONS) -> dict:
     """Retorna {actions:[...], hidden:N, total:N}. Ordem: severidade, KEV, nº de hosts."""
-    findings = [f for f in (co.get("findings") or []) if f.get("severity") in ("critical", "high", "medium", "low")]
+    findings = [f for f in (co.get("findings") or []) if f.get("severity") in ("critical", "high", "medium", "low")
+                and f.get("status") not in ("not_seen", "resolved") and "false" not in str(f.get("status") or "").lower()]
     groups: dict[str, list[dict]] = defaultdict(list)
     for f in findings:
         ftype = f.get("type") or "other"

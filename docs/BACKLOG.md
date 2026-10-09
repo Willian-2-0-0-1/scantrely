@@ -9,9 +9,7 @@
 
 | # | Prioridade | Descrição |
 |---|-----------|-----------|
-| P1 | 🟡 | Abas Vulnerabilidades e Hosts usarem `/findings` e `/hosts` paginados. Hoje agrupam e filtram no navegador sobre a empresa inteira (~0,7 MB na Porto); exige reescrever agrupamento, triagem e filtros (~1.700 linhas). A API já existe e está testada. |
 | P4 | 🟢 | Remover estilos inline (~680) do front e dividir por aba os arquivos de `static/js/dashboard/` que ainda passam de 1.000 linhas (06, 07, 12, 16). |
-| P6 | 🟢 | Achados "não vistos no último scan" marcarem como resolvidos: hoje os achados anteriores são carregados e os geradores pulam chaves já existentes, então não dá saber o que foi regerado sem refatorar os geradores. VHost e cadeias já são recalculados a cada scan. |
 
 ---
 

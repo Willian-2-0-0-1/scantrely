@@ -34,6 +34,30 @@ def _wayback_cdx_urls(domain: str, limit: int) -> list:
 
 
 
+_VERIFY_MAX = 60   # teto de sondagens ao vivo por scan (só caminhos de alto risco)
+
+
+def _verify_live(items: list) -> None:
+    """URL do arquivo histórico não é prova de exposição: sonda ao vivo os caminhos de alto risco e
+    grava `live_status`/`verified` (verified só se o conteúdo confirma o arquivo sensível)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from core.verification import HIGH_RISK_PATH, classify_live
+
+    targets = [u for u in items if HIGH_RISK_PATH.search(u.get("path") or "")][:_VERIFY_MAX]
+
+    def probe(u):
+        try:
+            status, body, _ = http_get(u["url"], timeout=4, retries=0)
+        except Exception:
+            status, body = 0, b""
+        u.update(classify_live(u.get("path") or "", status, body))
+
+    if targets:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(probe, targets))
+
+
 def run_wayback(domain: str, limit: int = 5000, hosts: list = None) -> dict:
     """Mine historical URLs via gau (with Wayback CDX fallback) for sensitive paths.
     Runs on root domain; CDX also covers all subdomains via wildcard query.
@@ -94,10 +118,13 @@ def run_wayback(domain: str, limit: int = 5000, hosts: list = None) -> dict:
             seen_paths.add(key)
             deduped.append(u)
 
+    interesting_out = deduped[:200]
+    _verify_live(interesting_out)
+
     return {
         "domain":         domain,
         "total_urls":     len(all_urls),
-        "interesting":    deduped[:200],
+        "interesting":    interesting_out,
         "interesting_count": len(deduped),
         "subdomains":     sorted(subdomains_found),
         "scanned_at":     datetime.now().isoformat(timespec="seconds"),

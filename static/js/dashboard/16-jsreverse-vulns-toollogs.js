@@ -441,6 +441,7 @@ async function renderVulnsTab(co) {
         <option value="">Todos os status</option>
         ${Object.entries(FINDING_TRIAGE_LABELS).map(([val,lbl])=>`<option value="${val}">${lbl}</option>`).join("")}
       </select>
+      ${fg0.stale_total ? `<select class="fi" id="f-view" onchange='applyFindFilter(${cidJs})' title="Achados que um módulo deixou de reportar"><option value="">Ativos</option><option value="stale">Não vistos no último scan (${fg0.stale_total})</option></select>` : ""}
       <span style="font-size:.68rem;color:var(--text3);padding:6px 4px" id="f-cnt"></span>
       <button class="btn btn-secondary" style="font-size:.68rem;padding:4px 10px;margin-left:auto" onclick='exportFindings(${cidJs},"csv")' title="Export CSV">${icoHtml("chevron-down",14)} CSV</button>
       <button class="btn btn-secondary" style="font-size:.68rem;padding:4px 10px" onclick='exportFindings(${cidJs},"json")' title="Export JSON">${icoHtml("chevron-down",14)} JSON</button>

@@ -3193,7 +3193,8 @@ class TestPersistFrontendSync:
         out = merge_persist_findings({
             "leaks_data": {
                 "git_exposed": [
-                    {"host": "git.example.com", "path": "/.git/HEAD", "severity": "critical", "snippet": "[core]"},
+                    {"host": "git.example.com", "path": "/.git/config", "severity": "critical", "snippet": "[core]\n\trepositoryformatversion = 0"},
+                    {"host": "spa.example.com", "path": "/.git/config", "severity": "critical", "snippet": "<!doctype html><html>"},
                 ]
             }
         })
@@ -3669,3 +3670,42 @@ class TestOriginLink:
         assert "vuln_cnt" in i18n
         assert "js/dashboard/17-terminal-alerts-init.js" in html
         assert "i18n.js?v=21" in html
+
+
+class TestFindingLifecyclePersist:
+    """Integração: _persist_pipeline_results aplica visto / não visto sobre o que o módulo reportou neste scan."""
+
+    def _runner(self, db, tmp_path):
+        from core.pipeline import ReconRunner
+        return ReconRunner(db=db, base_dir=tmp_path, get_settings=lambda: {}, load_hosts_fn=lambda cid: [],
+                           recon_module=None, recon_available=False)
+
+    def _hdr(self, host, header):
+        return {"host": host, "findings": [{"header": header, "present": False, "severity": "warn", "issue": f"Missing {header}"}]}
+
+    def test_headers_fixed_becomes_not_seen_and_unrelated_modules_untouched(self, db, tmp_path):
+        old_hdr = {"key": "header-missing-a.x.com-Content-Security-Policy", "type": "header", "module": "headers", "severity": "medium",
+                   "title": "Header ausente em a.x.com: Content-Security-Policy", "host": "a.x.com"}
+        old_cors = {"key": "cors-1", "type": "cors", "module": "cors_scan", "severity": "high", "title": "CORS", "host": "a.x.com"}
+        db.save_asm_data({"companies": [{"id": "co", "name": "Co", "domains": ["x.com"], "hosts": [{"host": "a.x.com", "status_code": 200}],
+                                         "findings": [old_hdr, old_cors]}]})
+        runner = self._runner(db, tmp_path)
+        # o módulo headers rodou e agora o host está corrigido (sem header ausente); cors_scan NÃO rodou
+        runner.results["co:headers"] = {"status": "done", "data": {"results": [{"host": "a.x.com", "findings": [], "cookie_issues": []}]}}
+        runner._persist_pipeline_results("co")
+        got = {f["key"]: f for f in db.load_asm_data()["companies"][0]["findings"]}
+        assert got[old_hdr["key"]]["status"] == "not_seen" and got[old_hdr["key"]]["miss_count"] == 1
+        assert "status" not in got["cors-1"]                       # módulo que não rodou: intacto
+        stats = db.load_asm_data()["companies"][0]["stats"]
+        assert stats["findings_medium"] == 0 and stats["findings_high"] == 1
+
+    def test_still_present_finding_is_refreshed_not_stale(self, db, tmp_path):
+        key = "header-missing-a.x.com-Content-Security-Policy"
+        old = {"key": key, "type": "header", "module": "headers", "severity": "medium", "title": "x", "host": "a.x.com",
+               "first_seen": "2026-10-01T00:00:00", "status": "not_seen", "miss_count": 2}
+        db.save_asm_data({"companies": [{"id": "co", "name": "Co", "domains": ["x.com"], "hosts": [{"host": "a.x.com", "status_code": 200}], "findings": [old]}]})
+        runner = self._runner(db, tmp_path)
+        runner.results["co:headers"] = {"status": "done", "data": {"results": [self._hdr("a.x.com", "Content-Security-Policy")]}}
+        runner._persist_pipeline_results("co")
+        f = next(f for f in db.load_asm_data()["companies"][0]["findings"] if f["key"] == key)
+        assert f.get("status") is None and f["miss_count"] == 0 and f["first_seen"] == "2026-10-01T00:00:00"

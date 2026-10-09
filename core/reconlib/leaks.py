@@ -198,6 +198,9 @@ def search_codebase_leaks(domain: str) -> dict:
     return {"results": results}
 
 
+from core.verification import looks_like_git
+
+
 def check_exposed_git(hosts: list) -> list:
     """Quick check for exposed .git directories."""
     exposed = []
@@ -206,8 +209,9 @@ def check_exposed_git(hosts: list) -> list:
     def check(host):
         for path in ["/.git/config", "/.git/HEAD"]:
             status, body, _ = http_get(f"https://{host}{path}", timeout=3, retries=0)
-            if status == 200 and body:
-                return {"host": host, "path": path, "severity": "critical",
+            # HTTP 200 sozinho não prova nada: SPA/soft-404 devolve HTML para qualquer caminho.
+            if status == 200 and body and looks_like_git(path, body):
+                return {"host": host, "path": path, "severity": "critical", "verified": True,
                         "snippet": body[:100].decode("utf-8", "ignore")}
         return None
 

@@ -19,6 +19,10 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 - Gaveta do host com achados, CVE, secrets e endpoints; contagens da matriz abrem a seção certa; exportação CSV/JSON respeita os filtros e leva todas as colunas; cabeçalho e coluna URL fixos; layout compacto no celular.
 - Corrigidos: `_downloadBlob` inexistente (botões CSV/JSON de hosts e achados não faziam nada), "NaN" no cartão de ferramenta da aba Portas, data velha no rodapé.
 - Vulnerabilidades: seções e cartões sem dados não aparecem; KPIs de severidade deixaram de duplicar os cartões.
+- **Falsos positivos tratados (`core/verification.py`)**: `.git exposto` só vale com conteúdo de git (HTML de SPA/soft-200 não conta; os 3 críticos da Porto eram isso e foram para `auto_dismissed`); URLs históricas do Wayback de alto risco são sondadas ao vivo (`live_status`/`verified`) e, sem confirmação, aparecem como INFO "histórico · não verificado" na aba Endpoints (ex.: `/.git/config` que hoje responde 403); CORS refletido em resposta 4xx/5xx é rebaixado um nível.
+- **Achados "não vistos"**: `core/finding_lifecycle.py` — o que um módulo que rodou neste scan deixa de reportar vira `not_seen` (some das contagens, prioridades, matriz e lista; aparece no filtro "Não vistos") e `resolved` após 3 scans; módulos que não rodaram não mudam nada.
+- Matriz de ativos (`/assets`, `/assets/export`) e lista de vulnerabilidades (`/finding-groups`) agora filtram, ordenam e paginam no servidor; `tests/test_asset_matrix_parity.py` compara o servidor com o código antigo do front (congelado em `tests/js/legacy`) no node.
+- Corrigidos: `_classifyCache` nunca declarada, ordenação que jogava críticos para o fim (`||5`), `_IP_RE` indefinido em `utils/tools.py`, gaveta do host vazia para hosts só do histórico.
 - Docs movidos para `docs/`, README curto e backlog único.
 
 ## [1.3.11] - 2026-10-08

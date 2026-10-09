@@ -222,6 +222,8 @@ def compute_aggregates(co: dict) -> dict[str, dict]:
         return agg.setdefault(h, {"sev": {s: 0 for s in SEV_KEYS}, "findings": 0, "cve": 0, "secrets": 0, "endpoints": 0, "score": 0})
 
     for f in co.get("findings") or []:
+        if f.get("status") in ("not_seen", "resolved"):
+            continue   # não visto no último scan: não conta
         sev = _t(f.get("severity") or "info").lower()
         for h in finding_host_set(f):
             a = slot(h)
@@ -473,6 +475,8 @@ def finding_risk_map(co: dict) -> dict[str, dict]:
     rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
     out: dict[str, dict] = {}
     for f in co.get("findings") or []:
+        if f.get("status") in ("not_seen", "resolved"):
+            continue
         sev = _t(f.get("severity") or "info").lower()
         cand = {host_from_any(f.get("host")), host_from_any(f.get("domain"))}
         # o front só olha host, domain e o hostname da url (não affected_hosts)

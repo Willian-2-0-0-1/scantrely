@@ -712,6 +712,9 @@ def merge_persist_findings(co_data: dict, all_findings: list | None = None, exis
             continue
         host = item.get('host') or primary_domain
         path = item.get('path') or '/.git/'
+        from core.verification import looks_like_git as _looks_like_git
+        if not _looks_like_git(path, item.get('snippet') or ''):
+            continue   # 200 com HTML (SPA) não é .git exposto
         _add({
             'key': f'git-exposed-{host}-{path}',
             'type': 'git_exposed',
@@ -3299,7 +3302,9 @@ class ReconRunner:
             co_data['snmp_data'] = snmp_data
             log(f"  ↳ SNMP: {snmp_data.get('vulnerable', 0)} hosts com community 'public'")
         _prior = co_data.get('findings', [])
-        all_findings: list[dict] = [f for f in _prior if f.get('type') not in ('cve', 'secret', 'attack_chain')]
+        from core.finding_lifecycle import split_prior as _split_prior
+        _carry, _reeval = _split_prior(_prior, lambda mod: bool(_result(mod)) and not _result(mod).get('error'))
+        all_findings: list[dict] = [f for f in _carry if f.get('type') not in ('cve', 'secret', 'attack_chain')]
         existing_keys = {f.get('key') or f.get('title') or f.get('name') or '' for f in all_findings}
         try:
             from core.validators import filter_nuclei_info, dedup_findings
@@ -3638,6 +3643,8 @@ class ReconRunner:
                     titles = [f.get('title', '')[:50] for f in critical_high[:3]]
                     all_findings.append({'key': key, 'type': 'attack_chain', 'title': f'Superfície concentrada: {len(critical_high)} findings críticos/altos em {hostname}', 'severity': 'high', 'category': 'correlation', 'desc': f"Host {hostname} concentra {len(critical_high)} findings de alta severidade: {'; '.join(titles)}", 'host': hostname, 'module': 'correlation'})
                     existing_keys.add(key)
+        from core.finding_lifecycle import apply_lifecycle as _apply_lifecycle
+        all_findings = _apply_lifecycle(all_findings, _reeval)
         all_findings = [_normalize_finding(f, f.get('module') or f.get('category') or 'general') for f in all_findings]
 
         def _semantic_key(f: dict) -> str:
@@ -3702,7 +3709,7 @@ class ReconRunner:
             log(f'  ⚠ Cloud enrichment failed: {e}')
 
         def _count_sev(sev):
-            return sum((1 for f in all_findings if f.get('severity') == sev))
+            return sum((1 for f in all_findings if f.get('severity') == sev and f.get('status') not in ('not_seen', 'resolved')))
         co_data.setdefault('stats', {}).update({'live_hosts': len([h for h in co_data.get('hosts', []) if _is_responsive(h)]), 'subdomains': len(co_data.get('hosts', [])), 'findings_critical': _count_sev('critical'), 'findings_high': _count_sev('high'), 'findings_medium': _count_sev('medium'), 'findings_info': _count_sev('info'), 'open_ports': len(co_data.get('port_scan', {}).get('results', [])), 'waf_protected': sum(co_data.get('waf_coverage', {}).values()), 'screenshots': int(co_data.get('screenshots_count') or 0)})
         log(f"  ↳ Stats: {co_data['stats']['findings_critical']}c/{co_data['stats']['findings_high']}h/{co_data['stats']['findings_medium']}m findings, {co_data['stats']['open_ports']} ports")
         now_ts = datetime.now().isoformat(timespec='seconds')

@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from datetime import datetime
+
+from core.verification import looks_like_git
 
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 _VHOST_WILDCARD_MIN = 3          # respostas idênticas em ≥3 vhosts do mesmo IP = padrão do WAF/CDN
@@ -140,10 +143,38 @@ def _group_headers(findings: list[dict]) -> list[dict]:
     return rest
 
 
+def _false_positive_git(f: dict) -> bool:
+    """`.git exposto` sem evidência de git no corpo (HTML de SPA/soft-200 ou só "HTTP 200")."""
+    if f.get("type") != "git_exposed":
+        return False
+    path = f.get("value") or "/.git/config"
+    evidence = f.get("desc") or ""
+    return not looks_like_git(path, evidence)
+
+
+def dismiss_false_positives(findings: list[dict], co_data: dict) -> list[dict]:
+    """Tira da lista achados que não resistem à verificação e guarda o motivo em `auto_dismissed`."""
+    keep, dismissed = [], co_data.setdefault("auto_dismissed", [])
+    known = {d.get("key") for d in dismissed}
+    for f in findings:
+        if _false_positive_git(f):
+            if f.get("key") not in known:
+                dismissed.append({"key": f.get("key"), "title": f.get("title"), "host": f.get("host"), "type": f.get("type"),
+                                  "reason": "Resposta HTML (SPA/soft-200), não é um repositório .git",
+                                  "evidence": str(f.get("desc") or "")[:120], "dismissed_at": datetime.now().isoformat(timespec="seconds")})
+            continue
+        keep.append(f)
+    leaks = co_data.get("leaks_data")
+    if isinstance(leaks, dict) and isinstance(leaks.get("git_exposed"), list):
+        leaks["git_exposed"] = [g for g in leaks["git_exposed"]
+                                if isinstance(g, dict) and looks_like_git(g.get("path") or "/.git/config", g.get("snippet") or "")]
+    return keep
+
+
 def tidy_findings(findings: list[dict], co_data: dict) -> list[dict]:
     """Aplica todas as regras de higiene. Idempotente."""
     out: list[dict] = []
-    for f in findings:
+    for f in dismiss_false_positives(findings, co_data):
         f = dict(f)
         for k in ("title", "desc"):
             if k in f:
@@ -165,7 +196,7 @@ def chain_candidate_hosts(co_data: dict) -> set[str]:
 
 
 def count_by_severity(findings: list[dict]) -> dict[str, int]:
-    return {f"findings_{s}": sum(1 for f in findings if f.get("severity") == s)
+    return {f"findings_{s}": sum(1 for f in findings if f.get("severity") == s and f.get("status") not in ("not_seen", "resolved"))
             for s in ("critical", "high", "medium", "low", "info")}
 
 

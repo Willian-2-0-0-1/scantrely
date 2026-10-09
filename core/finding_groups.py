@@ -16,15 +16,18 @@ _NOISE = re.compile(r"phish|typosquat|intel|osint|leak|brand|whois|monitor|newsl
 _IP = re.compile(r"\b\d+\.\d+\.\d+\.\d+\b")
 _PORT = re.compile(r":\d{2,5}\b")
 _BAD_STATUS = ("false", "ignor", "dismiss", "duplicate", "invalid")
+_INACTIVE = ("not_seen", "resolved")   # ciclo de vida: ver core/finding_lifecycle.py
 
 
 def _s(v) -> str:
     return "" if v is None else str(v)
 
 
-def is_confirmed(f: dict) -> bool:
+def is_confirmed(f: dict, *, include_inactive: bool = False) -> bool:
     status = _s(f.get("status")).lower()
     if any(w in status for w in _BAD_STATUS):
+        return False
+    if status in _INACTIVE and not include_inactive:
         return False
     if f.get("type") == "secret" or f.get("category") == "secrets":
         return True
@@ -69,9 +72,13 @@ def _matches(f: dict, q: str, sev: str, cat: str) -> bool:
 
 
 def build_groups(findings: list[dict], *, q: str = "", severity: str = "", category: str = "",
-                 triage: str = "", triage_map: dict | None = None, page: int = 1, per_page: int = 25) -> dict:
+                 triage: str = "", triage_map: dict | None = None, page: int = 1, per_page: int = 25,
+                 view: str = "active") -> dict:
+    """view="active" (padrão) | "stale": só os não vistos/resolvidos em scans recentes."""
     triage_map = triage_map or {}
-    confirmed = [f for f in (findings or []) if is_confirmed(f)]
+    stale_view = view == "stale"
+    confirmed = [f for f in (findings or [])
+                 if is_confirmed(f, include_inactive=stale_view) and (_s(f.get("status")) in _INACTIVE) == stale_view]
     q = (q or "").strip().lower()
 
     sev_counts = {s: sum(1 for f in confirmed if f.get("severity") == s) for s in ("critical", "high", "medium", "low")}
@@ -102,5 +109,5 @@ def build_groups(findings: list[dict], *, q: str = "", severity: str = "", categ
     return {
         "groups": chunk, "total_groups": len(entries), "total_findings": sum(e["count"] for e in entries),
         "page": page, "pages": pages, "per_page": per_page,
-        "confirmed_total": len(confirmed), "severity": sev_counts, "categories": categories,
+        "confirmed_total": len(confirmed), "stale_total": sum(1 for f in (findings or []) if _s(f.get("status")) in _INACTIVE), "severity": sev_counts, "categories": categories,
     }

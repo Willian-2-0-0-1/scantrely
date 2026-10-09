@@ -355,6 +355,7 @@ from core.reconlib.waf import (  # noqa: F401
     run_waf_detection,
 )
 from core.reconlib.wayback import (  # noqa: F401
+    _verify_live,
     _INTERESTING_EXT,
     _INTERESTING_PATH,
     _wayback_cdx_urls,

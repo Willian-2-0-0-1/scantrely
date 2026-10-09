@@ -76,6 +76,13 @@ def run_cors_scan(hosts: list) -> dict:
                 else:
                     sev = base_sev
 
+                # Resposta de erro (4xx/5xx) na raiz — típico de API gateway — reflete o CORS sem provar impacto:
+                # rebaixa um nível e deixa isso explícito (o impacto depende de um endpoint autenticado).
+                err_note = ""
+                if status >= 400:
+                    sev = {"critical": "high", "high": "medium", "medium": "low"}.get(sev, sev)
+                    err_note = f" (resposta HTTP {status} na raiz: confirme em um endpoint autenticado)"
+
                 candidate = {
                     "type": "cors", "host": host, "url": base_url,
                     "test": test_name, "origin_sent": origin,
@@ -85,7 +92,7 @@ def run_cors_scan(hosts: list) -> dict:
                     "desc": (
                         f"{host} reflects origin '{origin}'. "
                         f"Access-Control-Allow-Origin: {acao}. "
-                        f"Access-Control-Allow-Credentials: {acac or 'not set'}."
+                        f"Access-Control-Allow-Credentials: {acac or 'not set'}.{err_note}"
                     ),
 
                     "request_raw":  ("GET / HTTP/1.1\r\nHost: " + host + "\r\nOrigin: " + origin + "\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*"),

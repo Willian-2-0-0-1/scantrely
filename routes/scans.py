@@ -247,7 +247,8 @@ def create_scan_blueprint(
             triage = {}
         return jsonify(build_groups(
             co.get("findings") or [], q=a.get("q", ""), severity=a.get("severity", ""), category=a.get("category", ""),
-            triage=a.get("triage", ""), triage_map=triage, page=a.get("page", 1), per_page=a.get("per_page", 25)))
+            triage=a.get("triage", ""), triage_map=triage, page=a.get("page", 1), per_page=a.get("per_page", 25),
+            view=a.get("view", "active")))
 
     @bp.route("/api/data/company/<cid>/priorities", methods=["GET"])
     @require_auth
