@@ -157,6 +157,27 @@ def create_scan_blueprint(
             return jsonify({"error": "Company not found"}), 404
         return jsonify(co)
 
+    @bp.route("/api/data/company/<cid>/findings", methods=["GET"])
+    @require_auth
+    def api_company_findings(cid: str):
+        """Achados paginados: ?severity=&type=&host=&q=&new=1&page=&per_page="""
+        if not _visible_company(cid):
+            return jsonify({"error": "Company not found"}), 404
+        a = request.args
+        return jsonify(db.query_findings(
+            cid, severity=a.get("severity", ""), ftype=a.get("type", ""), host=a.get("host", ""),
+            q=a.get("q", "").strip(), only_new=a.get("new") == "1", page=a.get("page"), per_page=a.get("per_page")))
+
+    @bp.route("/api/data/company/<cid>/hosts", methods=["GET"])
+    @require_auth
+    def api_company_hosts(cid: str):
+        """Hosts paginados: ?q=&live=1|0&waf=none|<nome>&page=&per_page="""
+        if not _visible_company(cid):
+            return jsonify({"error": "Company not found"}), 404
+        a = request.args
+        return jsonify(db.query_hosts(cid, q=a.get("q", "").strip(), live=a.get("live", ""),
+                                      waf=a.get("waf", ""), page=a.get("page"), per_page=a.get("per_page")))
+
     @bp.route("/api/data/company/<cid>/priorities", methods=["GET"])
     @require_auth
     def api_company_priorities(cid: str):

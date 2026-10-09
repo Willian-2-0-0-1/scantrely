@@ -2,6 +2,18 @@
 
 Todas as mudanças relevantes do projeto são documentadas aqui.
 
+## [1.4.0] - 2026-10-09
+
+### Dados e organização
+
+- **Higiene dos achados** (`core/finding_hygiene.py`): vhosts com resposta idêntica viram 1 achado informativo; headers/cookies agrupados por tipo; cadeias de ataque recalculadas a cada scan e só sobre hosts do inventário; typosquat limitado a *high*; achados de scans antigos não se acumulam. Porto: 567 → 130 achados, críticos 50 → 8.
+- Corrigida a acentuação corrompida (dupla codificação UTF-8) em `core/recon.py` e nos textos gravados.
+- **Prioridades**: `GET /api/data/company/<id>/priorities` (`core/priorities.py`) e nova visão geral "O que fazer agora".
+- Abas da empresa de 10 para 5; cabeçalho com menus Exportar e ⋯.
+- **API paginada**: `/api/data/company/<id>/findings` e `/hosts` sobre tabelas de índice (`finding_index`, `host_index`) derivadas do JSON.
+- `/api/data/company/<id>` respeita o escopo do admin.
+- Docs movidos para `docs/`, README curto e backlog único.
+
 ## [1.3.11] - 2026-10-08
 
 ### Vulnerabilidades confirmadas

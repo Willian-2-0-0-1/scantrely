@@ -887,6 +887,24 @@ class TestAuth:
         assert analyst.get("/api/data/company/alpha/priorities").status_code in (403, 404)
         assert analyst.get("/api/data/company/beta/priorities").status_code == 200
 
+    def test_paginated_findings_and_hosts(self, flask_app, db, auth_client):
+        auth_client.post("/api/companies", json={"name": "Alpha", "domains": ["alpha.com"]})
+        db.save_asm_data({"companies": [{"id": "alpha", "name": "Alpha",
+            "findings": [{"key": f"k{i}", "type": "header" if i % 2 else "cve", "severity": "high" if i < 3 else "low",
+                          "host": f"h{i}.alpha.com", "title": f"t{i}"} for i in range(7)],
+            "hosts": [{"host": "a.alpha.com", "ip": "1.1.1.1", "status_code": 200, "waf": "Cloudflare"},
+                      {"host": "b.alpha.com", "ip": "2.2.2.2", "status_code": 0, "waf": ""}]}]})
+        r = auth_client.get("/api/data/company/alpha/findings?per_page=3&page=2").get_json()
+        assert r["total"] == 7 and r["pages"] == 3 and len(r["items"]) == 3
+        assert r["facets"]["severity"] == {"high": 3, "low": 4}
+        r = auth_client.get("/api/data/company/alpha/findings?severity=high&type=cve").get_json()
+        assert {f["key"] for f in r["items"]} == {"k0", "k2"}
+        assert auth_client.get("/api/data/company/alpha/findings?q=h5").get_json()["total"] == 1
+        assert auth_client.get("/api/data/company/alpha/hosts?live=1").get_json()["total"] == 1
+        assert auth_client.get("/api/data/company/alpha/hosts?waf=none").get_json()["items"][0]["host"] == "b.alpha.com"
+        db.save_asm_data({"companies": []})
+        assert db.query_findings("alpha")["total"] == 0
+
     def test_empty_scope_sees_nothing(self, flask_app, db):
         analyst = login_as_admin(flask_app, db, "analyst2", "password123", role="analyst", scoped_companies=[])
         resp = analyst.get("/api/companies")

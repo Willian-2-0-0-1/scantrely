@@ -301,6 +301,6 @@ Removidos como lixo desnecessário:
 
 ## 9. Documentos relacionados
 
-- `README.md` — visão rápida / instalação.
-- `ARCHITECTURE.md` — arquitetura detalhada (referência longa).
-- `TOOL_ANALYSIS.md` — análise das ferramentas integradas.
+- `../README.md` — visão rápida / instalação.
+- `ARQUITETURA.md` — arquitetura detalhada (referência longa).
+- `FERRAMENTAS.md` — análise das ferramentas integradas.

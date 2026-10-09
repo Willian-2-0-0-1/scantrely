@@ -252,6 +252,33 @@ class ASMDatabase:
                 );
                 CREATE INDEX IF NOT EXISTS idx_jobs_status_priority ON jobs(status, priority, created_at);
                 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company_id, created_at DESC);
+
+                -- Índices de consulta derivados do JSON de asm_data_state (reconstruídos a cada gravação).
+                CREATE TABLE IF NOT EXISTS finding_index (
+                    company_id TEXT NOT NULL,
+                    key        TEXT NOT NULL,
+                    type       TEXT NOT NULL DEFAULT '',
+                    severity   TEXT NOT NULL DEFAULT 'info',
+                    sev_rank   INTEGER NOT NULL DEFAULT 4,
+                    host       TEXT NOT NULL DEFAULT '',
+                    title      TEXT NOT NULL DEFAULT '',
+                    category   TEXT NOT NULL DEFAULT '',
+                    module     TEXT NOT NULL DEFAULT '',
+                    is_new     INTEGER NOT NULL DEFAULT 0,
+                    data_json  TEXT NOT NULL,
+                    PRIMARY KEY (company_id, key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_findex_sev ON finding_index(company_id, sev_rank, type);
+                CREATE TABLE IF NOT EXISTS host_index (
+                    company_id  TEXT NOT NULL,
+                    host        TEXT NOT NULL,
+                    ip          TEXT NOT NULL DEFAULT '',
+                    status_code INTEGER,
+                    waf         TEXT NOT NULL DEFAULT '',
+                    live        INTEGER NOT NULL DEFAULT 0,
+                    data_json   TEXT NOT NULL,
+                    PRIMARY KEY (company_id, host)
+                );
                 """
             )
             conn.execute(
@@ -1552,8 +1579,125 @@ class ASMDatabase:
                 """,
                 (self._json_dumps(data), now),
             )
+            self._reindex(conn, data)
             conn.commit()
         self._sync_asm_data_file()
+
+    # ── índices de consulta (findings / hosts) ─────────────────────────────
+    _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+    def _reindex(self, conn, data: dict) -> None:
+        ids = [c.get("id") for c in data.get("companies", []) if c.get("id")]
+        marks = ",".join("?" * len(ids))
+        for table in ("finding_index", "host_index"):   # empresa removida não deixa índice órfão
+            conn.execute(f"DELETE FROM {table}" + (f" WHERE company_id NOT IN ({marks})" if ids else ""), ids)
+        for co in data.get("companies", []):
+            cid = co.get("id")
+            if not cid:
+                continue
+            conn.execute("DELETE FROM finding_index WHERE company_id=?", (cid,))
+            conn.execute("DELETE FROM host_index WHERE company_id=?", (cid,))
+            seen: set[str] = set()
+            for i, f in enumerate(co.get("findings") or []):
+                key = str(f.get("key") or f.get("id") or f"#{i}")
+                if key in seen:
+                    continue
+                seen.add(key)
+                sev = f.get("severity") if f.get("severity") in self._SEV_RANK else "info"
+                conn.execute(
+                    "INSERT INTO finding_index (company_id,key,type,severity,sev_rank,host,title,category,module,is_new,data_json)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (cid, key, str(f.get("type") or ""), sev, self._SEV_RANK[sev], str(f.get("host") or ""),
+                     str(f.get("title") or ""), str(f.get("category") or ""), str(f.get("module") or ""),
+                     1 if f.get("is_new") else 0, self._json_dumps(f)),
+                )
+            for h in co.get("hosts") or []:
+                name = h.get("host")
+                if not name:
+                    continue
+                code = h.get("status_code")
+                conn.execute(
+                    "INSERT OR REPLACE INTO host_index (company_id,host,ip,status_code,waf,live,data_json) VALUES (?,?,?,?,?,?,?)",
+                    (cid, name, str(h.get("ip") or ""), code if isinstance(code, int) else None,
+                     str(h.get("waf") or ""), 1 if isinstance(code, int) and code > 0 else 0, self._json_dumps(h)),
+                )
+
+    def _ensure_index(self) -> None:
+        if getattr(self, "_index_ready", False):
+            return
+        with self._lock, self._connect() as conn:
+            empty = conn.execute("SELECT COUNT(*) FROM finding_index").fetchone()[0] == 0 and \
+                conn.execute("SELECT COUNT(*) FROM host_index").fetchone()[0] == 0
+            if empty:
+                row = conn.execute("SELECT json_text FROM asm_data_state WHERE id = 1").fetchone()
+                if row:
+                    self._reindex(conn, self._json_loads(row["json_text"], {"companies": []}))
+                    conn.commit()
+        self._index_ready = True
+
+    @staticmethod
+    def _page(page, per_page, default=50, maximum=200) -> tuple[int, int]:
+        try:
+            per_page = max(1, min(int(per_page or default), maximum))
+            page = max(1, int(page or 1))
+        except (TypeError, ValueError):
+            per_page, page = default, 1
+        return page, per_page
+
+    def query_findings(self, company_id: str, *, severity: str = "", ftype: str = "", host: str = "",
+                       q: str = "", only_new: bool = False, page=1, per_page=50) -> dict:
+        """Achados paginados + contagens por severidade/tipo (facets) respeitando os filtros de texto."""
+        self._ensure_index()
+        page, per_page = self._page(page, per_page)
+        where, args = ["company_id=?"], [company_id]
+        if ftype:
+            where.append("type=?"); args.append(ftype)
+        if host:
+            where.append("host=?"); args.append(host)
+        if only_new:
+            where.append("is_new=1")
+        if q:
+            where.append("(title LIKE ? OR host LIKE ? OR key LIKE ?)"); args += [f"%{q}%"] * 3
+        base = " AND ".join(where)
+        with self._connect() as conn:
+            sev_facets = {r["severity"]: r["n"] for r in conn.execute(
+                f"SELECT severity, COUNT(*) n FROM finding_index WHERE {base} GROUP BY severity", args)}
+            type_facets = {r["type"]: r["n"] for r in conn.execute(
+                f"SELECT type, COUNT(*) n FROM finding_index WHERE {base}"
+                + (" AND severity=?" if severity else "") + " GROUP BY type ORDER BY n DESC",
+                args + ([severity] if severity else []))}
+            fw, fa = base, list(args)
+            if severity:
+                fw += " AND severity=?"; fa.append(severity)
+            total = conn.execute(f"SELECT COUNT(*) FROM finding_index WHERE {fw}", fa).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT data_json FROM finding_index WHERE {fw} ORDER BY sev_rank, type, host, key LIMIT ? OFFSET ?",
+                fa + [per_page, (page - 1) * per_page]).fetchall()
+        return {"items": [json.loads(r["data_json"]) for r in rows], "total": total, "page": page,
+                "per_page": per_page, "pages": max(1, -(-total // per_page)),
+                "facets": {"severity": sev_facets, "type": type_facets}}
+
+    def query_hosts(self, company_id: str, *, q: str = "", live: str = "", waf: str = "", page=1, per_page=50) -> dict:
+        """Hosts paginados. live='1' só ativos, '0' só inativos; waf='none' sem WAF."""
+        self._ensure_index()
+        page, per_page = self._page(page, per_page)
+        where, args = ["company_id=?"], [company_id]
+        if q:
+            where.append("(host LIKE ? OR ip LIKE ?)"); args += [f"%{q}%"] * 2
+        if live in ("0", "1"):
+            where.append("live=?"); args.append(int(live))
+        if waf == "none":
+            where.append("(waf='' OR waf='Direct')")
+        elif waf:
+            where.append("waf=?"); args.append(waf)
+        w = " AND ".join(where)
+        with self._connect() as conn:
+            total = conn.execute(f"SELECT COUNT(*) FROM host_index WHERE {w}", args).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT data_json FROM host_index WHERE {w} ORDER BY live DESC, host LIMIT ? OFFSET ?",
+                args + [per_page, (page - 1) * per_page]).fetchall()
+        return {"items": [json.loads(r["data_json"]) for r in rows], "total": total, "page": page,
+                "per_page": per_page, "pages": max(1, -(-total // per_page))}
 
     def import_asm_data_file(self, path: Path | None = None) -> dict:
         source = path or self.asm_data_file
