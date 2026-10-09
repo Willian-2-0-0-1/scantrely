@@ -15,6 +15,7 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 - ~200 `except Exception: pass` viraram `_log.debug(..., exc_info=True)` (ligue com `ASM_LOG_LEVEL=DEBUG`); shims da raiz removidos.
 - `core/recon.py` dividido em `core/reconlib/*` (36 módulos); corrigidos NameError latentes em xss_scan e na checagem de CNAME do salesforce_recon.
 - `static/js/dashboard.js` (12 mil linhas) dividido em `static/js/dashboard/NN-*.js` (17 arquivos, mesma ordem); render de todos os painéis conferido antes/depois. `priorities.js` não era servido pelo servidor (404): corrigido; rota `/js/<nome>.js` genérica.
+- **Tela principal = matriz de ativos** (Ativos → Hosts, abre por padrão): uma linha por host e colunas Achados (por severidade), CVE, Secrets, Endpoints, Portas, Infra, Tech, Título, IP, Captura; Domínio opcional. Filtros por achados/“contém”/domínio, atalhos com contagem e menu “Colunas” (salvo no navegador). Ordenação por qualquer coluna (numéricas do maior para o menor).
 - Docs movidos para `docs/`, README curto e backlog único.
 
 ## [1.3.11] - 2026-10-08

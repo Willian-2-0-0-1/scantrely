@@ -4200,3 +4200,32 @@ a.op-chip.origin-link:hover { text-decoration: underline; }
 .recon-two-col:has(> .job-detail-card .op-empty-marker) { grid-template-columns: 1fr; }
 .recon-two-col:not(:has(> .job-detail-card:not(:has(.op-empty-marker)))) { display: none; }
 .recon-two-col:has(> :only-child) { grid-template-columns: 1fr; }
+
+/* ── Matriz de ativos (tela principal) ──────────────────────────────── */
+.ai-table-wrap { overflow-x: auto; }
+.ai-table { min-width: 1280px; }
+.am-chips { display:flex; flex-wrap:wrap; gap:8px; margin:-6px 0 14px; }
+.am-chip { background:var(--card); border:1px solid var(--border); color:var(--text2); font-size:.72rem; font-weight:600;
+  padding:6px 12px; border-radius:99px; cursor:pointer; transition:.15s; }
+.am-chip b { color:var(--text1); margin-left:4px; }
+.am-chip:hover:not(:disabled) { border-color:var(--teal-border); color:var(--text1); }
+.am-chip.active { background:var(--teal-dim); border-color:var(--teal-border); color:var(--teal); }
+.am-chip:disabled { opacity:.4; cursor:default; }
+.am-clear { border-style:dashed; }
+.am-sev-row { display:flex; gap:4px; }
+.am-sev, .am-count { display:inline-flex; min-width:24px; height:22px; padding:0 7px; align-items:center; justify-content:center;
+  border-radius:6px; font-size:.72rem; font-weight:700; font-family:var(--mono); }
+.am-critical { background:rgba(239,68,68,.18); color:#fb7185; }
+.am-high { background:rgba(249,115,22,.18); color:#fb923c; }
+.am-medium { background:rgba(234,179,8,.16); color:#facc15; }
+.am-low { background:rgba(59,130,246,.16); color:#60a5fa; }
+.am-cve { background:rgba(244,63,94,.14); color:#fb7185; }
+.am-secret { background:rgba(168,85,247,.16); color:#c084fc; }
+.am-ep { background:rgba(56,189,248,.12); color:var(--teal); }
+.am-num { text-align:left; }
+.am-cols { position:relative; }
+.am-cols summary { list-style:none; cursor:pointer; }
+.am-cols summary::-webkit-details-marker { display:none; }
+.am-cols .co-menu-list { right:0; min-width:150px; padding:8px 10px; gap:4px; }
+.am-colopt { display:flex; gap:8px; align-items:center; font-size:.76rem; color:var(--text2); padding:3px 2px; cursor:pointer; }
+.ai-table td { vertical-align: middle; }

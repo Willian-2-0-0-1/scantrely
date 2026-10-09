@@ -559,6 +559,9 @@ function _renderSubInventoryShell(co, inventory, el) {
   const activeInventory = (inventory || []).filter(_isActiveHost);
   const riskMap = _findingHosts(co);
   activeInventory.forEach(h => { h._risk = _hostRiskInfo(h, riskMap); });
+  const _agg = _assetAgg(co);
+  const _domSet = new Set((co.domains || []).map(_normalizeScopeDomain));
+  activeInventory.forEach(h => { h._agg = _agg.get(h.host) || null; h._domain = _matchDomainForHost(h.host, co.domains || [], _domSet); });
   _sub_hosts = activeInventory;
   _sub_page = 1;
   const tc = document.getElementById("tc-subdomains");
@@ -596,7 +599,6 @@ function _renderSubInventoryShell(co, inventory, el) {
       </div>` : "";
 
     el.innerHTML = `
-    <div id="playwright-host-inventory" class="ai-pw-inventory"></div>
     ${hostSelector}
     <div class="ai-shell">
       <div class="ai-head">
@@ -607,6 +609,10 @@ function _renderSubInventoryShell(co, inventory, el) {
         <div class="ai-head-r">
           ${statBadges}
           <button type="button" class="ai-refresh" onclick="switchHostsPanel('subdomains')" title="${esc(typeof t === "function" ? t("ai_refresh") : "Atualizar")}" aria-label="${esc(typeof t === "function" ? t("ai_refresh") : "Atualizar")}">${icoHtml("reload",14)} ${esc(typeof t === "function" ? t("ai_refresh") : "Atualizar")}</button>
+          <details class="co-menu am-cols">
+            <summary class="ai-icon-btn">Colunas ▾</summary>
+            <div class="co-menu-list" id="sub-colmenu">${_assetColMenuHtml()}</div>
+          </details>
           <button type="button" class="ai-icon-btn" onclick="exportHosts('csv')" title="Export CSV" aria-label="Export CSV">CSV</button>
           <button type="button" class="ai-icon-btn" onclick="exportHosts('json')" title="Export JSON" aria-label="Export JSON">JSON</button>
         </div>
@@ -645,19 +651,12 @@ function _renderSubInventoryShell(co, inventory, el) {
           <option value="AWS">AWS</option>
           <option value="Direct">Direct (no WAF)</option>
         </select>
+        ${_assetExtraFilterHtml(activeInventory)}
       </div>
+      <div class="am-chips" id="sub-chips"></div>
       <div class="ai-table-wrap">
         <table class="ai-table">
-          <thead><tr>
-            <th onclick="_subSort('host')">URL ⇅</th>
-            <th onclick="_subSort('status_code')">Status ⇅</th>
-            <th onclick="_subSort('ports')">${esc(typeof t === "function" ? t("ai_ports") : "Portas")} ⇅</th>
-            <th onclick="_subSort('title')">${esc(typeof t === "function" ? t("ai_col_title") : "Título")} ⇅</th>
-            <th onclick="_subSort('ip')">Host IP ⇅</th>
-            <th>Tech</th>
-            <th style="width:88px">${esc(typeof t === "function" ? t("ai_shot") : "Captura")}</th>
-            <th class="ai-actions-h">${esc(typeof t === "function" ? t("ai_actions") : "Ações")}</th>
-          </tr></thead>
+          <thead id="sub-thead">${_assetTheadHtml()}</thead>
           <tbody id="sub-tbody"></tbody>
         </table>
         <div class="pager">
@@ -669,7 +668,8 @@ function _renderSubInventoryShell(co, inventory, el) {
           </div>
         </div>
       </div>
-    </div>`;
+    </div>
+    <div id="playwright-host-inventory" class="ai-pw-inventory"></div>`;
   _subApplyFilter();
   renderPlaywrightHostInventoryTab(co);
   if (typeof hydrateIcons === "function") hydrateIcons(el);
@@ -949,8 +949,16 @@ function _domFilterCards() {
   _renderDomCards();
 }
 
-let _sub_sort = "host", _sub_asc = true;
-function _subSort(key){ if(_sub_sort===key) _sub_asc=!_sub_asc; else{_sub_sort=key;_sub_asc=true;} _subApplyFilter(); }
+let _sub_sort = "url", _sub_asc = true;
+function _subSort(key){
+  if (_sub_sort === key) _sub_asc = !_sub_asc;
+  else {
+    _sub_sort = key;
+    const probe = _sub_hosts.length && _ASSET_COL[key] ? _ASSET_COL[key].val(_sub_hosts[0]) : "";
+    _sub_asc = typeof probe !== "number";   // colunas numéricas começam do maior para o menor
+  }
+  _subApplyFilter();
+}
 function _subPageNav(d){ _sub_page+=d; _subRenderTable(_subFiltered()); }
 
 function _subFiltered(){
@@ -960,7 +968,10 @@ function _subFiltered(){
   const pt = document.getElementById("sub-port")?.value||"";
   const rk = document.getElementById("sub-risk")?.value||"";
   const wf = document.getElementById("sub-waf")?.value||"";
-  const NUMERIC = {status_code:1, ports:1};
+  const fd = document.getElementById("sub-find")?.value||"";
+  const hs = document.getElementById("sub-has")?.value||"";
+  const dm = document.getElementById("sub-dom")?.value||"";
+  const col = _ASSET_COL[_sub_sort] || _ASSET_COL.url;
   return _sub_hosts.filter(h=>{
     const techLabels = _hostTechLabels(h);
     const mq = !q || h.host.toLowerCase().includes(q) || (h.ip||"").includes(q)
@@ -973,15 +984,14 @@ function _subFiltered(){
     const mp = !pt || _hostOpenPorts(h).some(p => String(p.port) === String(pt));
     const mr = !rk || (rk === "risk" ? !!h._risk?.risk : !h._risk?.risk);
     const mw = !wf || (h.waf||"Direct").includes(wf);
-    return mq && ms && mt && mp && mr && mw;
+    const mf = !fd || (_FIND_FILTERS[fd] ? _FIND_FILTERS[fd](h) : true);
+    const mh = !hs || (_HAS_FILTERS[hs] ? _HAS_FILTERS[hs](h) : true);
+    const md = !dm || h._domain === dm;
+    return mq && ms && mt && mp && mr && mw && mf && mh && md;
   }).sort((a,b)=>{
-    if (NUMERIC[_sub_sort]) {
-      const av = _sub_sort === "ports" ? _hostOpenPorts(a).length : Number(a[_sub_sort]||0);
-      const bv = _sub_sort === "ports" ? _hostOpenPorts(b).length : Number(b[_sub_sort]||0);
-      return _sub_asc ? av-bv : bv-av;
-    }
-    const av=String(a[_sub_sort]||""), bv=String(b[_sub_sort]||"");
-    return _sub_asc ? av.localeCompare(bv) : bv.localeCompare(av);
+    const av = col.val(a), bv = col.val(b);
+    const cmp = (typeof av === "number" && typeof bv === "number") ? av - bv : String(av).localeCompare(String(bv));
+    return _sub_asc ? cmp : -cmp;
   });
 }
 
@@ -989,6 +999,8 @@ function _subApplyFilter(){
   _sub_page = 1;
   const filtered = _subFiltered();
   const c = document.getElementById("sub-cnt"); if (c) c.textContent = filtered.length;
+  const head = document.getElementById("sub-thead"); if (head) head.innerHTML = _assetTheadHtml();
+  const chips = document.getElementById("sub-chips"); if (chips) chips.innerHTML = _assetQuickChips(_sub_hosts);
   _subRenderTable(filtered);
 }
 
@@ -1004,39 +1016,9 @@ function _subRenderTable(filtered){
     pn+=`<button class="pb${i===_sub_page?" active":""}" onclick="_sub_page=${i};_subRenderTable(_subFiltered())">${i}</button>`;
   const pne=document.getElementById("sub-pnums"); if(pne) pne.innerHTML=pn;
   const tb=document.getElementById("sub-tbody"); if(!tb) return;
-  const collectionRunning = _isAssetCollectionRunning();
-  tb.innerHTML = pg.map(h => {
-    const scheme = (h.status_code || (h.ports||[]).includes('443') || !(h.ports||[]).includes('80')) ? 'https' : 'http';
-    const url   = `${scheme}://${h.host}/`;
-    const sc    = h.status_code;
-    const scCls = sc ? (sc<300?'s2':sc<400?'s3':sc<500?'s4':'s5') : 'na';
-    const scHtml= `<span class="ai-status ${scCls}">${sc}</span>`;
-    const techCell = _hostTechCell(h);
-    const title = h.title ? esc(h.title) : (collectionRunning ? _assetPendingCell() : '<span class="ai-dash">—</span>');
-    const ipCell = h.ip ? esc(h.ip) : (collectionRunning ? _assetPendingCell() : '<span class="ai-dash">—</span>');
-    const shotSrc = _shotSrc(h.screenshot);
-    const copyLbl = typeof t === "function" ? t("ai_copy_url") : "Copiar URL";
-    const openLbl = typeof t === "function" ? t("ai_open_url") : "Abrir URL";
-    const viewLbl = typeof t === "function" ? t("ai_view_host") : "Ver detalhes";
-    const shotLbl = typeof t === "function" ? t("ai_open_shot") : "Abrir screenshot";
-    const shotCell = shotSrc
-      ? `<button type="button" class="ai-shot-btn" aria-label="${esc(shotLbl + " · " + (h.host || ""))}" onmouseenter="ssPopoverShow(event,${_shotJs(shotSrc)},${_shotJs(h.host || "")})" onmouseleave="ssPopoverHide()" onclick="event.stopPropagation();ssLightboxOpen(${_shotJs(shotSrc)},${_shotJs(h.host || url)})"><img src="${esc(shotSrc)}" alt="${esc("Screenshot de " + (h.host || ""))}" onerror="this.closest('.ai-shot-btn').style.display='none'"></button>`
-      : (collectionRunning ? _assetPendingCell() : '<span class="ai-dash">—</span>');
-    return `<tr class="ai-row" onclick="openHostDrawer('${escAttr(h.host)}')">
-      <td class="ai-url-cell">
-        <button type="button" class="ai-mini" title="${esc(copyLbl)}" aria-label="${esc(copyLbl)}" onclick="event.stopPropagation();copyToClipboard('${escAttr(url)}')">${icoHtml("clipboard",16)}</button>
-        <a class="ai-mini" href="${escAttr(url)}" target="_blank" rel="noopener" title="${esc(openLbl)}" aria-label="${esc(openLbl)}" onclick="event.stopPropagation()">${icoHtml("link",16)}</a>
-        <a class="ai-url" href="${escAttr(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(url)}</a>
-      </td>
-      <td>${scHtml}</td>
-      <td class="ai-cl">${_fmtHostPorts(h, collectionRunning)}</td>
-      <td class="ai-title" title="${escAttr(h.title||'')}">${title}</td>
-      <td class="ai-ip">${ipCell}</td>
-      <td><div class="ai-tech-row">${techCell}</div></td>
-      <td class="ai-shot">${shotCell}</td>
-      <td class="ai-actions"><button type="button" class="ai-eye" title="${esc(viewLbl)}" aria-label="${esc(viewLbl)}" onclick="event.stopPropagation();openHostDrawer('${escAttr(h.host)}')">${icoHtml("eye",16)}</button></td>
-    </tr>`;
-  }).join('');
+  const ctx = {running: _isAssetCollectionRunning()};
+  const cols = _assetVisibleCols();
+  tb.innerHTML = pg.map(h => `<tr class="ai-row" onclick="openHostDrawer('${escAttr(h.host)}')">${cols.map(c => c.td(h, ctx)).join("")}</tr>`).join("");
 }
 
 function renderSubHistoryTab(co) {

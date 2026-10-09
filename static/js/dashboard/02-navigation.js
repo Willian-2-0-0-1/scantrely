@@ -448,12 +448,16 @@ async function selectCompany(id) {
   if (schBtn && SERVER_MODE) loadScheduleStatus(id);
 
   // Reset active tab button
-  state.tab = "overview";
-  state.activeGroup = "overview";
-  document.querySelectorAll(".tab-btn").forEach((b,i)=>b.classList.toggle("active",i===0));
-  document.querySelectorAll(".tab-content").forEach((t,i)=>t.classList.toggle("active",i===0));
-  renderGroupSubnav("overview", "overview");
-  syncCompanyTabsAccessibility("overview");
+  // A tela principal da empresa é a matriz de ativos (Ativos → Hosts).
+  state.tab = "subdomains";
+  state.activeGroup = "hosts";
+  state.hostPanel = "subdomains";
+  if (!state.groupPanel) state.groupPanel = {};
+  state.groupPanel.hosts = "subdomains";
+  document.querySelectorAll(".tab-btn").forEach(b=>b.classList.toggle("active", b.dataset.group === "hosts"));
+  document.querySelectorAll(".tab-content").forEach(t=>t.classList.toggle("active", t.id === "tab-subdomains"));
+  renderGroupSubnav("hosts", "subdomains");
+  syncCompanyTabsAccessibility("hosts");
 
   if (SERVER_MODE && co.summary_only) {
     renderCompanyLoading(id);
@@ -465,12 +469,13 @@ async function selectCompany(id) {
     }
   }
   renderCompanyView(co);
+  switchGroup("hosts", document.querySelector('.tab-btn[data-group="hosts"]'), "subdomains");
   if (SERVER_MODE) startCompanyPipelineSync(id);
   if (SERVER_MODE) { loadTrendCharts(id); loadSuppressedFindings(id); }
   // Always poll for live data while viewing a company
   startLiveDataPolling(id);
   // Update URL hash for browser history
-  if (typeof ASM !== 'undefined' && ASM.updateHash) ASM.updateHash('company/' + id + '/overview');
+  if (typeof ASM !== 'undefined' && ASM.updateHash) ASM.updateHash('company/' + id + '/subdomains');
 }
 
 const TAB_GROUPS = {
