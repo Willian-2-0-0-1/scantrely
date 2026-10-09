@@ -631,7 +631,7 @@ function openHostDrawer(hostname, section) {
   // Look up host from current company
   const co = allCompanies().find(c => c.id === state.currentId);
   const hosts = co ? (co.hosts || []) : (_sub_hosts || _co_ports || []);
-  const h = hosts.find(x => x.host === hostname) || {};
+  const h = hosts.find(x => x.host === hostname) || (typeof _sub_hosts !== "undefined" && _sub_hosts.find(x => x.host === hostname)) || {};
   const sc = h.status_code;
   const statusCls = sc ? (sc < 300 ? 's2' : sc < 400 ? 's3' : sc < 500 ? 's4' : 's5') : 'na';
   const statusText = sc ? `${sc}` : 'n/a';

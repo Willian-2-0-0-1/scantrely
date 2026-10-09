@@ -29,6 +29,7 @@ function classifyUrl(url) {
   return { type: 'Static Resource', severity: 'info', score: 5 };
 }
 
+let _classifyCache = null;   // antes nunca era declarada: só funcionava se invalidateEndpointCache() rodasse primeiro
 function _classifyUrlMemo(url) {
   const k = String(url || '').toLowerCase();
   if (!_classifyCache) _classifyCache = {};

@@ -912,6 +912,29 @@ class TestAuth:
         db.save_asm_data({"companies": []})
         assert db.query_findings("alpha")["total"] == 0
 
+    def test_assets_and_finding_groups_endpoints(self, flask_app, db, auth_client):
+        auth_client.post("/api/companies", json={"name": "Alpha", "domains": ["alpha.com"]})
+        auth_client.post("/api/companies", json={"name": "Beta", "domains": ["beta.com"]})
+        db.save_asm_data({"companies": [
+            {"id": "alpha", "name": "Alpha", "domains": ["alpha.com"],
+             "hosts": [{"host": "a.alpha.com", "status_code": 200, "waf": "Direct", "ports": ["22"]},
+                       {"host": "b.alpha.com", "status_code": 403, "waf": "Cloudflare"}],
+             "findings": [{"key": "1", "type": "cors", "severity": "critical", "host": "a.alpha.com", "title": "CORS em a.alpha.com"},
+                          {"key": "2", "type": "cors", "severity": "critical", "host": "b.alpha.com", "title": "CORS em b.alpha.com"}]},
+            {"id": "beta", "name": "Beta", "domains": ["beta.com"], "hosts": []}]})
+        r = auth_client.get("/api/data/company/alpha/assets?sort=findings&dir=desc").get_json()
+        assert r["total"] == 2 and r["facets"]["chips"]["critical"] == 2 and r["items"][0]["_agg"]["sev"]["critical"] == 1
+        assert auth_client.get("/api/data/company/alpha/assets?has=riskport").get_json()["total"] == 1
+        assert auth_client.get("/api/data/company/alpha/assets?find=none").get_json()["total"] == 0
+        csv = auth_client.get("/api/data/company/alpha/assets/export?fmt=csv&has=nowaf")
+        assert csv.status_code == 200 and csv.data.decode().count("\n") == 2   # cabeçalho + 1 linha
+        g = auth_client.get("/api/data/company/alpha/finding-groups").get_json()
+        assert g["total_groups"] == 1 and g["groups"][0]["count"] == 2   # mesmo título normalizado
+        analyst = login_as_admin(flask_app, db, "analyst4", "password123", role="analyst", scoped_companies=["beta"])
+        for url in ("assets", "assets/export", "finding-groups"):
+            assert analyst.get(f"/api/data/company/alpha/{url}").status_code in (403, 404)
+        assert analyst.get("/api/data/company/beta/assets").status_code == 200
+
     def test_empty_scope_sees_nothing(self, flask_app, db):
         analyst = login_as_admin(flask_app, db, "analyst2", "password123", role="analyst", scoped_companies=[])
         resp = analyst.get("/api/companies")
@@ -3541,7 +3564,7 @@ class TestOriginLink:
         css = (ROOT / "static" / "css" / "dashboard.css").read_text(encoding="utf-8")
         i18n = (ROOT / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
         start = js.index("function _renderSubInventoryShell")
-        end = js.index("function _assetStatusSummary")
+        end = js.index("function _assetStatusBadges")
         body = js[start:end]
         assert 'id="playwright-host-inventory"' in body
         assert "renderPlaywrightHostInventoryTab(co)" in body

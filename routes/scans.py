@@ -159,6 +159,57 @@ def create_scan_blueprint(
             return jsonify({"error": "Company not found"}), 404
         return jsonify(co)
 
+    _asset_cache: dict = {}   # cid -> (carimbo dos dados, linhas) — evita remontar a matriz a cada filtro
+
+    def _asset_rows(cid: str, co: dict) -> list[dict]:
+        from core import asset_matrix
+        history = db.get_subdomain_history(cid, limit=1000)
+        stamp = (get_asm_data_timestamp(), len(history), history[0]["created_at"] if history else "")
+        hit = _asset_cache.get(cid)
+        if hit and hit[0] == stamp:
+            return hit[1]
+        rows = asset_matrix.build_rows(co, history)
+        _asset_cache[cid] = (stamp, rows)
+        return rows
+
+    def _asset_filters(a) -> dict:
+        return dict(q=a.get("q", "").strip(), status=a.get("status", ""), tech=a.get("tech", ""), port=a.get("port", ""),
+                    risk=a.get("risk", ""), waf=a.get("waf", ""), find=a.get("find", ""), has=a.get("has", ""),
+                    domain=a.get("domain", ""))
+
+    @bp.route("/api/data/company/<cid>/assets", methods=["GET"])
+    @require_auth
+    def api_company_assets(cid: str):
+        """Matriz de ativos paginada: filtros q,status,tech,port,risk,waf,find,has,domain; sort=url|status|findings|...; dir=asc|desc"""
+        from core import asset_matrix
+        co = _visible_company(cid)
+        if not co:
+            return jsonify({"error": "Company not found"}), 404
+        a = request.args
+        return jsonify(asset_matrix.query(_asset_rows(cid, co), sort=a.get("sort", "url"), asc=a.get("dir", "asc") != "desc",
+                                          page=a.get("page", 1), per_page=a.get("per_page", 50), **_asset_filters(a)))
+
+    @bp.route("/api/data/company/<cid>/assets/export", methods=["GET"])
+    @require_auth
+    def api_company_assets_export(cid: str):
+        """Exporta o que está filtrado: ?fmt=csv|json + os mesmos filtros da matriz."""
+        import csv
+        import io
+        from core import asset_matrix
+        co = _visible_company(cid)
+        if not co:
+            return jsonify({"error": "Company not found"}), 404
+        a = request.args
+        rows = asset_matrix.export_rows(asset_matrix.sort_rows(
+            asset_matrix.filter_rows(_asset_rows(cid, co), **_asset_filters(a)), a.get("sort", "url"), a.get("dir", "asc") != "desc"))
+        if a.get("fmt") == "json":
+            return jsonify(rows)
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=list(rows[0].keys()) if rows else ["host"], quoting=csv.QUOTE_ALL)
+        w.writeheader()
+        w.writerows(rows)
+        return buf.getvalue(), 200, {"Content-Type": "text/csv; charset=utf-8"}
+
     @bp.route("/api/data/company/<cid>/findings", methods=["GET"])
     @require_auth
     def api_company_findings(cid: str):

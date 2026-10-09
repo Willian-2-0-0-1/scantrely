@@ -25,41 +25,6 @@ function _findingHostSet(f) {
   return hosts;
 }
 
-// Agregados por host: achados por severidade, CVEs, secrets e endpoints. Cacheado por empresa.
-function _assetAgg(co) {
-  const stamp = [(co.findings || []).length, (co.cve_findings || []).length, _epDataStamp(co)].join(":");
-  if (co._assetAgg && co._assetAggStamp === stamp) return co._assetAgg;
-  const map = new Map();
-  const slot = host => {
-    if (!host) return null;
-    let a = map.get(host);
-    if (!a) { a = {sev: {critical: 0, high: 0, medium: 0, low: 0}, findings: 0, cve: 0, secrets: 0, endpoints: 0, score: 0}; map.set(host, a); }
-    return a;
-  };
-  (co.findings || []).forEach(f => {
-    const sev = String(f.severity || "info").toLowerCase();
-    _findingHostSet(f).forEach(h => {
-      const a = slot(h);
-      if (!a) return;
-      if (_SEV_KEYS.includes(sev)) { a.sev[sev]++; a.findings++; }
-      if (f.type === "cve") a.cve++;
-    });
-  });
-  try { buildUnifiedEndpoints(co); } catch (e) { /* sem dados de endpoints ainda */ }
-  (co._unifiedEndpoints || []).forEach(ep => {
-    const a = slot(_hostFromAny(ep.host) || _hostFromAny(ep.url));
-    if (a) a.endpoints++;
-  });
-  (co._unifiedSecrets || []).forEach(s => {
-    const a = slot(_hostFromAny(s.host) || _hostFromAny(s.url));
-    if (a) a.secrets++;
-  });
-  map.forEach(a => { a.score = a.sev.critical * 1000 + a.sev.high * 100 + a.sev.medium * 10 + a.sev.low; });
-  co._assetAgg = map;
-  co._assetAggStamp = stamp;
-  return map;
-}
-
 const _EMPTY_AGG = {sev: {critical: 0, high: 0, medium: 0, low: 0}, findings: 0, cve: 0, secrets: 0, endpoints: 0, score: 0};
 const _aggOf = h => h._agg || _EMPTY_AGG;
 const _dash = '<span class="ai-dash">—</span>';
@@ -152,7 +117,7 @@ function _subRerender() {
   if (head) head.innerHTML = _assetTheadHtml();
   const menu = document.getElementById("sub-colmenu");
   if (menu) menu.innerHTML = _assetColMenuHtml();
-  _subRenderTable(_subFiltered());
+  _subRenderTable(_sub_hosts);
 }
 
 function _assetTheadHtml() {
@@ -169,38 +134,21 @@ function _assetColMenuHtml() {
     `<label class="am-colopt"><input type="checkbox" ${vis.has(c.key) ? "checked" : ""} onchange="assetToggleCol('${c.key}', this.checked)"> ${esc(c.label)}</label>`).join("");
 }
 
-// Filtros extras + atalhos (chips) ---------------------------------------------------------
-const _FIND_FILTERS = {
-  any:      h => _aggOf(h).findings > 0,
-  critical: h => _aggOf(h).sev.critical > 0,
-  high:     h => _aggOf(h).sev.critical + _aggOf(h).sev.high > 0,
-  medium:   h => _aggOf(h).sev.critical + _aggOf(h).sev.high + _aggOf(h).sev.medium > 0,
-  none:     h => _aggOf(h).findings === 0,
-};
-const _HAS_FILTERS = {
-  secrets:   h => _aggOf(h).secrets > 0,
-  cve:       h => _aggOf(h).cve > 0,
-  endpoints: h => _aggOf(h).endpoints > 0,
-  riskport:  h => _hostOpenPorts(h).some(p => _isHighRiskPort(p.port, p.service)),
-  nowaf:     h => !h.waf || /^direct$/i.test(String(h.waf)),
-  shot:      h => !!h.screenshot,
-};
-
-function _assetQuickChips(hosts) {
+// Filtros extras + atalhos (os filtros em si são aplicados pelo servidor) ------------------------
+function _assetQuickChips(facets) {
+  const c = (facets && facets.chips) || {};
   const defs = [
-    ["find", "critical", "Críticos", _FIND_FILTERS.critical],
-    ["find", "high", "Alto ou crítico", _FIND_FILTERS.high],
-    ["has", "secrets", "Com secrets", _HAS_FILTERS.secrets],
-    ["has", "cve", "Com CVE", _HAS_FILTERS.cve],
-    ["has", "riskport", "Porta sensível", _HAS_FILTERS.riskport],
-    ["has", "nowaf", "Sem WAF", _HAS_FILTERS.nowaf],
+    ["find", "critical", "Críticos", c.critical],
+    ["find", "high", "Alto ou crítico", c.high],
+    ["has", "secrets", "Com secrets", c.secrets],
+    ["has", "cve", "Com CVE", c.cve],
+    ["has", "riskport", "Porta sensível", c.riskport],
+    ["has", "nowaf", "Sem WAF", c.nowaf],
   ];
   const cur = {find: document.getElementById("sub-find")?.value || "", has: document.getElementById("sub-has")?.value || ""};
-  const chips = defs.map(([kind, val, label, fn]) => {
-    const n = hosts.filter(fn).length;
-    return `<button type="button" class="am-chip${cur[kind] === val ? " active" : ""}" onclick="assetQuickFilter('${kind}','${val}')" ${n ? "" : "disabled"}>${esc(label)} <b>${n}</b></button>`;
-  }).join("");
-  const any = cur.find || cur.has || document.getElementById("sub-dom")?.value;
+  const chips = defs.map(([kind, val, label, n]) =>
+    `<button type="button" class="am-chip${cur[kind] === val ? " active" : ""}" onclick="assetQuickFilter('${kind}','${val}')" ${n ? "" : "disabled"}>${esc(label)} <b>${n || 0}</b></button>`).join("");
+  const any = cur.find || cur.has || document.getElementById("sub-dom")?.value || document.getElementById("sub-search")?.value;
   return chips + (any ? `<button type="button" class="am-chip am-clear" onclick="assetQuickFilter('clear')">Limpar filtros</button>` : "");
 }
 
@@ -215,8 +163,8 @@ function assetQuickFilter(kind, val) {
   _subApplyFilter();
 }
 
-function _assetExtraFilterHtml(hosts) {
-  const doms = [...new Set(hosts.map(h => h._domain).filter(Boolean))].sort();
+function _assetExtraFilterHtml(facets) {
+  const doms = (facets && facets.domains) || [];
   return `
     <select class="ai-drop" id="sub-find" onchange="_subApplyFilter()" aria-label="Achados">
       <option value="">Achados</option>
@@ -250,18 +198,4 @@ function hostDetails(co, host) {
   const endpoints = (co._unifiedEndpoints || []).filter(ep => (_hostFromAny(ep.host) || _hostFromAny(ep.url)) === host);
   const secrets = (co._unifiedSecrets || []).filter(x => (_hostFromAny(x.host) || _hostFromAny(x.url)) === host);
   return {findings, cves: findings.filter(f => f.type === "cve"), endpoints, secrets};
-}
-
-// Exportação respeita os filtros ativos e leva todas as colunas de assunto.
-function _assetExportRows(hosts) {
-  return hosts.map(h => {
-    const a = _aggOf(h);
-    return {
-      host: h.host, url: _urlOf(h), status: h.status_code ?? "", domain: h._domain || "", ip: h.ip || "", title: h.title || "",
-      critical: a.sev.critical, high: a.sev.high, medium: a.sev.medium, low: a.sev.low,
-      cve: a.cve, secrets: a.secrets, endpoints: a.endpoints,
-      ports: _hostOpenPorts(h).map(p => p.port).join("|"), waf: h.waf || "Direct", cloud: h.cloud_provider || "",
-      technologies: (h.technologies || []).join("|"),
-    };
-  });
 }

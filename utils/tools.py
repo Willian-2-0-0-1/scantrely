@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from typing import Callable
 from utils.tool_gate import gate_for as _gate_for
 
+import re
+_IP_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+
 
 class _GatedSubprocess:
     """Transparent stand-in for subprocess in the tool registry.

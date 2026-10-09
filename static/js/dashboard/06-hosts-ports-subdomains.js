@@ -334,7 +334,6 @@ const HIGH_RISK_PORT_LABELS = {
 };
 
 let _sub_hosts = [], _sub_page = 1;
-const SUB_PER_PAGE = 50;
 
 // Domains tab: cap how many domain cards render at once. Companies can have
 // tens of thousands of scope domains; rendering one card each froze the UI.
@@ -519,55 +518,17 @@ function _fmtHostPorts(h, pending = false) {
   return `<div class="ai-port-row">${shown}${overflow}</div>`;
 }
 
-function _findingHosts(co) {
-  const map = new Map();
-  const sevRank = {critical: 4, high: 3, medium: 2, low: 1, info: 0};
-  const add = (host, finding) => {
-    const h = _normalizeScopeDomain(host);
-    if (!h) return;
-    const sev = String(finding.severity || "info").toLowerCase();
-    const prev = map.get(h);
-    if (!prev || (sevRank[sev] || 0) > (sevRank[prev.severity] || 0)) {
-      map.set(h, {severity: sev, title: finding.title || finding.category || "Finding"});
-    }
-  };
-  (co?.findings || []).forEach(f => {
-    add(f.host, f);
-    add(f.domain, f);
-    try {
-      if (f.url) add(new URL(f.url).hostname, f);
-    } catch(e) {}
-  });
-  return map;
-}
 
-function _hostRiskInfo(h, riskMap) {
-  const direct = String(h?.risk || h?.risk_level || h?.severity || "").toLowerCase();
-  if (["critical", "high", "medium"].includes(direct)) return {risk: true, severity: direct, label: direct};
-  const finding = riskMap && riskMap.get(h.host);
-  if (finding && ["critical", "high", "medium"].includes(finding.severity)) {
-    return {risk: true, severity: finding.severity, label: finding.title || finding.severity};
-  }
-  const sc = Number(h?.status_code || 0);
-  if (sc >= 500) return {risk: true, severity: "high", label: "5xx"};
-  const sensitivePort = _hostOpenPorts(h).find(p => _isHighRiskPort(p.port, p.service));
-  if (sensitivePort) return {risk: true, severity: "high", label: _portServiceLabel(sensitivePort.port, sensitivePort.service) || `Port ${sensitivePort.port}`};
-  return {risk: false, severity: "", label: ""};
-}
 
-function _renderSubInventoryShell(co, inventory, el) {
-  const activeInventory = (inventory || []).filter(_isActiveHost);
-  const riskMap = _findingHosts(co);
-  activeInventory.forEach(h => { h._risk = _hostRiskInfo(h, riskMap); });
-  const _agg = _assetAgg(co);
-  const _domSet = new Set((co.domains || []).map(_normalizeScopeDomain));
-  activeInventory.forEach(h => { h._agg = _agg.get(h.host) || null; h._domain = _matchDomainForHost(h.host, co.domains || [], _domSet); });
-  _sub_hosts = activeInventory;
-  _sub_page = 1;
+function _renderSubInventoryShell(co, resp, el) {
+  // resp = resposta de /assets: {items, total, facets}. Filtros, ordenação e página são do servidor.
+  const facets = resp.facets || {total: 0, status: {}, chips: {}, tech: [], ports: [], domains: []};
+  _sub_hosts = resp.items || [];
+  _sub_page = resp.page || 1;
   const tc = document.getElementById("tc-subdomains");
-  if (tc) tc.textContent = _sub_hosts.length || 0;
+  if (tc) tc.textContent = facets.total || 0;
 
-  if(!_sub_hosts.length) {
+  if(!facets.total) {
     el.innerHTML = `<div id="playwright-host-inventory" class="ai-pw-inventory"></div>
       <div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">Nenhum host ativo encontrado</div><div class="empty-state-copy">A tabela de Hosts mostra somente dominios/subdominios com status HTTP real. Rode um scan para validar os ativos.</div></div>`;
     renderPlaywrightHostInventoryTab(co);
@@ -582,15 +543,11 @@ function _renderSubInventoryShell(co, inventory, el) {
       : "";
     const hostSelector = "";
 
-    const statBadges = _assetStatusSummary(activeInventory);
-    const techCounts = {};
-    activeInventory.forEach(h => _hostTechLabels(h).forEach(t => { techCounts[t] = (techCounts[t] || 0) + 1; }));
-    const techOptions = Object.keys(techCounts).sort((a, b) => techCounts[b] - techCounts[a]).slice(0, 40)
-      .map(t => `<option value="${escAttr(t)}">${esc(t)} (${techCounts[t]})</option>`).join("");
-    const portCounts = {};
-    activeInventory.forEach(h => _hostOpenPorts(h).forEach(p => { portCounts[p.port] = (portCounts[p.port] || 0) + 1; }));
-    const portOptions = Object.keys(portCounts).sort((a,b)=>Number(a)-Number(b))
-      .map(p => `<option value="${escAttr(p)}">${esc(p)}${ADMIN_PORT_LABELS[p] ? " · " + esc(ADMIN_PORT_LABELS[p]) : ""} (${portCounts[p]})</option>`).join("");
+    const statBadges = _assetStatusBadges(facets.status);
+    const techOptions = (facets.tech || [])
+      .map(([name, n]) => `<option value="${escAttr(name)}">${esc(name)} (${n})</option>`).join("");
+    const portOptions = (facets.ports || [])
+      .map(([port, n]) => `<option value="${escAttr(port)}">${esc(port)}${ADMIN_PORT_LABELS[port] ? " · " + esc(ADMIN_PORT_LABELS[port]) : ""} (${n})</option>`).join("");
     const newHostsBanner = (checkpointInfo && checkpointInfo.new_subdomains_count > 0) ? `
       <div class="ai-newbanner">
         <span class="ai-newbanner-t">${icoHtml("bolt",14)} ${checkpointInfo.new_subdomains_count} new since last scan</span>
@@ -604,7 +561,7 @@ function _renderSubInventoryShell(co, inventory, el) {
       <div class="ai-head">
         <div class="ai-head-l">
           <div class="ai-title">${esc(typeof t === "function" ? t("ai_title") : "Inventário de ativos")}</div>
-          <div class="ai-sub"><span id="sub-cnt">${activeInventory.length}</span> ${esc(typeof t === "function" ? t("ai_sub") : "ativos validados · sem n/a")}</div>
+          <div class="ai-sub"><span id="sub-cnt">${resp.total}</span> ${esc(typeof t === "function" ? t("ai_sub") : "ativos validados · sem n/a")}</div>
         </div>
         <div class="ai-head-r">
           ${statBadges}
@@ -622,7 +579,7 @@ function _renderSubInventoryShell(co, inventory, el) {
         <div class="ai-search">
           <span class="ai-search-ic" aria-hidden="true">${icoHtml("search",16)}</span>
           <label class="sr-only" for="sub-search">${esc(typeof t === "function" ? t("ai_search") : "Buscar host")}</label>
-          <input id="sub-search" placeholder="${esc(typeof t === "function" ? t("ai_search_ph") : "Buscar dominio, subdominio, titulo, IP ou porta...")}" oninput="_subApplyFilter()">
+          <input id="sub-search" placeholder="${esc(typeof t === "function" ? t("ai_search_ph") : "Buscar dominio, subdominio, titulo, IP ou porta...")}" oninput="_subApplyFilter(1,false)">
         </div>
         <select class="ai-drop" id="sub-status" onchange="_subApplyFilter()" aria-label="Status HTTP">
           <option value="">Status HTTP</option>
@@ -651,7 +608,7 @@ function _renderSubInventoryShell(co, inventory, el) {
           <option value="AWS">AWS</option>
           <option value="Direct">Direct (no WAF)</option>
         </select>
-        ${_assetExtraFilterHtml(activeInventory)}
+        ${_assetExtraFilterHtml(facets)}
       </div>
       <div class="am-chips" id="sub-chips"></div>
       <div class="ai-table-wrap">
@@ -665,21 +622,22 @@ function _renderSubInventoryShell(co, inventory, el) {
             <button type="button" class="pb" id="sub-prev" onclick="_subPageNav(-1)">${esc(typeof t === "function" ? t("ss_prev") : "Anterior")}</button>
             <span id="sub-pnums"></span>
             <button type="button" class="pb" id="sub-next" onclick="_subPageNav(1)">${esc(typeof t === "function" ? t("ss_next") : "Próximo")}</button>
+            <select class="ai-drop" id="sub-perpage" onchange="_subSetPerPage(this.value)" aria-label="Linhas por página" style="padding:6px 8px">
+              ${[25, 50, 100, 200].map(n => `<option value="${n}">${n} / pág.</option>`).join("")}
+            </select>
           </div>
         </div>
       </div>
     </div>
     <div id="playwright-host-inventory" class="ai-pw-inventory"></div>`;
-  _subApplyFilter();
+  _subPaint(resp);
   renderPlaywrightHostInventoryTab(co);
   if (typeof hydrateIcons === "function") hydrateIcons(el);
 }
 
 // Asset status-code summary badges (Osmedeus-style)
-function _assetStatusSummary(hosts) {
-  const b = {2: 0, 3: 0, 4: 0, 5: 0};
-  (hosts || []).forEach(h => { const s = h.status_code; if (s) { const g = Math.floor(s / 100); if (b[g] != null) b[g]++; } });
-  const chip = (g, cls) => b[g] ? `<span class="ai-statchip ${cls}">${g}xx: ${b[g]}</span>` : "";
+function _assetStatusBadges(st) {
+  const chip = (g, cls) => st && st[g] ? `<span class="ai-statchip ${cls}">${g}xx: ${st[g]}</span>` : "";
   return chip(2, "s2") + chip(3, "s3") + chip(4, "s4") + chip(5, "s5");
 }
 
@@ -773,24 +731,23 @@ function _fmtCL(n) {
   return v.toLocaleString("en-US");
 }
 
-function renderSubdomainsTab(co, historyRows = null) {
+async function renderSubdomainsTab(co) {
   const el = document.getElementById("tab-subdomains");
   if (!el) return;
-  const rows = Array.isArray(historyRows)
-    ? historyRows
-    : Array.isArray(co.subdomain_history)
-      ? co.subdomain_history
-      : null;
-  if (rows === null) {
-    _renderSubInventoryShell(co, _buildSubdomainInventory(co, []), el);
-    _loadSubdomainHistory(co).then(history => {
-      if (state.currentId !== co.id) return;
-      co.subdomain_history = history;
-      _renderSubInventoryShell(co, _buildSubdomainInventory(co, history), el);
-    });
+  el.setAttribute("aria-busy", "true");
+  el.innerHTML = `<div class="vuln-loading" role="status" style="padding:40px;text-align:center;color:var(--text3)">Carregando ativos…</div>`;
+  let resp;
+  try {
+    resp = await _subQuery({page: 1, sort: "url", dir: "asc", per_page: _sub_per_page});
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-state-title">Falha ao carregar os ativos</div><div class="empty-state-copy">${esc(e.message || e)}</div></div>`;
+    el.removeAttribute("aria-busy");
     return;
   }
-  _renderSubInventoryShell(co, _buildSubdomainInventory(co, rows), el);
+  if (state.currentId !== co.id) return;
+  _sub_sort = "url"; _sub_asc = true;
+  _renderSubInventoryShell(co, resp, el);
+  el.removeAttribute("aria-busy");
 }
 
 function openSubdomainsFiltered(term) {
@@ -949,7 +906,31 @@ function _domFilterCards() {
   _renderDomCards();
 }
 
-let _sub_sort = "url", _sub_asc = true;
+let _sub_sort = "url", _sub_asc = true, _sub_per_page = 50, _sub_facets = null;
+let _subReq = 0, _subTimer = null;
+
+// Todos os filtros/ordenação/página vêm do servidor (/api/data/company/<id>/assets).
+function _subParams(extra = {}) {
+  const v = id => document.getElementById(id)?.value || "";
+  const qs = new URLSearchParams();
+  const set = (k, val) => { if (val !== "" && val != null) qs.set(k, val); };
+  set("q", v("sub-search")); set("status", v("sub-status")); set("tech", v("sub-tech")); set("port", v("sub-port"));
+  set("risk", v("sub-risk")); set("waf", v("sub-waf")); set("find", v("sub-find")); set("has", v("sub-has")); set("domain", v("sub-dom"));
+  Object.entries(extra).forEach(([k, val]) => set(k, val));
+  return qs;
+}
+
+async function _subQuery(extra) {
+  const r = await fetch(`/api/data/company/${encodeURIComponent(state.currentId)}/assets?${_subParams(extra)}`, {headers: _authHeaders()});
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const resp = await r.json();
+  // captura: o servidor não conhece os screenshots capturados pelo navegador/Playwright
+  const co = allCompanies().find(c => c.id === state.currentId);
+  const shots = co && co._screenshotsByHost;
+  (resp.items || []).forEach(h => { if (!h.screenshot && shots && shots.has(h.host)) h.screenshot = shots.get(h.host); });
+  return resp;
+}
+
 function _subSort(key){
   if (_sub_sort === key) _sub_asc = !_sub_asc;
   else {
@@ -959,66 +940,54 @@ function _subSort(key){
   }
   _subApplyFilter();
 }
-function _subPageNav(d){ _sub_page+=d; _subRenderTable(_subFiltered()); }
 
-function _subFiltered(){
-  const q  = document.getElementById("sub-search")?.value.toLowerCase()||"";
-  const st = document.getElementById("sub-status")?.value||"";
-  const tc = document.getElementById("sub-tech")?.value||"";
-  const pt = document.getElementById("sub-port")?.value||"";
-  const rk = document.getElementById("sub-risk")?.value||"";
-  const wf = document.getElementById("sub-waf")?.value||"";
-  const fd = document.getElementById("sub-find")?.value||"";
-  const hs = document.getElementById("sub-has")?.value||"";
-  const dm = document.getElementById("sub-dom")?.value||"";
-  const col = _ASSET_COL[_sub_sort] || _ASSET_COL.url;
-  return _sub_hosts.filter(h=>{
-    const techLabels = _hostTechLabels(h);
-    const mq = !q || h.host.toLowerCase().includes(q) || (h.ip||"").includes(q)
-              || (h.title||"").toLowerCase().includes(q)
-              || techLabels.join(",").toLowerCase().includes(q)
-              || _hostOpenPorts(h).some(p => String(p.port).includes(q) || String(p.service || "").toLowerCase().includes(q));
-    let ms = true;
-    if (st) ms = h.status_code && Math.floor(h.status_code/100) === Number(st);
-    const mt = !tc || techLabels.includes(tc);
-    const mp = !pt || _hostOpenPorts(h).some(p => String(p.port) === String(pt));
-    const mr = !rk || (rk === "risk" ? !!h._risk?.risk : !h._risk?.risk);
-    const mw = !wf || (h.waf||"Direct").includes(wf);
-    const mf = !fd || (_FIND_FILTERS[fd] ? _FIND_FILTERS[fd](h) : true);
-    const mh = !hs || (_HAS_FILTERS[hs] ? _HAS_FILTERS[hs](h) : true);
-    const md = !dm || h._domain === dm;
-    return mq && ms && mt && mp && mr && mw && mf && mh && md;
-  }).sort((a,b)=>{
-    const av = col.val(a), bv = col.val(b);
-    const cmp = (typeof av === "number" && typeof bv === "number") ? av - bv : String(av).localeCompare(String(bv));
-    return _sub_asc ? cmp : -cmp;
-  });
+// page=null => volta à primeira página (mudou um filtro); busca com atraso curto para não disparar a cada tecla
+function _subApplyFilter(page = 1, immediate = true) {
+  clearTimeout(_subTimer);
+  const run = async () => {
+    const req = ++_subReq;
+    let resp;
+    try { resp = await _subQuery({page, sort: _sub_sort, dir: _sub_asc ? "asc" : "desc", per_page: _sub_per_page}); }
+    catch (e) { const pi = document.getElementById("sub-pinfo"); if (pi) pi.textContent = String(e.message || e); return; }
+    if (req !== _subReq) return;   // resposta velha
+    _subPaint(resp);
+  };
+  if (immediate) run(); else _subTimer = setTimeout(run, 220);
 }
+function _subPageNav(d){ _subApplyFilter(Math.max(1, _sub_page + d)); }
+function _subGoPage(p){ _subApplyFilter(p); }
+function _subSetPerPage(n){ _sub_per_page = Number(n) || 50; _subApplyFilter(1); }
 
-function _subApplyFilter(){
-  _sub_page = 1;
-  const filtered = _subFiltered();
-  const c = document.getElementById("sub-cnt"); if (c) c.textContent = filtered.length;
+function _subPaint(resp) {
+  _sub_hosts = resp.items || [];
+  _sub_page = resp.page || 1;
+  _sub_facets = resp.facets || _sub_facets;
+  _sub_hosts.forEach(h => { h._agg = h._agg || null; });
+  const c = document.getElementById("sub-cnt"); if (c) c.textContent = resp.total;
   const head = document.getElementById("sub-thead"); if (head) head.innerHTML = _assetTheadHtml();
-  const chips = document.getElementById("sub-chips"); if (chips) chips.innerHTML = _assetQuickChips(_sub_hosts);
-  _subRenderTable(filtered);
+  const chips = document.getElementById("sub-chips"); if (chips) chips.innerHTML = _assetQuickChips(_sub_facets);
+  const tot = resp.total, totPg = resp.pages, per = resp.per_page;
+  const st = (resp.page - 1) * per;
+  const pi = document.getElementById("sub-pinfo"); if (pi) pi.textContent = tot ? `${st + 1}–${Math.min(st + per, tot)} de ${tot}` : "0 de 0";
+  const pr = document.getElementById("sub-prev"); if (pr) pr.disabled = resp.page <= 1;
+  const nx = document.getElementById("sub-next"); if (nx) nx.disabled = resp.page >= totPg;
+  let pn = "";
+  for (let i = Math.max(1, resp.page - 2); i <= Math.min(totPg, resp.page + 2); i++)
+    pn += `<button class="pb${i === resp.page ? " active" : ""}" onclick="_subGoPage(${i})">${i}</button>`;
+  const pne = document.getElementById("sub-pnums"); if (pne) pne.innerHTML = pn;
+  const pp = document.getElementById("sub-perpage"); if (pp) pp.value = String(per);
+  _subRenderTable(_sub_hosts);
 }
 
-function _subRenderTable(filtered){
-  const tot=filtered.length, totPg=Math.ceil(tot/SUB_PER_PAGE);
-  _sub_page = Math.max(1, Math.min(_sub_page, totPg||1));
-  const st=(_sub_page-1)*SUB_PER_PAGE, pg=filtered.slice(st, st+SUB_PER_PAGE);
-  const pi=document.getElementById("sub-pinfo"); if(pi) pi.textContent=`${st+1}–${Math.min(st+SUB_PER_PAGE,tot)} de ${tot}`;
-  const pr=document.getElementById("sub-prev"); if(pr) pr.disabled=_sub_page<=1;
-  const nx=document.getElementById("sub-next"); if(nx) nx.disabled=_sub_page>=totPg;
-  let pn="";
-  for(let i=Math.max(1,_sub_page-2);i<=Math.min(totPg,_sub_page+2);i++)
-    pn+=`<button class="pb${i===_sub_page?" active":""}" onclick="_sub_page=${i};_subRenderTable(_subFiltered())">${i}</button>`;
-  const pne=document.getElementById("sub-pnums"); if(pne) pne.innerHTML=pn;
-  const tb=document.getElementById("sub-tbody"); if(!tb) return;
+function _subRenderTable(rows) {
+  const tb = document.getElementById("sub-tbody"); if (!tb) return;
   const ctx = {running: _isAssetCollectionRunning()};
   const cols = _assetVisibleCols();
-  tb.innerHTML = pg.map(h => `<tr class="ai-row" onclick="openHostDrawer('${escAttr(h.host)}')">${cols.map(c => c.td(h, ctx)).join("")}</tr>`).join("");
+  if (!rows.length) {
+    tb.innerHTML = `<tr><td colspan="${cols.length}" class="recon-empty-row" style="padding:28px;text-align:center;color:var(--text3)">Nenhum ativo bate com os filtros.</td></tr>`;
+    return;
+  }
+  tb.innerHTML = rows.map(h => `<tr class="ai-row" onclick="openHostDrawer('${escAttr(h.host)}')">${cols.map(c => c.td(h, ctx)).join("")}</tr>`).join("");
 }
 
 function renderSubHistoryTab(co) {

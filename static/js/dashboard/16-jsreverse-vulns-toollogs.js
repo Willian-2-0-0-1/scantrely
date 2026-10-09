@@ -525,18 +525,17 @@ async function renderVulnsTab(co) {
   if (!_applyPendingVulnFilter(co.id) && findings.length) applyFindFilter(co.id);
 }
 
-function exportHosts(fmt) {
-  // Exporta o que está na tela: respeita os filtros ativos da matriz de ativos.
-  const hosts = typeof _subFiltered === "function" && _sub_hosts && _sub_hosts.length ? _subFiltered() : (_sub_hosts || _co_hosts || []);
-  const rows = typeof _assetExportRows === "function" ? _assetExportRows(hosts) : hosts.map(h => ({host: h.host, ip: h.ip, waf: h.waf}));
+async function exportHosts(fmt) {
+  // Exporta o que está na tela: o servidor aplica os mesmos filtros e ordenação da matriz.
   const cid = state.currentId || "export";
   const ts = new Date().toISOString().slice(0,10);
-  if (fmt === "json") {
-    _downloadBlob(JSON.stringify(rows, null, 2), `${cid}_ativos_${ts}.json`, "application/json");
-  } else {
-    const cols = rows.length ? Object.keys(rows[0]) : ["host"];
-    const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    _downloadBlob(cols.join(",") + "\n" + rows.map(r => cols.map(c => q(r[c])).join(",")).join("\n"), `${cid}_ativos_${ts}.csv`, "text/csv");
+  const qs = _subParams({fmt: fmt === "json" ? "json" : "csv", sort: _sub_sort, dir: _sub_asc ? "asc" : "desc"});
+  try {
+    const r = await fetch(`/api/data/company/${encodeURIComponent(cid)}/assets/export?${qs}`, {headers: _authHeaders()});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _downloadBlob(await r.text(), `${cid}_ativos_${ts}.${fmt === "json" ? "json" : "csv"}`, fmt === "json" ? "application/json" : "text/csv");
+  } catch (e) {
+    showToast("Falha ao exportar: " + (e.message || e));
   }
 }
 

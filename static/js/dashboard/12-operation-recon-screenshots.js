@@ -1001,7 +1001,7 @@ async function loadScreenshots(cid, co) {
 
   if (vulnFindings.length) {
     const sevOrder = {critical:0, high:1, medium:2, low:3, info:4};
-    vulnFindings.sort((a,b) => (sevOrder[a.severity]||5) - (sevOrder[b.severity]||5));
+    vulnFindings.sort((a,b) => (sevOrder[a.severity] ?? 5) - (sevOrder[b.severity] ?? 5));
 
     // Filter chips
     const vulnModulesUniq = [...new Set(vulnFindings.map(f => f.module))].sort();
