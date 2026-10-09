@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.11"
 
 
 def _ok_check(ok: bool, **extra) -> dict:

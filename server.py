@@ -418,7 +418,7 @@ def serve_generators_js():
 
 @app.route("/js/<name>.js")
 def serve_extra_js(name: str):
-    allowed = {"theme", "asset-graph", "extras", "icons", "exposure"}
+    allowed = {"theme", "asset-graph", "extras", "icons", "exposure", "operation-persist", "origin-link"}
     if name not in allowed:
         abort(404)
     path = BASE / "static" / "js" / f"{name}.js"
@@ -820,8 +820,8 @@ RECON_MODULES = {
     "cms_scan":     ("CMS Scan (WPScan)",                   "~5m"),
     "cloud_enum":   ("Cloud Bucket Enumeration (cloud_enum)", "~3m"),
     "param_mine":   ("Parameter Discovery (arjun)",         "~5m"),
-    "js_endpoints": ("JS Endpoint Extraction (linkfinder)",  "~2m"),
-    "js_secrets":   ("JS Secret Detection (secretfinder)",   "~2m"),
+    "js_endpoints": ("JS Endpoint Extraction (from js module)",  "~2m"),
+    "js_secrets":   ("JS Secret Detection (from js module)",   "~2m"),
     "favicon_hunt": ("Favicon Hash → Origin IP (Shodan)",   "~1m"),
     # NOTE: "grep_app" was advertised here but has no implementation in
     # _make_fn_map, so running it raised KeyError('grep_app'). Removed until a
@@ -1099,7 +1099,7 @@ if __name__ == "__main__":
 
     print(f"""
   ===================================
-    ASM Platform - Server v1.3.0
+    ASM Platform - Server v1.3.11
   ===================================
   -> http://{args.host}:{args.port}
   -> Database       : {DB_FILE}

@@ -179,6 +179,48 @@ def _run_surface_intel(domains, hosts=None) -> dict:
 _GOWITNESS_SHOT_RE = re.compile(r'^(https?)---(.+)-(\d+)$', re.I)
 
 
+def serve_screenshot_path(cid: str, raw: str) -> str:
+    """Normalize a stored screenshot path to ``screenshots/{cid}/{rel}``.
+
+    Gowitness used to persist ``screenshots/<file.jpeg>`` without the company
+    id. The Flask serve route is ``/screenshots/<cid>/<path:filename>``, so a
+    cid-less value 404s. Nested gowitness v3 paths
+    (``screenshot/<host>/<hash>.png``) stay under the company prefix.
+    """
+    s = str(raw or '').strip().replace('\\', '/')
+    if not s:
+        return ''
+    if re.match(r'https?://', s, re.I):
+        return s
+    rest = ''
+    match = re.search(r'(?:^|/)screenshots/(.+)$', s, re.I)
+    if match:
+        rest = match.group(1)
+    elif s.startswith('/') or '/scans/' in s:
+        rest = s.rsplit('/', 1)[-1]
+    else:
+        rest = s.lstrip('/')
+    rest = re.sub(r'^screenshots/', '', rest, flags=re.I)
+    cid = str(cid or '').strip()
+    if cid:
+        if rest == cid:
+            rest = ''
+        elif rest.startswith(cid + '/'):
+            rest = rest[len(cid) + 1:]
+    rest = rest.lstrip('/')
+    if not rest or not cid:
+        return ''
+    return f'screenshots/{cid}/{rest}'
+
+
+def screenshot_path_missing_cid(cid: str, raw: str) -> bool:
+    s = str(raw or '').replace('\\', '/').strip()
+    cid = str(cid or '').strip()
+    if not s or not cid:
+        return True
+    return f'screenshots/{cid}/' not in s
+
+
 def screenshot_host_from_filename(name: str) -> str:
     """Map gowitness/browser screenshot filenames back to a hostname."""
     stem = Path(str(name or '')).stem
@@ -645,6 +687,64 @@ def _normalize_finding(finding: dict, source: str='general') -> dict:
         raw = f"{f.get('type', '')}|{f.get('title', '')}|{f.get('host', '')}|{f.get('value', '')}"
         f['id'] = hashlib.md5(raw.encode()).hexdigest()[:12]
     return f
+
+
+def merge_persist_findings(co_data: dict, all_findings: list | None = None, existing_keys: set | None = None, primary_domain: str = '') -> list:
+    """Fold persist blobs without a dedicated UI pane into ``findings``.
+
+    GitHub dork hits from the leaks module already merge earlier. This covers
+    ``.git`` exposure and vendor fingerprints so the Vulnerabilities tab sees
+    the same records the pipeline stored on the company object.
+    """
+    all_findings = list(all_findings if all_findings is not None else (co_data.get('findings') or []))
+    if existing_keys is None:
+        existing_keys = {f.get('key') or '' for f in all_findings}
+
+    def _add(item: dict) -> None:
+        key = item.get('key') or ''
+        if not key or key in existing_keys:
+            return
+        all_findings.append(_normalize_finding(item, item.get('module') or 'general'))
+        existing_keys.add(key)
+
+    for item in (co_data.get('leaks_data') or {}).get('git_exposed') or []:
+        if not isinstance(item, dict):
+            continue
+        host = item.get('host') or primary_domain
+        path = item.get('path') or '/.git/'
+        _add({
+            'key': f'git-exposed-{host}-{path}',
+            'type': 'git_exposed',
+            'title': f'.git exposto em {host}{path}',
+            'severity': item.get('severity') or 'critical',
+            'category': 'leaks',
+            'desc': item.get('snippet') or f'{path} responde HTTP 200',
+            'host': host,
+            'value': path,
+            'url': f'https://{host}{path}' if host else path,
+            'module': 'leaks',
+        })
+
+    for vf in co_data.get('vendor_fingerprints') or []:
+        if not isinstance(vf, dict):
+            continue
+        host = vf.get('host') or primary_domain
+        vendor = vf.get('vendor') or 'appliance'
+        url = vf.get('url') or ''
+        _add({
+            'key': f'vendorfp-{host}-{vendor}-{url[-40:]}',
+            'type': 'vendor_fingerprint',
+            'title': f'{vendor} em {host}',
+            'severity': vf.get('severity') or 'medium',
+            'category': 'fingerprint',
+            'desc': vf.get('cve_note') or f'Fingerprint {vendor} em {url or host}',
+            'host': host,
+            'value': vendor,
+            'url': url,
+            'module': 'vendor_fp',
+            'metadata': vf,
+        })
+    return all_findings
 
 def _select_browser_targets(hosts: list, domains: list, max_targets: int=12) -> list[str]:
     """Score and rank hosts to find the most interesting ones for browser recon."""
@@ -1474,7 +1574,7 @@ class ReconRunner:
         domains = self._active_scan_domains(co.get('domains') or [domain]) or [domain]
         screenshots_dir = str(self.base / 'scans' / cid / 'screenshots')
         r = self._recon
-        return {'email': lambda: r.run_email_recon(domain), 'surface_intel': lambda: _run_surface_intel(domains, hosts), 'certs': lambda: _run_certs_all_domains(r, domains, hosts), 'headers': lambda: r.run_headers_bulk(hosts), 'vendor_fp': lambda: r.run_vendor_fingerprint(hosts), 'typosquat': lambda: r.run_typosquatting(domain, extra_words=_brand_words(domains)), 'phishing': lambda: r.run_typosquatting(domain, extra_words=_brand_words(domains)), 'cloud': lambda: r.run_cloud_assets(domains, co.get('name', '')), 'related': lambda: r.run_related_domains(domain), 'reverse_whois': lambda: r.run_reverse_whois(domain, options.get('whoisxml_key', '')), 'github_subdomains': lambda: r.run_github_subdomains(domains, options.get('github_token', '')), 'apk_recon': lambda: r.run_apk_recon(domains, co.get('name', ''), apk_dir=str(self.base / 'scans' / cid / 'apks')), 'origin_discovery': lambda: r.run_origin_discovery(domains, hosts, options.get('shodan_key', '')), 'wayback': lambda: _run_wayback_all_domains(r, domains), 'waf': lambda: r.run_waf_detection(hosts), 'takeover': lambda: r.run_takeover_check(hosts), 'breach': lambda: r.run_breach_check(domain, options.get('hibp_key', ''), options.get('dehashed_key', '')), 'shodan': lambda: self._api_retry_wrapper(lambda: r.run_shodan(hosts, options.get('shodan_key', ''))), 'portscan': lambda: self._run_port_scan_smart([h for h in hosts if h.get('ip')], cid), 'asn': lambda: r.run_asn_recon(hosts, domain), 'services': lambda: self._run_services(hosts), 'leaks': lambda: r.run_leaks_recon(domain, hosts, options.get('github_token', '')), 'postman_collections': lambda: r.run_postman_collections(domain, co.get('name', ''), options.get('github_token', '')), 'dns': lambda: r.dns_records(domain), 'cve': lambda: r.run_cve_lookup(hosts, options.get('nvd_key', '')), 'vhost': lambda: r.run_vhost_discovery(hosts, domains), 'js': lambda: r.run_js_recon(domains, hosts), 'screenshot': lambda: r.run_screenshots(hosts, domains, output_dir=screenshots_dir), 'dns_brute': lambda: r.run_dns_bruteforce(domain, hosts, mode=options.get('scan_mode', 'balanced')), 'api_panels': lambda: self.run_api_panels_smart(cid, domain, hosts), 'certstream': lambda: r.run_certstream_snapshot(domains, duration_sec=45), 'dep_confusion': lambda: self._run_dep_confusion(cid, co, options), 'wappalyzer': lambda: self._call_run_wappalyzer(cid, co, hosts, options), 'subjack': lambda: self._run_tool('subjack', domain, {'hosts': hosts}), 'cms_scan': lambda: self.run_cms_scan_smart(cid, domain, options, hosts), 'cloud_enum': lambda: self._run_tool('cloud_enum', re.sub('\\.', '-', (co.get('name') or domain).lower().split('.')[0])), 'param_mine': lambda: self._run_tool('arjun', domain), 'js_endpoints': lambda: self._extract_js_endpoints_from_js_module(cid, domains, hosts), 'js_secrets': lambda: self._extract_js_secrets_from_js_module(cid, domains, hosts), 'favicon_hunt': lambda: self._api_retry_wrapper(lambda: self._run_tool('favicon_hash', domain, {'shodan_key': options.get('shodan_key', '')})), 'cloudlist': lambda: self._run_tool('cloudlist', domain), 'urlfinder': lambda: self._run_tool('urlfinder', domain), 'asnmap': lambda: self._run_tool('asnmap', domain), 'zone_transfer': lambda: r.run_zone_transfer(domains), 'subfinder': lambda: self.run_subfinder(cid, co, domain), 'assetfinder': lambda: self.run_assetfinder(cid, co, domain), 'theharvester': lambda: self.run_theharvester(cid, co, domain), 'amass': lambda: self.run_amass(cid, co, domain), 'riddler': lambda: self._run_free_api('riddler', domain), 'urlscan_io': lambda: self._run_free_api('urlscan_io', domain), 'rapiddns': lambda: self._run_free_api('rapiddns', domain), 'hackertarget': lambda: self._run_tool('hackertarget', domain), 'alienvault_otx': lambda: self._run_tool('alienvault_otx', domain), 'hunterio': lambda: self._run_tool('hunterio', domain, {'settings': options}), 'whatweb': lambda: self.run_whatweb(cid, co, hosts), 'gowitness': lambda: self.run_gowitness(cid, co, hosts), 'cors_scan': lambda: r.run_cors_scan(hosts), 'infra_exposure': lambda: r.run_infra_exposure(hosts), 'default_creds': lambda: r.run_default_creds(hosts), 'graphql': lambda: r.run_graphql_discovery(hosts, domains), 'browser_recon': lambda: self._browser_recon_wrapper(cid, co, hosts), 'browser_crawl': lambda: r.run_browser_crawl(hosts, domains, max_hosts=int(options.get('crawl_max_hosts', 150))), 'supply_chain': lambda: r.run_supply_chain_scan(hosts, options.get('nvd_key', '')), 'github_repos': lambda: r.run_github_repos(domains, options.get('github_token', '')), 'dnssec': lambda: r.run_dnssec_check(domains), 'waf_bypass': lambda: r.run_waf_bypass_test(hosts), 'smtp_probe': lambda: r.run_smtp_probe(hosts), 'snmp_probe': lambda: r.run_snmp_probe(hosts), 'host_header_injection': lambda: r.run_host_header_injection(hosts), 'open_redirect': lambda: r.run_open_redirect_check(hosts), 'tableau': lambda: self._run_tableau_check(hosts), 'container_registry': lambda: r.run_container_registry_scan(domains, co.get('name', ''), options.get('docker_token', '')), 'bulk_dataset': lambda: r.run_bulk_dataset_scan(hosts, domains, shodan_key=options.get('shodan_key', ''), censys_id=options.get('censys_id', ''), censys_secret=options.get('censys_secret', '')), 'database_enum_extra': lambda: r.run_database_enum_extra(hosts), 'service_version': lambda: r.run_service_version_detect(hosts), 'udp_portscan': lambda: r.run_udp_port_scan(hosts), 'api_discovery_extra': lambda: r.run_api_discovery_extra(hosts, domains), 'screenshot_diff': lambda: r.run_screenshot_diff(hosts, os.path.join(self.base, 'scans', cid, 'screenshots'), previous_dir=os.path.join(self.base, 'scans', cid, 'screenshots_prev')), 'git_leaks': lambda: r.run_git_leaks(hosts, domains, options.get('github_token', '')), 's3_scanner': lambda: r.run_s3_scanner(domains, co.get('name', '')), 'jwt_analysis': lambda: r.run_jwt_analysis(hosts, None), 'xss_scan': lambda: r.run_xss_scan(hosts, options.get('mode', 'balanced')), 'salesforce_recon': lambda: r.run_salesforce_recon(hosts, domains)}
+        return {'email': lambda: r.run_email_recon(domain), 'surface_intel': lambda: _run_surface_intel(domains, hosts), 'certs': lambda: _run_certs_all_domains(r, domains, hosts), 'headers': lambda: r.run_headers_bulk(hosts), 'vendor_fp': lambda: r.run_vendor_fingerprint(hosts), 'typosquat': lambda: r.run_typosquatting(domain, extra_words=_brand_words(domains)), 'phishing': lambda: r.run_typosquatting(domain, extra_words=_brand_words(domains)), 'cloud': lambda: r.run_cloud_assets(domains, co.get('name', '')), 'related': lambda: r.run_related_domains(domain), 'reverse_whois': lambda: r.run_reverse_whois(domain, options.get('whoisxml_key', '')), 'github_subdomains': lambda: r.run_github_subdomains(domains, options.get('github_token', '')), 'apk_recon': lambda: r.run_apk_recon(domains, co.get('name', ''), apk_dir=str(self.base / 'scans' / cid / 'apks')), 'origin_discovery': lambda: r.run_origin_discovery(domains, hosts, options.get('shodan_key', '')), 'wayback': lambda: _run_wayback_all_domains(r, domains), 'waf': lambda: r.run_waf_detection(hosts), 'takeover': lambda: r.run_takeover_check(hosts), 'breach': lambda: r.run_breach_check(domain, options.get('hibp_key', ''), options.get('dehashed_key', '')), 'shodan': lambda: self._api_retry_wrapper(lambda: r.run_shodan(hosts, options.get('shodan_key', ''))), 'portscan': lambda: self._run_port_scan_smart([h for h in hosts if h.get('ip')], cid), 'asn': lambda: r.run_asn_recon(hosts, domain), 'services': lambda: self._run_services(hosts), 'leaks': lambda: r.run_leaks_recon(domain, hosts, options.get('github_token', '')), 'postman_collections': lambda: r.run_postman_collections(domain, co.get('name', ''), options.get('github_token', '')), 'dns': lambda: r.dns_records(domain), 'cve': lambda: r.run_cve_lookup(hosts, options.get('nvd_key', '')), 'vhost': lambda: r.run_vhost_discovery(hosts, domains), 'js': lambda: r.run_js_recon(domains, hosts), 'screenshot': lambda: r.run_screenshots(hosts, domains, output_dir=screenshots_dir), 'dns_brute': lambda: r.run_dns_bruteforce(domain, hosts, mode=options.get('scan_mode', 'balanced')), 'api_panels': lambda: self.run_api_panels_smart(cid, domain, hosts), 'certstream': lambda: r.run_certstream_snapshot(domains, duration_sec=45), 'dep_confusion': lambda: self._run_dep_confusion(cid, co, options), 'wappalyzer': lambda: self._call_run_wappalyzer(cid, co, hosts, options), 'subjack': lambda: self._run_tool('subjack', domain, {'hosts': hosts}), 'cms_scan': lambda: self.run_cms_scan_smart(cid, domain, options, hosts), 'cloud_enum': lambda: self._run_tool('cloud_enum', re.sub('\\.', '-', (co.get('name') or domain).lower().split('.')[0])), 'param_mine': lambda: self._run_tool('arjun', domain), 'js_endpoints': lambda: self._extract_js_endpoints_from_js_module(cid, domains, hosts), 'js_secrets': lambda: self._extract_js_secrets_from_js_module(cid, domains, hosts), 'favicon_hunt': lambda: self._api_retry_wrapper(lambda: self._run_tool('favicon_hash', domain, {'shodan_key': options.get('shodan_key', '')})), 'cloudlist': lambda: self._run_tool('cloudlist', domain), 'urlfinder': lambda: self._run_tool('urlfinder', domain), 'asnmap': lambda: self._run_tool('asnmap', domain), 'zone_transfer': lambda: r.run_zone_transfer(domains), 'subfinder': lambda: self.run_subfinder(cid, co, domain), 'assetfinder': lambda: self.run_assetfinder(cid, co, domain), 'theharvester': lambda: self.run_theharvester(cid, co, domain), 'amass': lambda: self.run_amass(cid, co, domain), 'riddler': lambda: self._run_free_api('riddler', domain), 'urlscan_io': lambda: self._run_free_api('urlscan_io', domain), 'rapiddns': lambda: self._run_free_api('rapiddns', domain), 'hackertarget': lambda: self._run_tool('hackertarget', domain), 'alienvault_otx': lambda: self._run_tool('alienvault_otx', domain), 'hunterio': lambda: self._run_tool('hunterio', domain, {'settings': options}), 'whatweb': lambda: self.run_whatweb(cid, co, hosts), 'gowitness': lambda: self.run_gowitness(cid, co, hosts), 'cors_scan': lambda: r.run_cors_scan(hosts), 'infra_exposure': lambda: r.run_infra_exposure(hosts), 'default_creds': lambda: r.run_default_creds(hosts), 'graphql': lambda: r.run_graphql_discovery(hosts, domains), 'browser_recon': lambda: self._browser_recon_wrapper(cid, co, hosts), 'browser_crawl': lambda: r.run_browser_crawl(hosts, domains, max_hosts=int(options.get('crawl_max_hosts', 150))), 'supply_chain': lambda: r.run_supply_chain_scan(hosts, options.get('nvd_key', '')), 'github_repos': lambda: r.run_github_repos(domains, options.get('github_token', '')), 'dnssec': lambda: r.run_dnssec_check(domains), 'waf_bypass': lambda: r.run_waf_bypass_test(hosts), 'smtp_probe': lambda: r.run_smtp_probe(hosts), 'snmp_probe': lambda: r.run_snmp_probe(hosts), 'host_header_injection': lambda: r.run_host_header_injection(hosts), 'open_redirect': lambda: r.run_open_redirect_check(hosts), 'tableau': lambda: self._run_tableau_check(hosts), 'container_registry': lambda: r.run_container_registry_scan(domains, co.get('name', ''), options.get('docker_token', '')), 'bulk_dataset': lambda: r.run_bulk_dataset_scan(hosts, domains, shodan_key=options.get('shodan_key', ''), censys_id=options.get('censys_id', ''), censys_secret=options.get('censys_secret', '')), 'database_enum_extra': lambda: r.run_database_enum_extra(hosts), 'service_version': lambda: r.run_service_version_detect(hosts), 'udp_portscan': lambda: r.run_udp_port_scan(hosts), 'api_discovery_extra': lambda: r.run_api_discovery_extra(hosts, domains), 'screenshot_diff': lambda: r.run_screenshot_diff(hosts, os.path.join(self.base, 'scans', cid, 'screenshots'), previous_dir=os.path.join(self.base, 'scans', cid, 'screenshots_prev')), 'git_leaks': lambda: r.run_git_leaks(hosts, domains, options.get('github_token', '')), 's3_scanner': lambda: r.run_s3_scanner(domains, co.get('name', '')), 'jwt_analysis': lambda: r.run_jwt_analysis(hosts, ((self.results.get(f'{cid}:js') or {}).get('data') or {}).get('js_files') or (co.get('js_data') or {}).get('js_files')), 'xss_scan': lambda: r.run_xss_scan(hosts, options.get('mode', 'balanced')), 'salesforce_recon': lambda: r.run_salesforce_recon(hosts, domains)}
 
     def _browser_recon_wrapper(self, cid: str, co: dict, hosts: list[dict] | None=None) -> dict:
         """Multi-host browser recon: select interesting targets, run Playwright in parallel."""
@@ -1799,12 +1899,20 @@ class ReconRunner:
 
     def _extract_js_endpoints_from_js_module(self, cid: str, domains: list, hosts: list) -> dict:
         """Extract JS endpoints from js module results (already computed, no re-download)."""
+        try:
+            from core.recon import _js_host_is_noise as _noise
+            from core.recon import _js_path_is_noise as _path_noise
+        except Exception:
+            _noise = lambda h: False
+            _path_noise = lambda p: False
         js_result = (self.results.get(f'{cid}:js') or {}).get('data') or {}
         js_files = js_result.get('js_files', [])
         findings: list[dict] = []
         seen: set[str] = set()
         for jf in js_files:
             host = jf.get('host', '')
+            if _noise(host):
+                continue
             src = jf.get('url', '')
             for ep in jf.get('endpoints', []):
                 if isinstance(ep, dict):
@@ -1813,6 +1921,8 @@ class ReconRunner:
                 else:
                     path = str(ep)
                     kind = 'path'
+                if _path_noise(path):
+                    continue
                 key = f'{host}:{path}'
                 if path and key not in seen:
                     seen.add(key)
@@ -1821,12 +1931,18 @@ class ReconRunner:
 
     def _extract_js_secrets_from_js_module(self, cid: str, domains: list, hosts: list) -> dict:
         """Extract JS secrets from js module results (already computed, no re-download)."""
+        try:
+            from core.recon import _js_host_is_noise as _noise
+        except Exception:
+            _noise = lambda h: False
         js_result = (self.results.get(f'{cid}:js') or {}).get('data') or {}
         js_files = js_result.get('js_files', [])
         findings: list[dict] = []
         seen: set[str] = set()
         for jf in js_files:
             host = jf.get('host', '')
+            if _noise(host):
+                continue
             src = jf.get('url', '')
             for s in jf.get('secrets', []):
                 if isinstance(s, dict):
@@ -2026,7 +2142,7 @@ class ReconRunner:
             if not host:
                 continue
             meta = host_meta.get(host, {}) or host_meta.get('www.' + host, {})
-            screenshots.append({'host': host, 'screenshot': f'screenshots/{p.name}', 'status_code': meta.get('status_code'), 'title': meta.get('title', ''), 'ip': meta.get('ip', ''), 'server': meta.get('server', '')})
+            screenshots.append({'host': host, 'screenshot': f'screenshots/{cid}/{p.name}', 'status_code': meta.get('status_code'), 'title': meta.get('title', ''), 'ip': meta.get('ip', ''), 'server': meta.get('server', '')})
         return {'screenshots': screenshots, 'count': len(screenshots), 'scanned_at': datetime.now().isoformat(timespec='seconds')}
 
     def run_wappalyzer(self, cid: str, co: dict, hosts: list[dict] | None=None, options: dict | None=None) -> dict:
@@ -2918,8 +3034,26 @@ class ReconRunner:
                     if jf.get('source') == 'playwright' and u:
                         runtime_js_urls.append(u)
             runtime_js_urls = sorted(dict.fromkeys(runtime_js_urls))
-            co_data['js_data'] = {'js_files': js_data.get('js_files', []), 'total_endpoints': js_data.get('total_endpoints') or js_data.get('endpoints_found', 0), 'total_secrets': js_data.get('total_secrets') or js_data.get('secrets_found', 0), 'js_analyzed': js_data.get('js_analyzed', 0), 'js_files_found': js_data.get('js_files_found', 0), 'critical_count': js_data.get('critical_count', 0), 'high_count': js_data.get('high_count', 0), 'medium_count': js_data.get('medium_count', 0), 'runtime_network': js_data.get('runtime_network', []), 'runtime_network_map': js_data.get('runtime_network_map', {}), 'runtime_js_urls': runtime_js_urls, 'runtime_js_count': js_data.get('runtime_js_count', 0), 'scanned_at': js_data.get('scanned_at', '')}
-            log(f"  ↳ JS: {len(js_data.get('js_files', []))} arquivos, {js_data.get('total_endpoints', 0)} endpoints, {len(js_data.get('runtime_network', []))} runtime calls, {js_data.get('runtime_js_count', 0)} runtime JS chunks")
+            co_data['js_data'] = {
+                'js_files': js_data.get('js_files', []),
+                'total_endpoints': js_data.get('total_endpoints') or js_data.get('endpoints_found', 0),
+                'total_secrets': js_data.get('total_secrets') or js_data.get('secrets_found', 0),
+                'js_analyzed': js_data.get('js_analyzed', 0),
+                'js_files_found': js_data.get('js_files_found', 0),
+                'js_skipped_noise': js_data.get('js_skipped_noise', 0),
+                'js_fetch_failed': js_data.get('js_fetch_failed', 0),
+                'critical_count': js_data.get('critical_count', 0),
+                'high_count': js_data.get('high_count', 0),
+                'medium_count': js_data.get('medium_count', 0),
+                'source_maps': js_data.get('source_maps', []),
+                'source_maps_count': js_data.get('source_maps_count', 0),
+                'runtime_network': js_data.get('runtime_network', []),
+                'runtime_network_map': js_data.get('runtime_network_map', {}),
+                'runtime_js_urls': runtime_js_urls,
+                'runtime_js_count': js_data.get('runtime_js_count', 0),
+                'scanned_at': js_data.get('scanned_at', ''),
+            }
+            log(f"  ↳ JS: {len(js_data.get('js_files', []))} arquivos, {js_data.get('total_endpoints', 0)} endpoints, {len(js_data.get('runtime_network', []))} runtime calls, {js_data.get('runtime_js_count', 0)} runtime JS chunks, {js_data.get('source_maps_count', 0)} source maps")
         wappalyzer_data = _result('wappalyzer')
         if wappalyzer_data.get('tech_index'):
             merged = dict(co_data.get('tech_index') or {})
@@ -3025,8 +3159,11 @@ class ReconRunner:
             ss_map = {s.get('host', '').lower(): s.get('screenshot', '') for s in gw_screenshots if s.get('host')}
             for h in co_data.get('hosts', []):
                 hn = h.get('host', '').lower()
-                if hn in ss_map and (not h.get('screenshot')):
-                    h['screenshot'] = ss_map[hn]
+                if hn not in ss_map:
+                    continue
+                stored = h.get('screenshot')
+                if (not stored) or screenshot_path_missing_cid(cid, stored):
+                    h['screenshot'] = serve_screenshot_path(cid, ss_map[hn])
             log(f'  ↳ Screenshots linkados: {len(ss_map)} hosts com captura')
         log(f'  ↳ [persist] Ligando screenshots do disco...')
         try:
@@ -3052,7 +3189,10 @@ class ReconRunner:
                 linked = 0
                 for h in co_data.get('hosts', []):
                     hn = (h.get('host') or '').lower().strip('.')
-                    if not hn or h.get('screenshot'):
+                    if not hn:
+                        continue
+                    stored = h.get('screenshot')
+                    if stored and not screenshot_path_missing_cid(cid, stored):
                         continue
                     path = disk_shots.get(hn)
                     if not path and hn.startswith('www.'):
@@ -3060,7 +3200,7 @@ class ReconRunner:
                     if not path:
                         path = disk_shots.get('www.' + hn)
                     if path:
-                        h['screenshot'] = path
+                        h['screenshot'] = serve_screenshot_path(cid, path)
                         linked += 1
                 if linked:
                     log(f'  ↳ Screenshots disco linkados: {linked}')
@@ -3463,6 +3603,7 @@ class ReconRunner:
             if key not in existing_keys:
                 all_findings.append({'key': key, 'type': 'tableau_exposure', 'title': f.get('title', ''), 'severity': f.get('severity', 'medium'), 'category': 'exposure', 'desc': f.get('desc', ''), 'host': f.get('host', ''), 'value': f.get('url', ''), 'url': f.get('url', ''), 'module': 'tableau', 'request_raw': f.get('request_raw', ''), 'response_raw': f.get('response_raw', ''), 'matched': f.get('matched', '')})
                 existing_keys.add(key)
+        all_findings = merge_persist_findings(co_data, all_findings, existing_keys, primary_domain)
         host_findings: dict[str, list[dict]] = {}
         for f in all_findings:
             h = f.get('host', '')

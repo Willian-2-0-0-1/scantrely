@@ -414,6 +414,33 @@ def create_scan_blueprint(
             abort(404)
         return send_from_directory(str(shots_dir), filename)
 
+    @bp.route("/screenshots/<filename>")
+    def serve_screenshot_cidless(filename: str):
+        """Compat for persist that stored ``screenshots/<file.jpeg>`` without cid."""
+        name = os.path.basename(str(filename or "").replace("\\", "/"))
+        if name != filename or name in {".", ".."} or ".." in name:
+            abort(404)
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in {".png", ".jpg", ".jpeg", ".webp"}:
+            abort(404)
+        scans = base_dir / "scans"
+        hits = []
+        if scans.is_dir():
+            for shots_dir in scans.glob("*/screenshots"):
+                candidate = shots_dir / name
+                try:
+                    resolved = candidate.resolve()
+                    if resolved.is_file() and resolved.is_relative_to(shots_dir.resolve()):
+                        hits.append(resolved)
+                except Exception:
+                    continue
+                if len(hits) > 1:
+                    break
+        if not hits:
+            abort(404)
+        chosen = hits[0]
+        return send_from_directory(str(chosen.parent), chosen.name)
+
     # ── Enterprise: Alerts, Timeline, Diff ────────────────────────────────────
 
     @bp.route("/api/alerts/<cid>", methods=["GET"])

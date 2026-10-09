@@ -1,6 +1,6 @@
 # Backlog — Scantrely ASM Platform
 
-> Última atualização: 2026-10-07 (1.3.0)  
+> Última atualização: 2026-10-08 (1.3.11)  
 > Legenda de prioridade: 🔴 Alta · 🟡 Média · 🟢 Baixa
 
 ---
@@ -48,7 +48,7 @@ Nenhum bug confirmado aberto nesta lista. B1–B7 foram corrigidos em 2026-10-07
 | F12 | ✅ | Integrações | **Slash /scan** — Feito: `POST /api/integrations/slash` com `slash_token`. |
 | F13 | ✅ | API | **OpenAPI** — Feito: `GET /api/openapi.json` e `/api/docs`. |
 | F14 | ✅ | Pipeline | **Mobile recon** — Feito: `apk_recon` atribuído à fase intel (já existia o runner). |
-| F15 | ✅ | Dashboard | **Grafo de ativos** — Feito: SVG em `asset-graph.js` (sem D3). |
+| F15 | ✅ | Dashboard | **Grafo de ativos** — Feito: SVG em `asset-graph.js` (sem D3). 1.3.3: cluster/LOD, zoom, busca, formas, lista. |
 | F16 | ✅ | Intel | **Surface intel sem VirusTotal** — DNS/CNAME/CDN/CT/CSP/CORS + grafo (visão VT). |
 
 ---
@@ -69,6 +69,17 @@ Nenhum bug confirmado aberto nesta lista. B1–B7 foram corrigidos em 2026-10-07
 
 | Commit | O que foi corrigido |
 |--------|---------------------|
+| local 2026-10-08 | 1.3.11 — Grupo Vulnerabilidades (Confirmadas) em PT: título, loading, empty, filtros |
+| local 2026-10-08 | 1.3.10 — Aba Recon/Screenshots em PT (título, loading, empty, filtros) |
+| local 2026-10-08 | 1.3.9 — Badge Exposição = funcionários; Hosts = ativos; Pipeline em PT |
+| local 2026-10-08 | 1.3.8 — Inventário de hosts no Hosts visível; clique no screenshot abre lightbox; alvos 44px |
+| local 2026-10-08 | 1.3.7 — Screenshot 404: path sem company id vira `/screenshots/<cid>/<arquivo>` |
+| local 2026-10-08 | 1.3.6 — URL relativa colapsa `..`; inventário JS sem MIME/webpack; secrets da aba Endpoints iguais ao JS Reverse |
+| local 2026-10-08 | 1.3.5 — Clique em secret/endpoint/URL/host abre o local em que foi achado |
+| local 2026-10-07 | 1.3.4 — Operação mostra persist browser/crawl/JS; empty só sem evidência; CTA Playwright |
+| local 2026-10-07 | 1.3.3 — Grafo: cluster por apex, LOD, zoom/pan, busca, formas, vista lista |
+| local 2026-10-07 | 1.3.2 — Sync backend/frontend: subnav das abas órfãs, infra lê persist, git/vendor viram findings, param_mine nos endpoints |
+| local 2026-10-07 | 1.3.1 — JS scan: KPI array, JWT do módulo js, noise CDN por sufixo, source maps analisados, par client_id/secret |
 | local 2026-10-07 | 1.3.0 — Exposição estilo Cavalier: parser Hudson Rock rico, persist hudsonrock-only, busca ao vivo, aba + workspace |
 | local 2026-10-07 | 1.2.0 — Hermes breaker; S3 403 = sucesso; http_cache guarded; drain SIGTERM; X-Request-Id + pipeline trace_id; chaos `ASM_CHAOS_HOSTS`; load test `/health` |
 | local 2026-10-07 | 1.1.13 — OAuth Google com timeout + breaker; bootstrap cloudlist (GitHub/ZIP) via `guarded_urlopen` |

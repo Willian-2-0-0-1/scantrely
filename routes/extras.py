@@ -20,7 +20,7 @@ _OPENAPI = {
     "openapi": "3.0.3",
     "info": {
         "title": "Scantrely ASM API",
-        "version": "1.3.0",
+        "version": "1.3.11",
         "description": "Local External Attack Surface Monitoring API.",
     },
     "servers": [{"url": "/", "description": "Local"}],

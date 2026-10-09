@@ -2,6 +2,107 @@
 
 Todas as mudanças relevantes do projeto são documentadas aqui.
 
+## [1.3.11] - 2026-10-08
+
+### Vulnerabilidades confirmadas
+
+- Painel padrão do grupo Vulnerabilidades (`#tab-vulns`) em PT: título, loading, empty, filtros, contagem, pager e seções CORS/GraphQL/Nuclei/takeover.
+- Loading com `aria-busy` e `role="status"`.
+- Cards de severidade (Crítica/Alta/Média/Baixa) usam o mesmo i18n.
+
+## [1.3.10] - 2026-10-08
+
+### Recon / Screenshots
+
+- Título, subtítulo, loading, empty states, filtros e cabeçalhos da aba Recon em PT (`recon_*` no i18n).
+- Loading com `aria-busy` e `role="status"`, sem tela em branco.
+- Secrets do Postman ficam mascarados e só revelam no clique.
+
+## [1.3.9] - 2026-10-08
+
+### Contagens e Pipeline
+
+- Badge da aba Exposição usa o KPI de funcionários (consulta de domínio) ou registros de stealer (e-mail), sem somar usuários.
+- Badge do grupo Hosts = inventário ativo (`status_code` real), igual à tabela.
+- Aba Pipeline em PT: título, botão Rodar/Parar (ícone SVG restaurado), HUD e painel Playwright.
+
+## [1.3.8] - 2026-10-08
+
+### Inventário de hosts
+
+- O grupo Hosts abre o Inventário de ativos (`#tab-subdomains`) com o card `#playwright-host-inventory` (crawl persistido; sessão Playwright se existir).
+- Clique na miniatura abre o lightbox; Escape fecha; setas navegam. Toque no celular abre a prévia (hover fica só no desktop).
+- Ações de copiar/abrir/detalhe usam SVG de 44px com `aria-label` (sem emoji ⧉↗◉).
+
+## [1.3.7] - 2026-10-08
+
+### Screenshots
+
+- URL de captura inclui o id da empresa (`/screenshots/porto/<arquivo>`). Persist sem cid (gowitness `screenshots/<file.jpeg>`) deixa de 404.
+- Inventário e persist reescrevem path inválido; rota compatível atende o URL antigo sem cid.
+- Miniaturas, drawer e sessão Playwright passam pelo mesmo helper.
+
+## [1.3.6] - 2026-10-08
+
+### Inventário JS
+
+- Clique em path relativo (`../../foo`) abre a URL colapsada (`https://host/foo`), sem `..` na barra.
+- MIME (`application/json`), máscaras de data (`dd/MM/yyyy`) e imports webpack (`../utils`) saem do inventário de endpoints.
+- Aba Endpoints mostra os mesmos secrets do JS Reverse (FP filter + `secrets_findings`); o bloco `#endpoints-secrets` inclui a tabela com links de origem.
+
+## [1.3.5] - 2026-10-08
+
+### Clique na origem
+
+- Secret, endpoint, URL e host abrem o local em que foram achados (`target=_blank`, `rel=noopener`).
+- Tabela plana de endpoints: a URL é um link; o restante da linha ainda expande detalhes.
+- Secrets: arquivo JS e host navegam; o valor mascarado continua só revelando.
+- JS Reverse: host, path e fonte JS viram links; path relativo resolve contra o host.
+- Findings: chips de host e URLs abrem o alvo em vez de copiar.
+- Operação: crawl, cookies (página), observações, forms, terceiros com domínio, sessão Playwright.
+
+## [1.3.4] - 2026-10-07
+
+### Operação
+
+- A aba Operação lê `browser_recon_data`, `browser_crawl_data` e `js_data` da pipeline. Sem job `playwright_recon` a evidência do browser já aparece.
+- Empty state só quando não há persist nem job. CTA de 44px abre o modal Playwright Recon.
+- Inventário de hosts no grupo Hosts usa o crawl persistido.
+
+## [1.3.3] - 2026-10-07
+
+### Grafo de ativos
+
+- Clusters por apex (eTLD+1, `.com.br`, AWS DNS, CloudFront, Imperva) encolhem folhas; o grupo `+N hosts` expande no clique.
+- Layout por gravidade de cluster (sem D3), não mais um anel por tipo.
+- Zoom (roda, `+`/`−`, botões), pan, busca, tooltip com hostname integral.
+- Forma + cor por tipo (círculo, quadrado, losango, triângulo, hexágono, cruz).
+- Vista Lista como adjacência acessível. Chips e busca em 44px.
+
+## [1.3.2] - 2026-10-07
+
+### Backend ↔ frontend
+
+- Abas órfãs (JS Reverse, Endpoints, Portas, CVE, Supply Chain, Typosquat, Alertas, Timeline, Diff, Suprimidos, Terminal) entram na barra via subnav dos grupos Hosts / Vulnerabilidades / Operação / Pipeline.
+- Overview ganha atalhos para esses resultados.
+- Infra deixa o dump estático de Porto Seguro e passa a ler `vendor_fingerprints`, `related_domains`, Shodan, favicon, zone transfer, CMS e certstream.
+- `.git` exposto e fingerprints de appliance viram findings na aba Vulnerabilidades.
+- Param mine entra no inventário unificado de endpoints.
+- `#tab-terminal` passa a existir; o HUD da pipeline e o terminal verbose são sub-abas.
+
+## [1.3.1] - 2026-10-07
+
+### JS scan
+
+- KPI JavaScript conta `js_files.length` (antes `Number(array)` virava NaN).
+- Empty state aponta o módulo `js`, não `js_scan`.
+- `jwt_analysis` lê JWTs já extraídos pelo módulo `js` e não baixa de novo os bundles.
+- Hosts de CDN/analytics (Securiti, Clarity, Maps, GTM, Hotjar) são ignorados por sufixo; o flatten de endpoints/secrets segue a mesma regra.
+- Source maps (`.js.map`) entram no persist e o `sourcesContent` é varrido por secrets/endpoints.
+- Par `client_id` + `client_secret` no mesmo arquivo sobe para critical também no fetch direto.
+- Chave Google de Maps/Firebase no cliente cai para medium.
+- Padrões novos: `github_pat_`, Slack `xox*`, OpenAI `sk-proj-`, Anthropic `sk-ant-`, npm token.
+
 ## [1.3.0] - 2026-10-07
 
 ### Exposição (ideias do Cavalier, marca Scantrely)

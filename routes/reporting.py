@@ -56,7 +56,7 @@ def findings_to_sarif(company: dict) -> dict:
             "tool": {
                 "driver": {
                     "name": "Scantrely",
-                    "version": "1.3.0",
+                    "version": "1.3.11",
                     "informationUri": "https://github.com/Willian-2-0-0-1/scantrely",
                     "rules": list(rules.values()),
                 }

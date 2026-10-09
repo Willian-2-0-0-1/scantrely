@@ -1017,6 +1017,18 @@ class TestScanRoutes:
         assert resp.status_code == 200
         assert resp.get_json() == []
 
+    def test_screenshot_file_with_cid_and_cidless_fallback(self, client, tmp_path):
+        name = "https---auth.catalogo.portoplus.com.br-443.jpeg"
+        shots = tmp_path / "scans" / "porto" / "screenshots"
+        shots.mkdir(parents=True)
+        (shots / name).write_bytes(b"\xff\xd8\xff\xd9")
+        with_cid = client.get(f"/screenshots/porto/{name}")
+        assert with_cid.status_code == 200
+        cidless = client.get(f"/screenshots/{name}")
+        assert cidless.status_code == 200
+        missing = client.get("/screenshots/https---ghost.example-443.jpeg")
+        assert missing.status_code == 404
+
     def test_subhistory_empty(self, auth_client):
         resp = auth_client.get("/api/data/co/subhistory")
         assert resp.status_code == 200
@@ -2660,6 +2672,28 @@ class TestPipelineAssignment:
             "browser_https___catalogo_portoplus_com_br.png"
         ) == "catalogo.portoplus.com.br"
 
+    def test_serve_screenshot_path_inserts_cid(self):
+        from core.pipeline import screenshot_path_missing_cid, serve_screenshot_path
+
+        missing = "screenshots/https---auth.catalogo.portoplus.com.br-443.jpeg"
+        assert screenshot_path_missing_cid("porto", missing) is True
+        assert serve_screenshot_path("porto", missing) == (
+            "screenshots/porto/https---auth.catalogo.portoplus.com.br-443.jpeg"
+        )
+        assert serve_screenshot_path("porto", "/" + missing) == (
+            "screenshots/porto/https---auth.catalogo.portoplus.com.br-443.jpeg"
+        )
+        assert serve_screenshot_path("porto", "screenshots/porto/x.png") == "screenshots/porto/x.png"
+        assert serve_screenshot_path(
+            "porto",
+            "/home/will/scantrely/scans/porto/screenshots/browser_https___www_portoplus_com_br.png",
+        ) == "screenshots/porto/browser_https___www_portoplus_com_br.png"
+        assert serve_screenshot_path(
+            "porto", "screenshot/auth.catalogo.portoplus.com.br/hash.png"
+        ) == "screenshots/porto/screenshot/auth.catalogo.portoplus.com.br/hash.png"
+        assert serve_screenshot_path("porto", "") == ""
+        assert screenshot_path_missing_cid("porto", "screenshots/porto/x.png") is False
+
     def test_module_status_index_prefers_compact_map(self):
         from core.pipeline import module_status_index
 
@@ -2934,3 +2968,642 @@ class TestBacklogClose:
             text = ROOT.joinpath(name).read_text(encoding="utf-8")
             assert "Compatibility shim" in text
             assert "from routes." in text
+
+
+class TestJsScan:
+    def test_noise_host_matches_suffix(self):
+        from core.recon import _js_host_is_noise
+
+        assert _js_host_is_noise("cdn-prod.securiti.ai") is True
+        assert _js_host_is_noise("scripts.clarity.ms") is True
+        assert _js_host_is_noise("www.portoplus.com.br") is False
+        assert _js_host_is_noise("experiencias.portoplus.com.br") is False
+
+    def test_analyze_skips_noise_cdn(self):
+        from core.recon import _analyze_js_content
+
+        body = 'apiKey:"AIzaSyBUnU3tt0IxrAby30X3vEincvF-DxmXnE4"'
+        out = _analyze_js_content("https://cdn-prod.securiti.ai/consent/sdk.js", body)
+        assert out["secrets"] == []
+        assert out["endpoints"] == []
+
+    def test_google_maps_key_is_medium(self):
+        from core.recon import _analyze_js_content
+
+        body = 'Object({googleMapsApiKey:"AIzaSyBUnU3tt0IxrAby30X3vEincvF-DxmXnE4"}).isLoaded'
+        out = _analyze_js_content("https://experiencias.portoplus.com.br/static/js/main.js", body)
+        keys = [s for s in out["secrets"] if s["type"] == "google_api_key"]
+        assert keys
+        assert keys[0]["severity"] == "medium"
+        assert "Firebase/Maps" in keys[0]["context"]
+
+    def test_gateway_pair_escalates_to_critical(self):
+        from core.recon import _analyze_js_content
+
+        body = (
+            'const cfg = {client_id: "abc123def456", '
+            'client_secret: "xyzsecretvalue16x"};'
+        )
+        out = _analyze_js_content("https://loja.portoseguro.com.br/app.js", body)
+        types = {s["type"]: s for s in out["secrets"]}
+        assert "client_id" in types and "client_secret" in types
+        assert types["client_id"]["severity"] == "critical"
+        assert types["client_secret"]["severity"] == "critical"
+
+    def test_source_map_reads_sources_content(self):
+        from core.recon import _analyze_source_map
+
+        data = {
+            "version": 3,
+            "sources": ["src/config.ts"],
+            "sourcesContent": [
+                'initializeApp({apiKey:"AIzaSyBUnU3tt0IxrAby30X3vEincvF-DxmXnE4",authDomain:"x.firebaseapp.com"})'
+            ],
+        }
+        out = _analyze_source_map("https://app.example.com/main.js.map", data)
+        assert any(s["type"] == "google_api_key" for s in out["secrets"])
+
+    def test_jwt_analysis_uses_js_secrets_without_redownload(self, monkeypatch):
+        from core.recon import run_jwt_analysis
+        import base64
+        import json
+
+        def _b64(obj):
+            raw = json.dumps(obj, separators=(",", ":")).encode()
+            return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+        token = f"{_b64({'alg': 'none', 'typ': 'JWT'})}.{_b64({'sub': 'u1'})}.sig"
+        called = {"n": 0}
+
+        def _boom(*a, **k):
+            called["n"] += 1
+            raise AssertionError("jwt_analysis must not re-fetch JS")
+
+        monkeypatch.setattr("core.recon.http_get", _boom)
+        out = run_jwt_analysis([], [{
+            "url": "https://www.portoplus.com.br/static/js/main.js",
+            "secrets": [{"type": "jwt_token", "value": token, "severity": "high"}],
+        }])
+        assert called["n"] == 0
+        assert out["tokens_found"] == 1
+        assert any(f["type"] == "jwt_none_alg" for f in out["findings"])
+
+    def test_extract_skips_noise_hosts(self):
+        from core.pipeline import ReconRunner
+
+        runner = ReconRunner.__new__(ReconRunner)
+        runner.results = {
+            "c1:js": {
+                "data": {
+                    "js_files": [
+                        {
+                            "host": "cdn-prod.securiti.ai",
+                            "url": "https://cdn-prod.securiti.ai/x.js",
+                            "endpoints": [{"path": "/consent/x", "kind": "path"}],
+                            "secrets": [{"type": "google_api_key", "value": "AIzaSyBUnU3tt0IxrAby30X3vEincvF-DxmXnE4", "severity": "high"}],
+                        },
+                        {
+                            "host": "www.portoplus.com.br",
+                            "url": "https://www.portoplus.com.br/a.js",
+                            "endpoints": [{"path": "/api/v1/info", "kind": "api"}],
+                            "secrets": [{"type": "google_api_key", "value": "AIzaSyBUnU3tt0IxrAby30X3vEincvF-DxmXnE4", "severity": "medium"}],
+                        },
+                    ]
+                }
+            }
+        }
+        eps = ReconRunner._extract_js_endpoints_from_js_module(runner, "c1", [], [])
+        secs = ReconRunner._extract_js_secrets_from_js_module(runner, "c1", [], [])
+        assert eps["count"] == 1
+        assert eps["findings"][0]["host"] == "www.portoplus.com.br"
+        assert secs["count"] == 1
+        assert secs["findings"][0]["host"] == "www.portoplus.com.br"
+
+    def test_extract_skips_webpack_and_mime_paths(self):
+        from core.pipeline import ReconRunner
+
+        runner = ReconRunner.__new__(ReconRunner)
+        runner.results = {
+            "c1:js": {
+                "data": {
+                    "js_files": [
+                        {
+                            "host": "www.portoplus.com.br",
+                            "url": "https://www.portoplus.com.br/a.js",
+                            "endpoints": [
+                                {"path": "../constants", "kind": "path"},
+                                {"path": "application/json", "kind": "path"},
+                                {"path": "/api/v1/info", "kind": "api"},
+                            ],
+                            "secrets": [],
+                        }
+                    ]
+                }
+            }
+        }
+        eps = ReconRunner._extract_js_endpoints_from_js_module(runner, "c1", [], [])
+        assert eps["count"] == 1
+        assert eps["findings"][0]["value"] == "/api/v1/info"
+
+
+class TestJsPathNoise:
+    def test_noise_and_keep(self):
+        from core.recon import _js_path_is_noise
+
+        assert _js_path_is_noise("../constants")
+        assert _js_path_is_noise("./lib/adapters/http.js")
+        assert _js_path_is_noise("application/json")
+        assert _js_path_is_noise("text/plain")
+        assert _js_path_is_noise("dd/MM/yyyy")
+        assert _js_path_is_noise("America/Sao_Paulo")
+        assert _js_path_is_noise("firebase/firestore")
+        assert _js_path_is_noise("__bundle__/docs/")
+        assert not _js_path_is_noise("/api/v1/info")
+        assert not _js_path_is_noise("https://api.example.com/v1")
+        assert not _js_path_is_noise("api/auth?campaignId=")
+        assert not _js_path_is_noise("//cliente.portoseguro.com.br/x")
+
+
+class TestPersistFrontendSync:
+    def test_git_exposed_becomes_finding(self):
+        from core.pipeline import merge_persist_findings
+
+        out = merge_persist_findings({
+            "leaks_data": {
+                "git_exposed": [
+                    {"host": "git.example.com", "path": "/.git/HEAD", "severity": "critical", "snippet": "[core]"},
+                ]
+            }
+        })
+        assert len(out) == 1
+        assert out[0]["type"] == "git_exposed"
+        assert out[0]["module"] == "leaks"
+        assert out[0]["severity"] == "critical"
+        assert out[0]["host"] == "git.example.com"
+
+    def test_vendor_fingerprint_becomes_finding(self):
+        from core.pipeline import merge_persist_findings
+
+        out = merge_persist_findings({
+            "vendor_fingerprints": [
+                {"host": "vpn.example.com", "vendor": "Citrix", "url": "https://vpn.example.com/vpn/", "severity": "high", "cve_note": "check Citrix ADC"},
+            ]
+        })
+        assert len(out) == 1
+        assert out[0]["type"] == "vendor_fingerprint"
+        assert out[0]["module"] == "vendor_fp"
+        assert out[0]["value"] == "Citrix"
+
+    def test_does_not_duplicate_existing_key(self):
+        from core.pipeline import merge_persist_findings
+
+        existing = [{"key": "git-exposed-a.example-/.git/HEAD", "type": "git_exposed", "title": "already"}]
+        out = merge_persist_findings(
+            {"leaks_data": {"git_exposed": [{"host": "a.example", "path": "/.git/HEAD"}]}},
+            all_findings=existing,
+            existing_keys={"git-exposed-a.example-/.git/HEAD"},
+        )
+        assert len(out) == 1
+
+
+class TestAssetGraph:
+    @staticmethod
+    def _eval(expr: str):
+        import subprocess
+
+        js = ROOT / "static" / "js" / "asset-graph.js"
+        r = subprocess.run(
+            ["node", "-e", f"const g=require({json.dumps(str(js))}); {expr}"],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+        if r.returncode != 0:
+            raise AssertionError(r.stderr or r.stdout or "node failed")
+        return json.loads(r.stdout)
+
+    def test_apex_com_br_and_infra(self):
+        out = self._eval(
+            "console.log(JSON.stringify({"
+            "a:g.apexDomain('api.loja.portoseguro.com.br'),"
+            "b:g.apexDomain('catalogo.portoplus.com.br'),"
+            "c:g.clusterKey('ns-894.awsdns-47.net','ns'),"
+            "d:g.clusterKey('d2rx95bc40seqr.cloudfront.net','cdn'),"
+            "e:g.clusterKey('r9h3r9d.impervadns.net','cdn'),"
+            "f:g.clusterKey('45.223.41.75','ip')"
+            "}))"
+        )
+        assert out["a"] == "portoseguro.com.br"
+        assert out["b"] == "portoplus.com.br"
+        assert out["c"] == "aws-dns"
+        assert out["d"] == "cloudfront"
+        assert out["e"] == "imperva"
+        assert out["f"] == "ip"
+
+    def test_collapse_leaves_keeps_apex_and_supernode(self):
+        payload = {
+            "nodes": (
+                [{"id": "n:example.com", "label": "example.com", "kind": "host", "cluster": "example.com", "degree": 20}]
+                + [
+                    {
+                        "id": f"n:h{i}.example.com",
+                        "label": f"h{i}.example.com",
+                        "kind": "host",
+                        "cluster": "example.com",
+                        "degree": 15 - i,
+                    }
+                    for i in range(14)
+                ]
+            ),
+            "links": [
+                {"a": "n:example.com", "b": f"n:h{i}.example.com", "rel": "a"}
+                for i in range(14)
+            ],
+        }
+        out = self._eval(
+            "const p=" + json.dumps(payload) + ";"
+            "const r=g.collapseLeaves(p.nodes,p.links,{hostKeep:7,hostMin:9});"
+            "console.log(JSON.stringify({"
+            "n:r.nodes.length,"
+            "kinds:r.nodes.map(x=>x.kind),"
+            "super:(r.nodes.find(x=>x.kind==='cluster')||{}).label,"
+            "kept:r.nodes.filter(x=>x.kind==='host').length"
+            "}))"
+        )
+        assert out["kept"] == 7
+        assert "cluster" in out["kinds"]
+        assert out["super"].startswith("+")
+        assert out["n"] == 8
+
+    def test_build_model_clusters_porto_like(self):
+        hosts = [{"host": f"h{i}.portoseguro.com.br"} for i in range(20)]
+        hosts.append({"host": "portoseguro.com.br"})
+        graph = [{"from": "portoseguro.com.br", "rel": "a", "to": f"h{i}.portoseguro.com.br"} for i in range(20)]
+        graph.append({"from": "www.portoseguro.com.br", "rel": "cname", "to": "r9h3r9d.impervadns.net"})
+        co = {"hosts": hosts, "surface_intel": {"graph": graph, "records": [], "related": []}}
+        out = self._eval(
+            "const co=" + json.dumps(co) + ";"
+            "const m=g.buildGraphModel(co,{clustered:true});"
+            "console.log(JSON.stringify({"
+            "raw:m.rawNodeCount,"
+            "vis:m.nodes.length,"
+            "clusters:m.nodes.filter(n=>n.kind==='cluster').length"
+            "}))"
+        )
+        assert out["raw"] > out["vis"]
+        assert out["clusters"] >= 1
+        assert out["vis"] < 20
+
+    def test_query_pins_hidden_host(self):
+        hosts = [{"host": f"h{i}.example.com"} for i in range(20)]
+        hosts.append({"host": "example.com"})
+        hosts.append({"host": "loja-auth.example.com"})
+        graph = [{"from": "example.com", "rel": "cname", "to": f"h{i}.example.com"} for i in range(20)]
+        graph.append({"from": "example.com", "rel": "cname", "to": "loja-auth.example.com"})
+        co = {"hosts": hosts, "surface_intel": {"graph": graph, "records": [], "related": []}}
+        out = self._eval(
+            "const co=" + json.dumps(co) + ";"
+            "const a=g.buildGraphModel(co,{clustered:true});"
+            "const b=g.buildGraphModel(co,{clustered:true,query:'loja-auth'});"
+            "console.log(JSON.stringify({"
+            "aHas:a.nodes.some(n=>n.label==='loja-auth.example.com'),"
+            "bHas:b.nodes.some(n=>n.label==='loja-auth.example.com'),"
+            "aVis:a.nodes.length,bVis:b.nodes.length"
+            "}))"
+        )
+        assert out["aHas"] is False
+        assert out["bHas"] is True
+        assert out["bVis"] <= out["aVis"] + 2
+
+
+class TestOperationPersist:
+    @staticmethod
+    def _eval(expr: str):
+        import subprocess
+
+        js = ROOT / "static" / "js" / "operation-persist.js"
+        r = subprocess.run(
+            ["node", "-e", f"const g=require({json.dumps(str(js))}); {expr}"],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+        if r.returncode != 0:
+            raise AssertionError(r.stderr or r.stdout or "node failed")
+        return json.loads(r.stdout)
+
+    def test_screenshot_serve_url(self):
+        out = self._eval(
+            "console.log(JSON.stringify({"
+            "a:g.screenshotServeUrl('porto','/home/will/scantrely/scans/porto/screenshots/browser_https___www_portoplus_com_br.png'),"
+            "b:g.screenshotServeUrl('porto','/screenshots/porto/x.png'),"
+            "c:g.screenshotServeUrl('porto',''),"
+            "d:g.screenshotServeUrl('porto','screenshots/https---auth.catalogo.portoplus.com.br-443.jpeg'),"
+            "e:g.screenshotServeUrl('porto','/screenshots/https---auth.catalogo.portoplus.com.br-443.jpeg'),"
+            "f:g.screenshotServeUrl('porto','https---auth.catalogo.portoplus.com.br-443.jpeg'),"
+            "g:g.screenshotServeUrl('porto','screenshots/porto/screenshot/host/hash.png'),"
+            "h:g.screenshotServeUrl('porto','/home/will/scantrely/scans/porto/screenshots/screenshot/host/hash.png')"
+            "}))"
+        )
+        assert out["a"] == "/screenshots/porto/browser_https___www_portoplus_com_br.png"
+        assert out["b"] == "/screenshots/porto/x.png"
+        assert out["c"] == ""
+        assert out["d"] == "/screenshots/porto/https---auth.catalogo.portoplus.com.br-443.jpeg"
+        assert out["e"] == "/screenshots/porto/https---auth.catalogo.portoplus.com.br-443.jpeg"
+        assert out["f"] == "/screenshots/porto/https---auth.catalogo.portoplus.com.br-443.jpeg"
+        assert out["g"] == "/screenshots/porto/screenshot/host/hash.png"
+        assert out["h"] == "/screenshots/porto/screenshot/host/hash.png"
+
+    def test_summarize_reads_pipeline_persist(self):
+        co = {
+            "id": "porto",
+            "screenshots_count": 3,
+            "browser_recon_data": {
+                "hosts_scanned": 2,
+                "insecure_cookies": 1,
+                "total_cookies": 2,
+                "results": [
+                    {
+                        "url": "https://www.example.com",
+                        "status": 200,
+                        "title": "Home",
+                        "api_endpoints": [{"method": "GET", "url": "https://api.example.com/v1"}],
+                        "cookies": [{"name": "sid", "domain": ".example.com", "httpOnly": True, "secure": True, "value": "secret"}],
+                        "observations": ["Custom globals: Array", "Missing CSP"],
+                        "third_party_services": ["Google Tag Manager", "AbCdEfGhIj"],
+                        "security_headers": {"missing": ["content-security-policy"]},
+                    }
+                ],
+            },
+            "browser_crawl_data": {
+                "url_count": 4,
+                "hosts_crawled": 1,
+                "api_endpoints": [{"method": "POST", "url": "https://api.example.com/v1"}],
+                "results": [{"host": "www.example.com", "url": "https://www.example.com", "pages": 2, "urls": ["https://www.example.com/a"], "api_endpoints": [], "forms": [{"action": "/Login", "method": "post", "inputs": ["user"]}]}],
+            },
+            "js_data": {
+                "runtime_js_urls": ["https://www.example.com/app.js"],
+                "runtime_network": [{"method": "GET", "type": "xhr", "url": "https://api.example.com/v1"}],
+                "js_files": [{"url": "https://www.example.com/app.js"}],
+            },
+        }
+        out = self._eval(
+            "const co=" + json.dumps(co) + ";"
+            "const s=g.summarize(co);"
+            "console.log(JSON.stringify({"
+            "has:s.has,pages:s.pages.length,apis:s.apiCount,urls:s.urlCount,"
+            "obs:s.observations.map(o=>o.text),third:s.third,"
+            "cookieNames:s.cookies.map(c=>c.name),cookieHasValue:s.cookies.some(c=>'value' in c && c.value),"
+            "forms:s.formCount,badge:s.badge"
+            "}))"
+        )
+        assert out["has"] is True
+        assert out["pages"] == 1
+        assert out["apis"] == 2
+        assert out["urls"] == 4
+        assert out["obs"] == ["Missing CSP"]
+        assert out["third"] == ["Google Tag Manager"]
+        assert out["cookieNames"] == ["sid"]
+        assert out["cookieHasValue"] is False
+        assert out["forms"] == 1
+        assert out["badge"] >= 1
+
+    def test_empty_company_has_false(self):
+        out = self._eval("console.log(JSON.stringify(g.summarize({}).has))")
+        assert out is False
+
+    def test_operation_tab_no_longer_gates_on_playwright_job(self):
+        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        start = js.index("function _opT(")
+        end = js.index("async function renderReconTab")
+        body = js[start:end]
+        assert "_opSummarize" in body
+        assert "No Playwright run found" not in body
+        assert "openPlaywrightModal" in body
+        assert "_renderOperationPersistCards" in body
+
+
+class TestOriginLink:
+    @staticmethod
+    def _eval(expr: str):
+        import subprocess
+
+        js = ROOT / "static" / "js" / "origin-link.js"
+        r = subprocess.run(
+            ["node", "-e", f"const g=require({json.dumps(str(js))}); {expr}"],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+        if r.returncode != 0:
+            raise AssertionError(r.stderr or r.stdout or "node failed")
+        return json.loads(r.stdout)
+
+    def test_origin_href_https_passthrough(self):
+        out = self._eval(
+            "console.log(JSON.stringify(g.originHref('https://www.portoplus.com.br/app.js')))"
+        )
+        assert out == "https://www.portoplus.com.br/app.js"
+
+    def test_origin_href_relative_and_host(self):
+        out = self._eval(
+            "console.log(JSON.stringify({"
+            "a:g.originHref('/api/v1','www.example.com'),"
+            "b:g.originHref('','loja.portoseguro.com.br'),"
+            "c:g.originHref('.example.com'),"
+            "d:g.originHref('javascript:alert(1)'),"
+            "e:g.originHref('data:text/html,x'),"
+            "f:g.originHref('/home/will/secret.js','www.example.com'),"
+            "g:g.originHref('bundle.js','cdn.example.com')"
+            "}))"
+        )
+        assert out["a"] == "https://www.example.com/api/v1"
+        assert out["b"] == "https://loja.portoseguro.com.br"
+        assert out["c"] == "https://example.com"
+        assert out["d"] == ""
+        assert out["e"] == ""
+        assert out["f"] == ""
+        assert out["g"] == "https://cdn.example.com/bundle.js"
+
+    def test_origin_href_collapses_dotdot(self):
+        out = self._eval(
+            "console.log(JSON.stringify({"
+            "a:g.originHref('../../components/LoginComponents/styles','experiencias.portoplus.com.br'),"
+            "b:g.originHref('../constants','https://cdn.example.com/static/js/a.js'),"
+            "c:g.originHref('application/json','www.example.com'),"
+            "d:g.originHref('text/plain','www.example.com'),"
+            "e:g.originHref('dd/MM/yyyy','www.example.com'),"
+            "f:g.originHref('//cliente.portoseguro.com.br/x')"
+            "}))"
+        )
+        assert out["a"] == "https://experiencias.portoplus.com.br/components/LoginComponents/styles"
+        assert ".." not in out["a"]
+        assert out["b"] == "https://cdn.example.com/static/constants"
+        assert out["c"] == ""
+        assert out["d"] == ""
+        assert out["e"] == ""
+        assert out["f"] == "https://cliente.portoseguro.com.br/x"
+
+    def test_js_path_noise(self):
+        out = self._eval(
+            "console.log(JSON.stringify({"
+            "a:g.isJsPathNoise('../constants'),"
+            "b:g.isJsPathNoise('./lib/adapters/http.js'),"
+            "c:g.isJsPathNoise('application/json'),"
+            "d:g.isJsPathNoise('MM/dd/yyyy'),"
+            "e:g.isJsPathNoise('America/Sao_Paulo'),"
+            "f:g.isJsPathNoise('/api/v1/info'),"
+            "g:g.isJsPathNoise('https://api.example.com/v1'),"
+            "h:g.isJsPathNoise('api/auth?campaignId='),"
+            "i:g.isJsPathNoise('firebase/firestore')"
+            "}))"
+        )
+        assert out["a"] is True
+        assert out["b"] is True
+        assert out["c"] is True
+        assert out["d"] is True
+        assert out["e"] is True
+        assert out["f"] is False
+        assert out["g"] is False
+        assert out["h"] is False
+        assert out["i"] is True
+
+    def test_origin_link_html_is_anchor(self):
+        html = self._eval(
+            "console.log(JSON.stringify(g.originLinkHtml('https://api.example.com/v1','/v1')))"
+        )
+        assert html.startswith("<a ")
+        assert 'href="https://api.example.com/v1"' in html
+        assert 'target="_blank"' in html
+        assert "noopener" in html
+        assert html.endswith("</a>")
+        assert "javascript:" not in html
+
+    def test_dashboard_opens_origin_instead_of_copy(self):
+        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        assert "function originLinkHtml" in js
+        assert "function jumpToFound" in js
+        assert "Click to copy URL" not in js
+        assert "Click file path to copy" not in js
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        assert "origin-link.js" in html
+        assert "dashboard.js?v=81" in html
+        assert "operation-persist.js?v=2" in html
+        assert "function isJsPathNoise" in js
+        assert 'id="endpoints-secrets"' in js
+        assert "_isFpJsSecret" in js
+        assert "function _shotSrc" in js
+        assert "'/' + h.screenshot" not in js
+        assert '"/" + p.screenshot_path' not in js
+
+    def test_hosts_inventory_on_visible_subdomains_shell(self):
+        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        css = (ROOT / "static" / "css" / "dashboard.css").read_text(encoding="utf-8")
+        i18n = (ROOT / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
+        start = js.index("function _renderSubInventoryShell")
+        end = js.index("function _assetStatusSummary")
+        body = js[start:end]
+        assert 'id="playwright-host-inventory"' in body
+        assert "renderPlaywrightHostInventoryTab(co)" in body
+        assert "ssLightboxOpen" in js
+        assert "_ssOnKey" in js
+        assert "⧉" not in js
+        assert "hostPanel = \"subdomains\"" in js
+        assert "dashboard.js?v=81" in html
+        assert "dashboard.css?v=35" in html
+        assert "i18n.js?v=21" in html
+        assert "exposure.js?v=3" in html
+        assert "Prévia do screenshot" in html
+        assert "← Prev" not in html
+        assert ".ai-shot-btn" in css
+        assert "min-width:var(--target)" in css
+        assert "ai_open_shot" in i18n
+        assert "ss_preview" in i18n
+        assert "op_details" in i18n
+
+    def test_exposure_and_hosts_badge_semantics(self):
+        exp = (ROOT / "static" / "js" / "exposure.js").read_text(encoding="utf-8")
+        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        i18n = (ROOT / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
+        assert "function exposureCount" in exp
+        assert "hr.users || 0) + Number(hr.stealer_count" not in exp
+        assert "window.ASMExposure" in exp
+        assert "ASMExposure.count" in js
+        assert "hrStored.employees||0) + Number(hrStored.users" not in js
+        assert "hosts:      ['subdomains']" in js
+        assert "filter(_isActiveHost)" in js
+        assert "Scan execution and live phase status" not in js
+        assert "Run Pipeline" not in js
+        assert "Stop Pipeline" not in js
+        assert 'pipe_title' in i18n
+        assert "dashboard.js?v=81" in html
+        assert "exposure.js?v=3" in html
+        assert "_setIconLabel(btn, active ? \"stop\" : \"play\", label)" in js or "_setIconLabel(btn, active ? 'stop' : 'play', label)" in js
+
+    def test_recon_screenshots_copy_is_localized(self):
+        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        i18n = (ROOT / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
+        start = js.index("function loadScreenshots")
+        end = js.index("function renderPlaywrightOverview")
+        body = js[start:end]
+        panel = js[js.index("function _renderReconEvidencePanel"):js.index("function _ssShow")]
+        assert "Recon evidence and attack surface leads" not in js
+        assert "Loading recon data" not in js
+        assert "Crawled URLs (" not in body
+        assert "Pages visited by the integrated browser recon phase" not in js
+        assert "Filter endpoints..." not in js
+        assert "Filter secrets..." not in js
+        assert "Filter findings..." not in js
+        assert "No crawled pages yet" not in js
+        assert "No endpoints discovered yet" not in js
+        assert "No secrets or hardcoded keys found" not in js
+        assert "No Postman collections found" not in js
+        assert "Vulnerability Findings (" not in js
+        assert "Playwright Findings (" not in js
+        assert "more endpoints — use filter" not in js
+        assert 'section-kicker">Coverage' not in js
+        assert "_opT(\"recon_title\"" in body or "_opT('recon_title'" in body
+        assert 'aria-busy' in body
+        assert 'role="status"' in body
+        assert "recon_title" in i18n
+        assert "recon_loading" in i18n
+        assert "recon_crawled_empty" in i18n
+        assert "_opT(\"recon_cov_kicker\"" in panel or "_opT('recon_cov_kicker'" in panel
+        assert "s.value||'').slice(0,40)" not in body
+        assert "dashboard.js?v=81" in html
+        assert "i18n.js?v=21" in html
+
+    def test_confirmed_vulns_copy_is_localized(self):
+        js = (ROOT / "static" / "js" / "dashboard.js").read_text(encoding="utf-8")
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        i18n = (ROOT / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
+        start = js.index("async function renderVulnsTab")
+        end = js.index("function exportHosts")
+        body = js[start:end]
+        assert "Loading vulnerability data" not in js
+        assert "Confirmed vulnerability findings only" not in js
+        assert "Confirmed Vulnerabilities" not in body
+        assert "Search confirmed vulns" not in js
+        assert "No confirmed vulns match" not in js
+        assert "No confirmed vulnerabilities yet" not in js
+        assert "All severities" not in body
+        assert "All categories" not in body
+        assert "No CORS misconfigurations found" not in js
+        assert "No GraphQL endpoints detected" not in js
+        assert "No nuclei findings detected" not in js
+        assert "No takeover candidates detected" not in js
+        assert "CORS Misconfigurations" not in js
+        assert "Takeover Candidates" not in js
+        assert "_opT(\"vuln_title\"" in body or "_opT('vuln_title'" in body
+        assert "aria-busy" in body
+        assert 'role="status"' in body
+        assert 'critical: "Critical"' not in js
+        assert "unique issues" not in js
+        assert "vuln_title" in i18n
+        assert "vuln_loading" in i18n
+        assert "vuln_cnt" in i18n
+        assert "dashboard.js?v=81" in html
+        assert "i18n.js?v=21" in html

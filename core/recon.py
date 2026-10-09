@@ -4885,6 +4885,11 @@ _JS_SECRET_PATTERNS = [
     (r'(?i)firebase[^\n]{0,40}https://[a-zA-Z0-9\-]+\.firebaseio\.com',                     "firebase_url",      "high"),
     (r'ghp_[A-Za-z0-9]{36}',                                                                "github_token",      "critical"),
     (r'ghs_[A-Za-z0-9]{36}',                                                                "github_app_token",  "critical"),
+    (r'github_pat_[A-Za-z0-9_]{20,}',                                                       "github_pat",        "critical"),
+    (r'xox[baprs]-[A-Za-z0-9-]{10,}',                                                       "slack_token",       "critical"),
+    (r'sk-proj-[A-Za-z0-9_-]{20,}',                                                         "openai_key",        "critical"),
+    (r'sk-ant-[A-Za-z0-9_-]{20,}',                                                          "anthropic_key",     "critical"),
+    (r'npm_[A-Za-z0-9]{36}',                                                                "npm_token",         "high"),
     (r'sk_live_[A-Za-z0-9]{24,}',                                                           "stripe_live_key",   "critical"),
     (r'sk_test_[A-Za-z0-9]{24,}',                                                           "stripe_test_key",   "high"),
     (r'SG\.[A-Za-z0-9\-_]{22}\.[A-Za-z0-9\-_]{43}',                                        "sendgrid_key",      "critical"),
@@ -5132,24 +5137,77 @@ def _validate_secret(stype: str, value: str) -> bool:
     return True
 
 
-# Third-party CDN / library hosts whose JS is public and never contains real secrets
+# Third-party CDN / library hosts whose JS is public and never contains real secrets.
+# Matching is exact host or subdomain suffix via _js_host_is_noise.
 _JS_NOISE_HOSTS = frozenset({
-    "aadcdn.msauth.net", "aadcdn.msftauth.net",        # Microsoft MSAL
+    "aadcdn.msauth.net", "aadcdn.msftauth.net", "msauth.net", "msftauth.net",
     "js.live.net", "logincdn.msauth.net",
-    "ok1static.oktacdn.com", "cdn.auth0.com",          # Okta / Auth0
-    "use.fontawesome.com", "kit.fontawesome.com",
-    "cdn.jsdelivr.net", "cdnjs.cloudflare.com",
-    "unpkg.com", "ajax.googleapis.com",
-    "static.hotjar.com", "script.hotjar.com",
-    "cdn.segment.com", "cdn.segment.io",
-    "js.intercomcdn.com", "widget.intercom.io",
-    "cdn.newrelic.com", "js-agent.newrelic.com",
-    "browser.sentry-cdn.com", "cdn.ravenjs.com",
-    "www.google-analytics.com", "www.googletagmanager.com",
-    "www.google.com", "www.gstatic.com",
-    "snap.licdn.com", "connect.facebook.net",
-    "platform.twitter.com", "assets.zendesk.com",
+    "oktacdn.com", "okta.com", "auth0.com",
+    "fontawesome.com",
+    "jsdelivr.net", "cdnjs.cloudflare.com", "unpkg.com",
+    "googleapis.com", "gstatic.com", "google.com", "google-analytics.com",
+    "googletagmanager.com", "recaptcha.net", "doubleclick.net",
+    "googlesyndication.com",
+    "hotjar.com", "segment.com", "segment.io",
+    "intercomcdn.com", "intercom.io",
+    "newrelic.com", "sentry-cdn.com", "ravenjs.com",
+    "facebook.net", "facebook.com", "twitter.com", "licdn.com", "linkedin.com",
+    "zendesk.com",
+    "clarity.ms", "securiti.ai",
+    "cookiebot.com", "onetrust.com", "cookielaw.org",
+    "cloudflareinsights.com",
 })
+_JS_WAF_HOSTS = frozenset({
+    "imperva.com", "incapsula.com", "reblaze.com", "datadome.co",
+})
+
+
+def _js_host_is_noise(host: str) -> bool:
+    """True when the JS is served from a public CDN/WAF/analytics host."""
+    h = (host or "").lower().rstrip(".")
+    if not h:
+        return False
+    for n in _JS_NOISE_HOSTS | _JS_WAF_HOSTS:
+        if h == n or h.endswith("." + n):
+            return True
+    return False
+
+
+_JS_PATH_MIME_RE = re.compile(
+    r"^(text|application|image|audio|video|font|multipart)/[a-z0-9.+-]+$", re.I
+)
+_JS_PATH_DATE_RE = re.compile(
+    r"^(?:MM|dd|yyyy|yy|HH|mm|ss|\d{2,4}|9{2,4})[/\-.](?:MM|dd|yyyy|yy|HH|mm|ss|\d{2,4}|9{2,4})",
+    re.I,
+)
+_JS_PATH_TZ_RE = re.compile(r"^[A-Z][a-zA-Z]+/[A-Z][a-zA-Z_]+$")
+_JS_PATH_SDK_RE = re.compile(
+    r"^(firebase|react|rxjs|vue|angular|@angular|@babel|core-js|lodash)/"
+)
+
+
+def _js_path_is_noise(path: str) -> bool:
+    """True for webpack imports, MIME types, date masks — not live HTTP endpoints."""
+    s = (path or "").strip()
+    if not s:
+        return True
+    if s.startswith(("http://", "https://")) or (s.startswith("//") and len(s) > 3 and s[2] != "/"):
+        return False
+    if s.startswith("/") and not s.startswith("//"):
+        return False
+    if _JS_PATH_MIME_RE.match(s):
+        return True
+    if _JS_PATH_DATE_RE.match(s):
+        return True
+    if _JS_PATH_TZ_RE.match(s):
+        return True
+    if "__bundle__" in s:
+        return True
+    if _JS_PATH_SDK_RE.match(s):
+        return True
+    if s.startswith(("./", "../", "..")) or "/../" in s or "/./" in s:
+        return True
+    return False
 
 
 def _analyze_js_content(js_url: str, content: str) -> dict:
@@ -5161,8 +5219,8 @@ def _analyze_js_content(js_url: str, content: str) -> dict:
     except Exception:
         pass
 
-    # Skip well-known third-party library hosts Ã¢â‚¬â€ they never contain real secrets
-    if host in _JS_NOISE_HOSTS:
+    # Skip well-known third-party library hosts — they never contain real secrets
+    if _js_host_is_noise(host):
         return {"secrets": [], "endpoints": [], "urls": [], "interesting": []}
 
     secrets  = []
@@ -5177,16 +5235,30 @@ def _analyze_js_content(js_url: str, content: str) -> dict:
             key = (ptype, val[:60])
             if key not in seen_sec:
                 seen_sec.add(key)
+                item_sev = sev
                 # Get surrounding context (1 line)
                 start = max(0, m.start() - 80)
                 end   = min(len(content), m.end() + 40)
                 ctx   = content[start:end].replace("\n", " ").replace("\r", "").strip()[:200]
                 if ptype in ("jwt_token", "jwt_bearer"):
                     jwt_val = val.split()[-1] if ptype == "jwt_bearer" else val
-                    sev, note = _jwt_finding_detail(jwt_val, sev)
+                    item_sev, note = _jwt_finding_detail(jwt_val, item_sev)
                     if note:
                         ctx = f"{ctx} | {note}"
-                secrets.append({"type": ptype, "value": val, "context": ctx, "severity": sev})
+                if ptype == "google_api_key" and re.search(
+                    r"initializeApp|firebaseio|maps/api|maps/embed|googleMapsApiKey|authDomain",
+                    ctx, re.I,
+                ):
+                    item_sev = "medium"
+                    ctx = f"{ctx} | client-side Firebase/Maps key (often referrer-restricted)"
+                secrets.append({"type": ptype, "value": val, "context": ctx, "severity": item_sev})
+
+    secret_types = {s["type"] for s in secrets}
+    if "client_id" in secret_types and "client_secret" in secret_types:
+        for s in secrets:
+            if s["type"] in ("client_id", "client_secret", "consumer_key", "consumer_secret"):
+                s["severity"] = "critical"
+                s["note"] = "API gateway credential pair (client_id + client_secret co-located)"
 
     # Endpoints / paths
     endpoints = []
@@ -5199,6 +5271,8 @@ def _analyze_js_content(js_url: str, content: str) -> dict:
         if re.search(r'\.(png|jpg|gif|svg|ico|woff|ttf|eot|css|less|scss)$', path, re.I):
             continue
         if not re.search(r'[/?]', path):
+            continue
+        if _js_path_is_noise(path):
             continue
         seen_ep.add(path)
         # Classify by type
@@ -5248,6 +5322,26 @@ def _analyze_js_content(js_url: str, content: str) -> dict:
         "urls":        urls[:200],
         "interesting": interesting,
     }
+
+
+def _analyze_source_map(map_url: str, data: dict) -> dict:
+    """Run secret/endpoint analysis on a webpack/vite source map's original sources."""
+    empty = {"secrets": [], "endpoints": [], "urls": [], "interesting": []}
+    chunks = data.get("sourcesContent") if isinstance(data, dict) else None
+    if not isinstance(chunks, list):
+        return empty
+    parts: list[str] = []
+    total = 0
+    for c in chunks:
+        if not isinstance(c, str) or len(c) < 40:
+            continue
+        parts.append(c)
+        total += len(c)
+        if total >= 800_000:
+            break
+    if not parts:
+        return empty
+    return _analyze_js_content(map_url, "\n".join(parts)[:800_000])
 
 
 def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
@@ -5402,19 +5496,22 @@ def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
                 except Exception:
                     pass
 
-                # Fetch JS bodies via the browser's own fetch() Ã¢â‚¬â€ bypasses WAF/Imperva
+                # Fetch JS bodies via the browser's own fetch() — bypasses WAF/Imperva
                 # because the request originates from the already-authenticated browser session.
                 # Cap at 25 files; skip noise/CDN hosts; limit to 1.5MB per file.
-                _noise_hosts_re = re.compile(
-                    r'google-analytics\.com|googletagmanager\.com|hotjar\.|'
-                    r'segment\.|newrelic\.|datadoghq\.|doubleclick\.|'
-                    r'facebook\.com|twitter\.com|imperva\.com|incapsula\.com',
-                    re.I,
-                )
-                candidate_urls = [
-                    u for u in list(host_js)
-                    if not _noise_hosts_re.search(u) and not _is_bot_challenge(u)
-                ][:25]
+                from urllib.parse import urlparse as _pw_parse
+                candidate_urls = []
+                for u in list(host_js):
+                    if _is_bot_challenge(u):
+                        continue
+                    try:
+                        if _js_host_is_noise(_pw_parse(u).hostname or ""):
+                            continue
+                    except Exception:
+                        continue
+                    candidate_urls.append(u)
+                    if len(candidate_urls) >= 25:
+                        break
 
                 for js_url in candidate_urls:
                     try:
@@ -5644,23 +5741,29 @@ def run_js_recon(domains: list, hosts: list) -> dict:
     total_secrets   = 0
     total_endpoints = 0
     sev_counts      = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    stats           = {"noise": 0, "fail": 0}
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    # Skip CDN/noise hosts and Imperva-proxied origins at the URL level
-    _SKIP_JS_HOSTS = _JS_NOISE_HOSTS | frozenset({
-        "imperva.com", "incapsula.com", "reblaze.com", "datadome.co",
-    })
+    def _accept_js_file(result: dict) -> None:
+        nonlocal total_secrets, total_endpoints
+        js_files.append(result)
+        total_secrets   += len(result.get("secrets") or [])
+        total_endpoints += len(result.get("endpoints") or [])
+        for s in result.get("secrets") or []:
+            sev = s.get("severity", "low")
+            sev_counts[sev] = sev_counts.get(sev, 0) + 1
 
     def _fetch_and_analyze(url: str) -> dict | None:
         try:
             from urllib.parse import urlparse
             host = urlparse(url).hostname or ""
-            if host in _SKIP_JS_HOSTS:
+            if _js_host_is_noise(host):
+                stats["noise"] += 1
                 return None
-            # Use a short per-request timeout; skip retries to avoid long stalls
             status, raw, hdrs = http_get(url, timeout=8, retries=1)
             if status != 200 or not raw:
+                stats["fail"] += 1
                 return None
             size    = len(raw)
             content = raw[:800_000].decode("utf-8", errors="ignore")
@@ -5676,12 +5779,16 @@ def run_js_recon(domains: list, hosts: list) -> dict:
                 "interesting": analysis["interesting"],
             }
         except Exception:
+            stats["fail"] += 1
             return None
 
     # Cap at 200 files; prioritise first-party domains over third-party CDNs
     _domain_keywords = [d.split(".")[-2] for d in domains if "." in d] or []
     def _js_priority(u: str) -> int:
         return 0 if any(kw in u for kw in _domain_keywords) else 1
+    def _is_first_party_host(host: str) -> bool:
+        h = (host or "").lower()
+        return any(kw and kw in h for kw in _domain_keywords)
 
     capped_list = sorted(js_url_list, key=_js_priority)[:200]
 
@@ -5692,53 +5799,35 @@ def run_js_recon(domains: list, hosts: list) -> dict:
             for fut in as_completed(futures, timeout=240):
                 result = fut.result()
                 if result:
-                    js_files.append(result)
-                    total_secrets   += len(result["secrets"])
-                    total_endpoints += len(result["endpoints"])
-                    for s in result["secrets"]:
-                        sev_counts[s.get("severity", "low")] = sev_counts.get(s.get("severity", "low"), 0) + 1
+                    _accept_js_file(result)
         except TimeoutError:
-            pass  # some fetches didn't finish Ã¢â‚¬â€ that's fine, proceed with what we have
+            pass  # some fetches didn't finish — proceed with what we have
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Playwright-captured JS bodies Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    # These were fetched by the browser itself (with session cookies, correct
-    # headers) so they bypass Imperva WAF that blocks direct HTTP fetches.
-    # Analyse them for secrets Ã¢â‚¬â€ primarily Sensedia/API-gateway credentials.
-    _seen_pw_urls = {f["url"] for f in js_files}  # don't re-analyse already-fetched files
+    # Playwright-captured JS bodies (browser fetch bypasses WAF that blocks direct HTTP).
+    _seen_pw_urls = {f["url"] for f in js_files}
     for pw_js_url, pw_content in playwright_js_bodies.items():
         if pw_js_url in _seen_pw_urls:
             continue
         try:
             from urllib.parse import urlparse as _urlparse
             pw_host = _urlparse(pw_js_url).hostname or ""
+            if _js_host_is_noise(pw_host):
+                stats["noise"] += 1
+                continue
             analysis = _analyze_js_content(pw_js_url, pw_content[:800_000])
-
-            # Sensedia pair escalation: client_id + client_secret in same file Ã¢â€ â€™ critical
-            _secret_types = {s["type"] for s in analysis["secrets"]}
-            if "client_id" in _secret_types and "client_secret" in _secret_types:
-                for s in analysis["secrets"]:
-                    if s["type"] in ("client_id", "client_secret", "consumer_key", "consumer_secret"):
-                        s["severity"] = "critical"
-                        s["note"] = "API gateway credential pair (client_id + client_secret co-located)"
-
-            if analysis["secrets"] or analysis["endpoints"]:
-                file_result = {
+            keep = bool(analysis["secrets"] or analysis["endpoints"] or _is_first_party_host(pw_host))
+            if keep:
+                _accept_js_file({
                     "url":         pw_js_url,
                     "host":        pw_host,
                     "size":        len(pw_content),
                     "status":      200,
-                    "source":      "playwright",  # distinguishes browser-captured from direct-fetch
+                    "source":      "playwright",
                     "secrets":     analysis["secrets"],
                     "endpoints":   analysis["endpoints"],
                     "urls":        analysis["urls"],
                     "interesting": analysis["interesting"],
-                }
-                js_files.append(file_result)
-                total_secrets   += len(analysis["secrets"])
-                total_endpoints += len(analysis["endpoints"])
-                for s in analysis["secrets"]:
-                    sev = s.get("severity", "low")
-                    sev_counts[sev] = sev_counts.get(sev, 0) + 1
+                })
                 _seen_pw_urls.add(pw_js_url)
         except Exception:
             pass
@@ -5750,25 +5839,46 @@ def run_js_recon(domains: list, hosts: list) -> dict:
         return (best, -len(f["secrets"]))
     js_files.sort(key=_sort_key)
 
-    # Ã¢â€â‚¬Ã¢â€â‚¬ Source map discovery Ã¢â‚¬â€ probe .js.map for every discovered .js file Ã¢â€â‚¬Ã¢â€â‚¬
+    # Source map discovery — probe .js.map and analyse original sourcesContent
     source_maps = []
     source_map_urls = set()
-    for f in js_files:
-        map_url = f["url"].rstrip("/") + ".map"
-        if map_url not in source_map_urls:
-            try:
-                sc, raw, _ = http_get(map_url, timeout=4, retries=1)
-                if sc == 200 and len(raw) > 100:
-                    try:
-                        data = json.loads(raw.decode("utf-8", "ignore"))
-                        if isinstance(data, dict) and "sources" in data:
-                            source_maps.append({"url": map_url, "sources_count": len(data.get("sources", [])),
-                                                "file": f["url"]})
-                            source_map_urls.add(map_url)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+    for f in list(js_files):
+        if f.get("source") == "sourcemap" or _js_host_is_noise(f.get("host") or ""):
+            continue
+        base_url = f["url"].rstrip("/")
+        if base_url.endswith(".map"):
+            continue
+        map_url = base_url + ".map"
+        if map_url in source_map_urls:
+            continue
+        try:
+            sc, raw, _ = http_get(map_url, timeout=4, retries=1)
+            if sc == 200 and len(raw) > 100:
+                try:
+                    data = json.loads(raw.decode("utf-8", "ignore"))
+                    if isinstance(data, dict) and "sources" in data:
+                        source_maps.append({"url": map_url, "sources_count": len(data.get("sources", [])),
+                                            "file": f["url"]})
+                        source_map_urls.add(map_url)
+                        sm_analysis = _analyze_source_map(map_url, data)
+                        if sm_analysis["secrets"] or sm_analysis["endpoints"]:
+                            from urllib.parse import urlparse as _sm_parse
+                            _accept_js_file({
+                                "url":         map_url,
+                                "host":        _sm_parse(map_url).hostname or f.get("host") or "",
+                                "size":        len(raw),
+                                "status":      200,
+                                "source":      "sourcemap",
+                                "secrets":     sm_analysis["secrets"],
+                                "endpoints":   sm_analysis["endpoints"],
+                                "urls":        sm_analysis["urls"],
+                                "interesting": sm_analysis["interesting"],
+                                "sources_count": len(data.get("sources") or []),
+                            })
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     # Flatten all XHR/fetch calls from Playwright into a deduplicated list
     all_network_calls: list = []
@@ -5784,6 +5894,8 @@ def run_js_recon(domains: list, hosts: list) -> dict:
         "js_files":           js_files,
         "js_files_found":     len(js_url_list),
         "js_analyzed":        len(js_files),
+        "js_skipped_noise":   stats["noise"],
+        "js_fetch_failed":    stats["fail"],
         "source_maps":        source_maps,
         "source_maps_count":  len(source_maps),
         "total_secrets":      total_secrets,
@@ -10671,23 +10783,28 @@ def run_salesforce_recon(hosts: list, domains: list = None) -> dict:
 
 
 def run_jwt_analysis(hosts: list, js_files: list = None) -> dict:
-    """Analyze JWT tokens found in JS files for weaknesses using jwt_tool."""
+    """Analyze JWT tokens already extracted from the js module (no re-download)."""
     findings = []
-    jwt_bin = shutil.which("jwt_tool")
     tokens = set()
 
-    # Extract JWTs from JS files
     if js_files:
-        for jf in js_files[:30]:
+        for jf in js_files:
+            if not isinstance(jf, dict):
+                continue
             try:
+                for s in jf.get("secrets") or []:
+                    if not isinstance(s, dict):
+                        continue
+                    if s.get("type") not in ("jwt_token", "jwt_bearer"):
+                        continue
+                    raw = str(s.get("value") or "").strip()
+                    tok = raw.split()[-1] if " " in raw else raw
+                    if tok.startswith("eyJ") and tok.count(".") == 2:
+                        tokens.add(tok)
                 content = jf.get("content", "") or ""
-                if not content and jf.get("url"):
-                    status, body, _ = http_get(jf["url"], timeout=8, retries=1)
-                    if status == 200:
-                        content = body or ""
-                # Find JWT patterns
-                for match in re.finditer(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", content):
-                    tokens.add(match.group(0))
+                if content:
+                    for match in re.finditer(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", content):
+                        tokens.add(match.group(0))
             except Exception:
                 pass
 

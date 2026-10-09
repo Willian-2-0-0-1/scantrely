@@ -65,7 +65,13 @@
 
   function exposureCount(hr) {
     if (!hr || hr.error) return 0;
-    return Number(hr.employees || 0) + Number(hr.users || 0) + Number(hr.stealer_count || 0);
+    if (hr.kind === "email" || Array.isArray(hr.stealers)) {
+      var stealers = Array.isArray(hr.stealers) ? hr.stealers.length : 0;
+      return Number(hr.stealer_count || 0) || stealers;
+    }
+    var emp = Number(hr.employees || 0);
+    if (emp > 0) return emp;
+    return Number(hr.users || 0);
   }
 
   function emptyHtml(title, body, hint) {
@@ -391,4 +397,6 @@
       '<span class="exp-teaser-v">' + fmtN(hr.employees || 0) + " " + esc(t("exp_kpi_employees", "Funcionários")) +
       " · " + fmtN(hr.users || 0) + " " + esc(t("exp_kpi_users", "Usuários")) + "</span></button>";
   };
+
+  window.ASMExposure = { count: exposureCount, hudsonFrom: hudsonFrom };
 })();

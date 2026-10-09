@@ -97,13 +97,11 @@ go install github.com/projectdiscovery/cloudlist/cmd/cloudlist@latest
 
 | Module | Tool | Purpose |
 |--------|------|---------|
-| `js` | katana + subjs + getJS + gau | Discover JS + scan for secrets/endpoints |
-| `js_endpoints` | linkfinder (MISSING) | Extract endpoints from JS |
-| `js_secrets` | secretfinder (MISSING) | Extract secrets from JS |
+| `js` | katana + subjs + getJS + gau + Playwright + regex (LinkFinder-style) | Discover JS, capture runtime, scan secrets/endpoints, probe `.js.map` |
+| `js_endpoints` | flatten from `js` (`js_module_extract`) | Persist endpoint findings for the URL inventory |
+| `js_secrets` | flatten from `js` (`js_module_extract`) | Persist secret findings into `secrets_findings` |
 
-**Decision needed:** `js` already does what `js_endpoints` and `js_secrets` do — it discovers JS files, scans for endpoints AND secrets. Since `linkfinder` and `secretfinder` are not installed, `js_endpoints` and `js_secrets` are dead weight.
-
-**Recommend:** Remove `js_endpoints` and `js_secrets` from the pipeline. Enhance `run_js_recon` if needed.
+`linkfinder` and `secretfinder` live in `bin/` but the pipeline does **not** spawn them. `js` already extracts endpoints and secrets; phase 7 only flattens that result (no re-download). Keep both flatteners — they feed findings and the URL tab.
 
 ---
 
@@ -168,8 +166,8 @@ go install github.com/projectdiscovery/cloudlist/cmd/cloudlist@latest
 | crawling | api_panels | ✅ Working | nuclei | 0 findings (tesla is secured) |
 | cms_tech | cms_scan | ✅ Working | wpscan | (result pending) |
 | cms_tech | services | ❌ Slow (fixed) | http_get | Fixed: sequential 771→parallel 50 |
-| js_analysis | js_endpoints | ❌ No binary | linkfinder | Not installed |
-| js_analysis | js_secrets | ❌ No binary | secretfinder | Not installed |
+| js_analysis | js_endpoints | ✅ Flatten | js_module_extract | No re-download; uses `js` results |
+| js_analysis | js_secrets | ✅ Flatten | js_module_extract | Feeds `secrets_findings` |
 | js_analysis | param_mine | ❌ No binary | arjun | Not installed |
 | secrets | grep_app | ✅ Working | grep.app API | (requires rate-limited API) |
 | secrets | cloud_enum | ❌ No binary | cloud_enum | Not installed |

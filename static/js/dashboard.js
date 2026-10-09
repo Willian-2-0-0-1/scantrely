@@ -26,6 +26,70 @@ function _setIconLabel(el, name, text) {
   el.innerHTML = icoHtml(name, 14) + " " + (text || "");
 }
 
+function originHref(raw, host) {
+  return (window.ASMOrigin && typeof ASMOrigin.originHref === "function") ? ASMOrigin.originHref(raw, host) : "";
+}
+function isJsPathNoise(path) {
+  if (window.ASMOrigin && typeof ASMOrigin.isJsPathNoise === "function") return ASMOrigin.isJsPathNoise(path);
+  var s = String(path || "");
+  return s.indexOf("../") === 0 || s.indexOf("./") === 0;
+}
+function originLinkHtml(raw, label, opts) {
+  if (window.ASMOrigin && typeof ASMOrigin.originLinkHtml === "function") return ASMOrigin.originLinkHtml(raw, label, opts);
+  return esc(label != null ? label : (raw || ""));
+}
+function originHostChip(host, extraClass) {
+  if (window.ASMOrigin && typeof ASMOrigin.originHostChip === "function") {
+    return ASMOrigin.originHostChip(host, extraClass);
+  }
+  return originLinkHtml("", host, { host: host, className: extraClass || "fg-host-chip origin-link" });
+}
+function _originTitle(kind) {
+  if (typeof t === "function") {
+    if (kind === "host") return t("origin_open_host") || "Abrir host";
+    if (kind === "js") return t("origin_open_js") || "Abrir arquivo JS";
+    return t("origin_open") || "Abrir o local em que foi achado";
+  }
+  return kind === "host" ? "Abrir host" : (kind === "js" ? "Abrir arquivo JS" : "Abrir o local em que foi achado");
+}
+
+let _pendingFoundFilter = null; // {tab, q} applied after switchTab paints the owner surface
+
+async function jumpToFound(tab, query, ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  _pendingFoundFilter = { tab: tab, q: String(query || "") };
+  await switchTab(tab);
+  setTimeout(_applyPendingFoundFilter, 80);
+}
+
+function _applyPendingFoundFilter() {
+  const p = _pendingFoundFilter;
+  if (!p) return;
+  if (p.tab === "jsreverse") {
+    const el = document.getElementById("jsr-text-filter");
+    const ep = document.getElementById("jsr-ep-text");
+    if (!el && !ep) return;
+    _pendingFoundFilter = null;
+    if (el) el.value = p.q;
+    if (ep) ep.value = p.q;
+    if (typeof _jsrRender === "function") _jsrRender();
+    if (typeof _jsrRenderEp === "function") _jsrRenderEp();
+    const tbl = document.getElementById("jsr-secrets-table") || document.getElementById("tab-jsreverse");
+    if (tbl) tbl.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (p.tab === "endpoints") {
+    const el = document.getElementById("url-search");
+    if (!el) return;
+    _pendingFoundFilter = null;
+    el.value = p.q;
+    window._urlSearch = p.q;
+    if (typeof filterUrlsTable === "function") filterUrlsTable();
+    const wrap = document.getElementById("urls-table-wrap") || document.getElementById("tab-endpoints");
+    if (wrap) wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
 
 
 // ════════════════════════════════════════════════════════════════════════
@@ -266,7 +330,9 @@ const state = (typeof ASM !== 'undefined') ? ASM : {
   mobileNavOpen: false,
 };
 if (!state.page) state.page = "companies";
-if (!state.hostPanel) state.hostPanel = "domains";
+if (!state.hostPanel) state.hostPanel = "subdomains";
+if (!state.groupPanel) state.groupPanel = {};
+if (!state.groupPanel.hosts) state.groupPanel.hosts = state.hostPanel;
 
 let _jobsPoll = null;
 let _jobCountPoll = null;  // always-on job count updater for nav badge
@@ -395,7 +461,13 @@ function _hydratePlaywrightInventoryBatch(jobs) {
 
 function _severityCard(severity, count, cid) {
   const classes = { critical: "c", high: "h", medium: "m", low: "l", info: "i" };
-  const labels = { critical: "Critical", high: "High", medium: "Medium", low: "Low", info: "Info" };
+  const labels = {
+    critical: _opT("vuln_sev_critical", "Crítica"),
+    high: _opT("vuln_sev_high", "Alta"),
+    medium: _opT("vuln_sev_medium", "Média"),
+    low: _opT("vuln_sev_low", "Baixa"),
+    info: _opT("vuln_sev_info", "Info"),
+  };
   const click = cid ? ` onclick="goToVulnSeverity(${_jsArg(cid)},'${severity}',event)" style="cursor:pointer" title="Ver vulnerabilidades ${labels[severity] || severity}"` : "";
   return `
     <div class="findings-mini ${classes[severity] || ""}"${click}>
@@ -408,8 +480,9 @@ function _hostTableRow(h) {
   const techs = (h.technologies || []).map(t => `<span class="tech-c">${esc(t)}</span>`).join("");
   const ports = (h.ports || []).map(p => `<span class="port-c">${esc(p)}</span>`).join("");
   const title = (h.title || "").substring(0, 80);
-  const screenshot = h.screenshot
-    ? `<img src="${esc('/' + h.screenshot)}" style="width:48px;height:30px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer" onerror="this.style.display='none'" onmouseenter="ssPopoverShow(event,${JSON.stringify('/' + h.screenshot).replace(/"/g,'&quot;')},${JSON.stringify(h.host || '').replace(/"/g,'&quot;')})" onmouseleave="ssPopoverHide()">`
+  const shotSrc = _shotSrc(h.screenshot);
+  const screenshot = shotSrc
+    ? `<img src="${esc(shotSrc)}" alt="${esc("Screenshot de " + (h.host || ""))}" style="width:48px;height:30px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer" onerror="this.style.display='none'" onmouseenter="ssPopoverShow(event,${_shotJs(shotSrc)},${_shotJs(h.host || "")})" onmouseleave="ssPopoverHide()">`
     : `<span style="color:var(--text3);font-size:.6rem">—</span>`;
   return `
     <tr>
@@ -906,14 +979,24 @@ function renderCompanyView(co) {
     (s.findings_critical||0)+(s.findings_high||0)+(s.findings_medium||0)+(s.findings_info||0);
   document.getElementById("tc-cve").textContent = co.cve_summary?.total || 0;
   document.getElementById("tc-supplychain").textContent = co.supply_chain_summary?.total || 0;
+  const tcJs = document.getElementById("tc-jsreverse");
+  if (tcJs) {
+    const jsCount = Number(co.js_data?.total_secrets || 0) || (Array.isArray(co.js_data?.js_files) ? co.js_data.js_files.length : 0);
+    tcJs.textContent = jsCount || "";
+  }
   document.getElementById("tc-domains").textContent = (co.domains||[]).length || 0;
-  document.getElementById("tc-subdomains").textContent = s.subdomains||0;
+  document.getElementById("tc-subdomains").textContent = (co.hosts||[]).filter(_isActiveHost).length || 0;
   document.getElementById("tc-ports").textContent = s.open_ports || (co.hosts||[]).filter(h=>(h.ports||[]).length>0).length || 0;
   const tcOperation = document.getElementById("tc-operation");
-  if (tcOperation) tcOperation.textContent = "";
+  if (tcOperation) {
+    const persist = _opSummarize(co);
+    tcOperation.textContent = persist.badge ? String(persist.badge) : "";
+  }
   document.getElementById("tc-screenshots").textContent = "";
   const hrStored = (co.breach_data && co.breach_data.hudsonrock) || {};
-  const expCount = (Number(hrStored.employees||0) + Number(hrStored.users||0) + Number(hrStored.stealer_count||0));
+  const expCount = (window.ASMExposure && typeof window.ASMExposure.count === "function")
+    ? window.ASMExposure.count(hrStored)
+    : Number(hrStored.employees || 0);
   const tcExp = document.getElementById("tc-exposure");
   if (tcExp) tcExp.textContent = expCount > 0 ? String(expCount) : "";
   // Async: load counts without blocking render
@@ -969,7 +1052,10 @@ function _applyScreenshotInventory(co, shots) {
   co._screenshotsByHost = map;
   (co.hosts || []).forEach(h => {
     const host = _normalizeScopeDomain(h.host || "");
-    if (host && !h.screenshot && map.has(host)) h.screenshot = map.get(host);
+    if (!host || !map.has(host)) return;
+    if (!h.screenshot || _shotMissingCid(co.id, h.screenshot)) {
+      h.screenshot = map.get(host);
+    }
   });
   if (state.currentId === co.id && (state.tab === "subdomains" || state.activeGroup === "hosts")) {
     renderSubdomainsTab(co);
@@ -1028,8 +1114,11 @@ async function selectCompany(id) {
   if (schBtn && SERVER_MODE) loadScheduleStatus(id);
 
   // Reset active tab button
+  state.tab = "overview";
+  state.activeGroup = "overview";
   document.querySelectorAll(".tab-btn").forEach((b,i)=>b.classList.toggle("active",i===0));
   document.querySelectorAll(".tab-content").forEach((t,i)=>t.classList.toggle("active",i===0));
+  renderGroupSubnav("overview", "overview");
   syncCompanyTabsAccessibility("overview");
 
   if (SERVER_MODE && co.summary_only) {
@@ -1052,11 +1141,11 @@ async function selectCompany(id) {
 
 const TAB_GROUPS = {
   overview:    ['overview'],
-  hosts:       ['domains', 'subdomains'],
+  hosts:       ['domains', 'subdomains', 'endpoints', 'ports', 'typosquat'],
   screenshots: ['screenshots'],
-  operation:   ['operation'],
+  operation:   ['operation', 'alerts', 'timeline', 'diff', 'suppressed'],
   infragroup:  ['infra'],
-  vulns:       ['vulns'],
+  vulns:       ['vulns', 'cve', 'supplychain', 'jsreverse'],
   logs:        ['toollogs'],
   pipeline:    ['pipeline', 'terminal'],
   graph:       ['graph'],
@@ -1065,59 +1154,130 @@ const TAB_GROUPS = {
 const TAB_TO_GROUP = {};
 (function() { for (const [g, tabs] of Object.entries(TAB_GROUPS)) tabs.forEach(t => TAB_TO_GROUP[t] = g); })();
 
-async function switchGroup(groupName, btn) {
-  const tabs = groupName === "hosts"
-    ? [state.hostPanel || "domains"]
-    : (TAB_GROUPS[groupName] || [groupName]);
-  state.tab = tabs[0];
+const GROUP_PANEL_I18N = {
+  overview: "subtab_overview",
+  domains: "subtab_domains",
+  subdomains: "subtab_hosts",
+  endpoints: "subtab_endpoints",
+  ports: "subtab_ports",
+  typosquat: "subtab_typosquat",
+  vulns: "subtab_vulns",
+  cve: "subtab_cve",
+  supplychain: "subtab_supplychain",
+  jsreverse: "subtab_jsreverse",
+  infra: "subtab_infra",
+  screenshots: "subtab_screenshots",
+  operation: "subtab_operation",
+  alerts: "subtab_alerts",
+  timeline: "subtab_timeline",
+  diff: "subtab_diff",
+  suppressed: "subtab_suppressed",
+  toollogs: "subtab_logs",
+  pipeline: "subtab_pipeline",
+  terminal: "subtab_terminal",
+  graph: "subtab_graph",
+  exposure: "subtab_exposure",
+};
+
+function _panelLabel(name) {
+  const key = GROUP_PANEL_I18N[name];
+  if (key && typeof t === "function") {
+    const translated = t(key);
+    if (translated && translated !== key) return translated;
+  }
+  return name;
+}
+
+function renderGroupSubnav(groupName, panel) {
+  const el = document.getElementById("co-subnav");
+  if (!el) return;
+  const tabs = TAB_GROUPS[groupName] || [];
+  if (tabs.length <= 1) {
+    el.hidden = true;
+    el.innerHTML = "";
+    return;
+  }
+  el.hidden = false;
+  el.setAttribute("role", "tablist");
+  el.setAttribute("aria-label", typeof t === "function" ? t("aria_company_sub") : "Subseção da empresa");
+  el.innerHTML = tabs.map(tabName => {
+    const active = tabName === panel;
+    const src = document.getElementById("tc-" + tabName);
+    const rawCount = src ? String(src.textContent || "").trim() : "";
+    const count = rawCount && rawCount !== "0" ? rawCount : "";
+    return `<button type="button" class="group-subnav-btn${active ? " active" : ""}" role="tab" aria-selected="${active ? "true" : "false"}" data-panel="${tabName}" onclick="switchGroupPanel('${groupName}','${tabName}')">${esc(_panelLabel(tabName))}${count ? ` <span class="tab-count">${esc(count)}</span>` : ""}</button>`;
+  }).join("");
+}
+
+async function switchGroup(groupName, btn, panelName) {
+  const groupTabs = TAB_GROUPS[groupName] || [groupName];
+  const requested = panelName || (state.groupPanel && state.groupPanel[groupName]) || (groupName === "hosts" ? state.hostPanel : null);
+  const panel = groupTabs.includes(requested) ? requested : groupTabs[0];
+  if (!state.groupPanel) state.groupPanel = {};
+  state.groupPanel[groupName] = panel;
+  if (groupName === "hosts") state.hostPanel = panel;
+  state.tab = panel;
   state.activeGroup = groupName;
 
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   if (btn) btn.classList.add('active');
-  tabs.forEach(t => { const el = document.getElementById('tab-' + t); if (el) el.classList.add('active'); });
+  const pane = document.getElementById('tab-' + panel);
+  if (pane) pane.classList.add('active');
 
+  renderGroupSubnav(groupName, panel);
   syncCompanyTabsAccessibility(groupName);
 
   const co = allCompanies().find(c => c.id === state.currentId);
-  for (const name of tabs) {
-    if (name === 'domains'      && co)              renderDomainsTab(co);
-    if (name === 'subdomains'   && co)              renderSubdomainsTab(co);
-    if (name === 'endpoints'    && co)              renderEndpointsTab(co);
-    if (name === 'pipeline'     && state.currentId) await renderReconTab(state.currentId);
-    if (name === 'supplychain'  && co)              renderSupplyChainTab(co);
-    if (name === 'jsreverse'    && co)              renderJsReverseTab(co);
-    if (name === 'vulns'        && co)              renderVulnsTab(co);
-    if (name === 'operation'    && co)              renderOperationTab(co);
-    if (name === 'infra'        && co)              renderInfraTab(co);
-    if (name === 'screenshots'  && state.currentId) loadScreenshots(state.currentId, co);
-    if (name === 'toollogs'     && state.currentId) {
-      await loadToolLogs();
-    }
-    if (name === 'terminal'     && state.currentId) renderLiveTerminal(state.currentId);
-    if (name === 'alerts'       && co)              renderAlertsTab(co);
-    if (name === 'timeline'     && co)              renderTimelineTab(co);
-    if (name === 'diff'         && co)              renderDiffTab(co);
-    if (name === 'graph'        && co && typeof renderAssetGraph === 'function') renderAssetGraph(co);
-    if (name === 'exposure'     && co && typeof renderExposureTab === 'function') renderExposureTab(co);
+  const name = panel;
+  if (name === 'overview'     && co)              renderOverview(co);
+  if (name === 'domains'      && co)              renderDomainsTab(co);
+  if (name === 'subdomains'   && co)              renderSubdomainsTab(co);
+  if (name === 'endpoints'    && co)              renderEndpointsTab(co);
+  if (name === 'ports'        && co)              renderPortsTab(co);
+  if (name === 'typosquat'    && co)              renderTyposquatTab(co);
+  if (name === 'pipeline'     && state.currentId) await renderReconTab(state.currentId);
+  if (name === 'cve'          && co)              renderCveTab(co);
+  if (name === 'supplychain'  && co)              renderSupplyChainTab(co);
+  if (name === 'jsreverse'    && co)              renderJsReverseTab(co);
+  if (name === 'vulns'        && co)              renderVulnsTab(co);
+  if (name === 'findings'     && co)              renderFindingsTab(co);
+  if (name === 'operation'    && co)              renderOperationTab(co);
+  if (name === 'infra'        && co)              renderInfraTab(co);
+  if (name === 'screenshots'  && state.currentId) loadScreenshots(state.currentId, co);
+  if (name === 'toollogs'     && state.currentId) {
+    await loadToolLogs();
   }
+  if (name === 'terminal'     && state.currentId) renderLiveTerminal(state.currentId);
+  if (name === 'alerts'       && co)              renderAlertsTab(co);
+  if (name === 'timeline'     && co)              renderTimelineTab(co);
+  if (name === 'diff'         && co)              renderDiffTab(co);
+  if (name === 'suppressed'   && state.currentId) loadSuppressedFindings(state.currentId);
+  if (name === 'graph'        && co && typeof renderAssetGraph === 'function') renderAssetGraph(co);
+  if (name === 'exposure'     && co && typeof renderExposureTab === 'function') renderExposureTab(co);
 
   if (typeof ASM !== 'undefined' && ASM.updateHash && state.currentId) {
-    ASM.updateHash('company/' + state.currentId + '/' + tabs[0]);
+    ASM.updateHash('company/' + state.currentId + '/' + panel);
   }
   if (btn) btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   updateTabScrollBtns();
 }
 
 async function switchTab(name, btn) {
-  if (name === "domains" || name === "subdomains") {
-    state.hostPanel = name;
-    const groupBtn = document.querySelector('.tab-btn[data-group="hosts"]') || btn;
-    return switchGroup("hosts", groupBtn);
-  }
   const groupName = TAB_TO_GROUP[name] || name;
+  if (!state.groupPanel) state.groupPanel = {};
+  if ((TAB_GROUPS[groupName] || []).includes(name)) state.groupPanel[groupName] = name;
+  if (groupName === "hosts") state.hostPanel = name;
   const groupBtn = document.querySelector(`.tab-btn[data-group="${groupName}"]`) || btn;
-  return switchGroup(groupName, groupBtn);
+  return switchGroup(groupName, groupBtn, name);
+}
+
+function switchGroupPanel(groupName, panel) {
+  if (!state.groupPanel) state.groupPanel = {};
+  state.groupPanel[groupName] = panel;
+  if (groupName === "hosts") state.hostPanel = panel;
+  const groupBtn = document.querySelector(`.tab-btn[data-group="${groupName}"]`);
+  return switchGroup(groupName, groupBtn, panel);
 }
 
 // Jump straight from any critical/high/medium/info severity indicator to the
@@ -1153,10 +1313,7 @@ async function goToVulnSeverity(cid, severity, ev) {
 }
 
 function switchHostsPanel(panel) {
-  if (panel !== "domains" && panel !== "subdomains") return;
-  state.hostPanel = panel;
-  const groupBtn = document.querySelector('.tab-btn[data-group="hosts"]');
-  switchGroup("hosts", groupBtn);
+  return switchGroupPanel("hosts", panel);
 }
 
 function scrollTabBar(dir) {
@@ -1178,9 +1335,10 @@ function updateTabScrollBtns() {
 }
 
 const _GC_DEFS = {
-  hosts:      ['domains', 'subdomains'],
+  hosts:      ['subdomains'],
+  vulns:      ['vulns', 'cve', 'supplychain', 'jsreverse'],
   screenshots:['screenshots'],
-  operation:  ['operation'],
+  operation:  ['operation', 'alerts'],
   logs:       ['toollogs'],
   exposure:   ['exposure'],
 };
@@ -1194,6 +1352,7 @@ function updateGroupCounts() {
     const el = document.getElementById('gc-' + group);
     if (el) el.textContent = total > 0 ? total : '';
   }
+  if (state.activeGroup) renderGroupSubnav(state.activeGroup, state.tab);
 }
 
 function initGroupCountObserver() {
@@ -1908,6 +2067,14 @@ function renderOverview(co) {
         </div>
       </div>
     </div>
+    <div class="ov-jump" aria-label="Atalhos de resultado">
+      <button type="button" class="ov-jump-btn" onclick="switchTab('jsreverse')">${_panelLabel("jsreverse")}<span>${Number(co.js_data?.total_secrets || 0) || (Array.isArray(co.js_data?.js_files) ? co.js_data.js_files.length : 0)}</span></button>
+      <button type="button" class="ov-jump-btn" onclick="switchTab('endpoints')">${_panelLabel("endpoints")}<span>${Number(co.js_data?.total_endpoints || 0) + Number(co.wayback_data?.interesting_count || 0) + (Array.isArray(co.urlfinder_data?.urls) ? co.urlfinder_data.urls.length : 0) + Number(co.api_exposure?.total || 0)}</span></button>
+      <button type="button" class="ov-jump-btn" onclick="switchTab('ports')">${_panelLabel("ports")}<span>${s.open_ports || 0}</span></button>
+      <button type="button" class="ov-jump-btn" onclick="switchTab('cve')">${_panelLabel("cve")}<span>${co.cve_summary?.total || 0}</span></button>
+      <button type="button" class="ov-jump-btn" onclick="switchTab('supplychain')">${_panelLabel("supplychain")}<span>${co.supply_chain_summary?.total || 0}</span></button>
+      <button type="button" class="ov-jump-btn" onclick="switchTab('vulns')">${_panelLabel("vulns")}<span>${totalFindings}</span></button>
+    </div>
     <div id="ov-trends" style="margin-top:16px"></div>
     ${typeof renderExposureTeaser === "function" ? renderExposureTeaser(co) : ""}`;
 }
@@ -2031,8 +2198,9 @@ function _confirmedVulnFindings(findings) {
   return (findings || []).filter(f => {
     const status = String(f.status || "").toLowerCase();
     if (status.includes("false") || status.includes("ignor") || status.includes("dismiss") || status.includes("duplicate") || status.includes("invalid")) return false;
-    // Secrets are always real findings — never hide them behind the noise filter
+    // Secrets and confirmed exposure findings stay visible through the noise filter
     if (f.type === "secret" || f.category === "secrets") return true;
+    if (f.type === "git_exposed" || f.type === "vendor_fingerprint" || f.type === "default_creds") return true;
     const text = [
       f.title,
       f.name,
@@ -2288,7 +2456,7 @@ function applyFindFilter(cid, keepPage) {
   const empty = document.getElementById("f-empty");
   const cnt   = document.getElementById("f-cnt");
   const filteredCount = entries.reduce((n,[,g])=>n+g.findings.length, 0);
-  if(cnt) cnt.textContent = filteredCount+" findings · "+entries.length+" unique issues";
+  if(cnt) cnt.textContent = _opT("vuln_cnt", "{n} findings · {u} issues únicos").replace("{n}", String(filteredCount)).replace("{u}", String(entries.length));
   if(!entries.length){
     list.innerHTML="";
     if (empty) empty.style.display="block";
@@ -2323,9 +2491,10 @@ function applyFindFilter(cid, keepPage) {
     const sevColors = {critical:"#f43f5e", high:"#fb923c", medium:"#fbbf24", low:"var(--blue)", info:"var(--text3)"};
 
     // Host list preview
+    const originUrls = [...new Set(group.findings.map(f => f.url || "").filter(Boolean))];
     const hostPreview = hosts.length <= 5
-      ? hosts.map(h=>`<code class="fg-host-chip">${esc(h)}</code>`).join(" ")
-      : hosts.slice(0,5).map(h=>`<code class="fg-host-chip">${esc(h)}</code>`).join(" ") + ` <span style="color:var(--text3);font-size:.68rem">+${hosts.length-5} more</span>`;
+      ? hosts.map(h=>originHostChip(h, "fg-host-chip origin-link")).join(" ")
+      : hosts.slice(0,5).map(h=>originHostChip(h, "fg-host-chip origin-link")).join(" ") + ` <span style="color:var(--text3);font-size:.68rem">${esc(_opT("vuln_more", "+{n} mais").replace("{n}", String(hosts.length-5)))}</span>`;
 
     const allHostsId = `fg-hosts-${_hashId(normTitle, "", "")}`;
     const triageKey = _hashId(normTitle, "", "");
@@ -2353,10 +2522,11 @@ function applyFindFilter(cid, keepPage) {
         <div class="fg-hosts-full" id="${allHostsId}" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(0,0,0,0.2);border:1px solid var(--border2);border-radius:8px">
           <div style="color:var(--text3);font-size:.65rem;font-weight:600;margin-bottom:6px">${icoHtml("clipboard",14)} All affected hosts (${hosts.length}):</div>
           <div style="display:flex;flex-wrap:wrap;gap:4px">
-            ${hosts.map(h=>`<code class="fg-host-chip fg-host-chip-full" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(h)}');this.style.background='var(--teal-dim)';setTimeout(()=>this.style.background='',1500)" title="Click to copy">${esc(h)}</code>`).join("")}
+            ${hosts.map(h=>originHostChip(h, "fg-host-chip fg-host-chip-full origin-link")).join("")}
           </div>
+          ${originUrls.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">${originUrls.slice(0,8).map(u => originLinkHtml(u, u.length > 72 ? u.slice(0,69) + "…" : u, { title: _originTitle() })).join("")}</div>` : ""}
           <div style="margin-top:8px;font-size:.65rem;color:var(--text3)">
-            Click any host to copy · ${esc(f0.desc||"").slice(0,200)}${(f0.desc||"").length>200?"…":""}
+            ${esc(typeof t === "function" ? (t("origin_click_hint") || "Clique o host ou a URL para abrir o local em que foi achado") : "Clique o host ou a URL para abrir o local em que foi achado")} · ${esc(f0.desc||"").slice(0,200)}${(f0.desc||"").length>200?"…":""}
           </div>
           ${_renderHttpEvidence(group.findings)}
           <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border2)">
@@ -2383,7 +2553,7 @@ function applyFindFilter(cid, keepPage) {
   const next = document.getElementById("f-next");
   const pnums = document.getElementById("f-pnums");
   if (pager) pager.style.display = "flex";
-  if (pinfo) pinfo.textContent = `${st + 1}–${Math.min(st + pageGroups.length, sortedGroups.length)} of ${sortedGroups.length}`;
+  if (pinfo) pinfo.textContent = _opT("vuln_page", "{a}–{b} de {t}").replace("{a}", String(st + 1)).replace("{b}", String(Math.min(st + pageGroups.length, sortedGroups.length))).replace("{t}", String(sortedGroups.length));
   if (prev) prev.disabled = _finds_page <= 1;
   if (next) next.disabled = _finds_page >= totPg;
   if (pnums) {
@@ -2893,7 +3063,9 @@ let _co_hosts = [], _hosts_page = 1, _hosts_sort = "host", _hosts_asc = true;
 const HPP = 30;
 
 function renderHostsTab(co) {
-  document.getElementById("tab-hosts").innerHTML = `
+  const pane = document.getElementById("tab-hosts");
+  if (!pane) return;
+  pane.innerHTML = `
     <div id="playwright-host-inventory" style="margin-bottom:12px"></div>
     <div class="filter-bar">
       <input type="text" class="fi grow" id="h-search" placeholder="Search host, IP, technology..." oninput="applyHostFilter()">
@@ -2945,62 +3117,57 @@ function renderHostsTab(co) {
   renderPlaywrightHostInventoryTab(co);
 }
 
+function _paintCrawlHostInventory(mount, crawl) {
+  if (!mount) return;
+  if (!crawl.length) {
+    mount.innerHTML = "";
+    return;
+  }
+  const chips = crawl.slice(0, 24).map(r => {
+    const pages = r.pages == null ? "—" : String(r.pages);
+    return `<code class="fg-host-chip fg-host-chip-full" title="${esc(r.url || "")}">${esc(r.host || "")} · ${esc(pages)}</code>`;
+  }).join("");
+  mount.innerHTML = `
+    <div class="job-detail-card">
+      <div class="job-detail-title">${esc(_opT("op_hosts_title", "Inventário de hosts"))}</div>
+      <div class="job-detail-copy">${esc(_opT("op_hosts_copy", "Hosts visitados pela pipeline (browser_crawl). Enfileire o Playwright Recon para a sessão de pentest."))}</div>
+      <div class="chip-row" style="margin-top:10px">${chips}</div>
+    </div>
+  `;
+}
+
 async function renderPlaywrightHostInventoryTab(co) {
   const mount = document.getElementById("playwright-host-inventory");
   if (!mount || !co?.id) return;
-  mount.innerHTML = `
-    <div class="job-detail-card">
-      <div class="job-detail-title">Playwright Host Inventory</div>
-      <div class="job-detail-copy">Loading browser-discovered hosts...</div>
-    </div>
-  `;
+  const persist = _opSummarize(co);
+  const crawl = persist.crawl || [];
+  _paintCrawlHostInventory(mount, crawl);
   try {
     const r = await fetch(`/api/jobs?company_id=${encodeURIComponent(co.id)}&limit=20`, {headers:_authHeaders()});
     if (!r.ok) throw new Error("HTTP " + r.status);
     const jobs = await r.json();
     const job = (jobs || []).find(j => j.job_type === "playwright_recon");
-    if (!job) {
-      mount.innerHTML = `
-        <div class="job-detail-card">
-          <div class="job-detail-title">Playwright Host Inventory</div>
-          <div class="job-detail-copy">No Playwright run found for this company yet.</div>
-        </div>
-      `;
-      return;
-    }
+    if (!job) return;
     const sessionResp = await fetch(_jobArtifactUrl(job.id, "session"), {headers:_authHeaders()});
-    if (!sessionResp.ok) {
-      mount.innerHTML = `
-        <div class="job-detail-card">
-          <div class="job-detail-title">Playwright Host Inventory</div>
-          <div class="job-detail-copy">Host inventory not available yet.</div>
-        </div>
-      `;
-      return;
-    }
+    if (!sessionResp.ok) return;
     const session = await sessionResp.json();
     mount.innerHTML = `
       <div class="job-detail-card">
         <div class="job-detail-head">
           <div>
-            <div class="job-detail-title">Playwright Host Inventory</div>
+            <div class="job-detail-title">${esc(_opT("op_hosts_title", "Inventário de hosts"))}</div>
             <div class="job-detail-copy">${esc(job.id)} · ${esc(job.status || "—")} · ${esc(job.created_at || "—")}</div>
           </div>
           <div class="job-actions">
-            <button class="btn btn-secondary btn-icon" onclick="openJobDetail(${_jsArg(job.id)})">Details</button>
-            ${job.status === "done" ? `<a class="btn btn-secondary btn-icon" href="${_jobArtifactUrl(job.id, 'session')}" target="_blank" rel="noopener">Session</a>` : ""}
+            <button type="button" class="btn btn-secondary btn-icon" onclick="openJobDetail(${_jsArg(job.id)})">${esc(_opT("op_details", "Detalhes"))}</button>
+            ${job.status === "done" ? `<a class="btn btn-secondary btn-icon" href="${_jobArtifactUrl(job.id, 'session')}" target="_blank" rel="noopener">${esc(_opT("op_session", "Sessão"))}</a>` : ""}
           </div>
         </div>
         ${_playwrightInventorySummary(session)}
       </div>
     `;
-  } catch(e) {
-    mount.innerHTML = `
-      <div class="job-detail-card">
-        <div class="job-detail-title">Playwright Host Inventory</div>
-        <div class="job-detail-copy">Failed to load host inventory: ${esc(e.message)}</div>
-      </div>
-    `;
+  } catch (e) {
+    if (!crawl.length) mount.innerHTML = "";
   }
 }
 
@@ -3456,7 +3623,10 @@ function _renderSubInventoryShell(co, inventory, el) {
   if (tc) tc.textContent = _sub_hosts.length || 0;
 
   if(!_sub_hosts.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">Nenhum host ativo encontrado</div><div class="empty-state-copy">A tabela de Hosts mostra somente dominios/subdominios com status HTTP real. Rode um scan para validar os ativos.</div></div>`;
+    el.innerHTML = `<div id="playwright-host-inventory" class="ai-pw-inventory"></div>
+      <div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">Nenhum host ativo encontrado</div><div class="empty-state-copy">A tabela de Hosts mostra somente dominios/subdominios com status HTTP real. Rode um scan para validar os ativos.</div></div>`;
+    renderPlaywrightHostInventoryTab(co);
+    if (typeof hydrateIcons === "function") hydrateIcons(el);
     return;
   }
 
@@ -3465,12 +3635,7 @@ function _renderSubInventoryShell(co, inventory, el) {
     const newSubsHtml = newSubs.length
       ? newSubs.slice(0, 12).map(s => `<code class="fg-host-chip fg-host-chip-full" title="New since ${esc(checkpointInfo?.compared_to || 'previous scan')}">${esc(s)}</code>`).join("")
       : "";
-    const hostSelector = `
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-        <button class="btn ${state.hostPanel === 'domains' ? 'btn-primary' : 'btn-secondary'}" style="font-size:.68rem;padding:4px 10px" onclick="switchHostsPanel('domains')">Domains</button>
-        <button class="btn ${state.hostPanel === 'subdomains' ? 'btn-primary' : 'btn-secondary'}" style="font-size:.68rem;padding:4px 10px" onclick="switchHostsPanel('subdomains')">Hosts</button>
-        <span style="font-size:.68rem;color:var(--text3)">Current view: ${state.hostPanel === 'subdomains' ? 'Hosts' : 'Domains'}</span>
-      </div>`;
+    const hostSelector = "";
 
     const statBadges = _assetStatusSummary(activeInventory);
     const techCounts = {};
@@ -3489,48 +3654,50 @@ function _renderSubInventoryShell(co, inventory, el) {
       </div>` : "";
 
     el.innerHTML = `
+    <div id="playwright-host-inventory" class="ai-pw-inventory"></div>
     ${hostSelector}
     <div class="ai-shell">
       <div class="ai-head">
         <div class="ai-head-l">
-          <div class="ai-title">Assets Inventory</div>
-          <div class="ai-sub"><span id="sub-cnt">${activeInventory.length}</span> ativos validados · sem n/a</div>
+          <div class="ai-title">${esc(typeof t === "function" ? t("ai_title") : "Inventário de ativos")}</div>
+          <div class="ai-sub"><span id="sub-cnt">${activeInventory.length}</span> ${esc(typeof t === "function" ? t("ai_sub") : "ativos validados · sem n/a")}</div>
         </div>
         <div class="ai-head-r">
           ${statBadges}
-          <button class="ai-refresh" onclick="switchHostsPanel('subdomains')" title="Refresh"><span style="font-size:.85rem">⟳</span> Refresh</button>
-          <button class="ai-icon-btn" onclick="exportHosts('csv')" title="Export CSV">CSV</button>
-          <button class="ai-icon-btn" onclick="exportHosts('json')" title="Export JSON">JSON</button>
+          <button type="button" class="ai-refresh" onclick="switchHostsPanel('subdomains')" title="${esc(typeof t === "function" ? t("ai_refresh") : "Atualizar")}" aria-label="${esc(typeof t === "function" ? t("ai_refresh") : "Atualizar")}">${icoHtml("reload",14)} ${esc(typeof t === "function" ? t("ai_refresh") : "Atualizar")}</button>
+          <button type="button" class="ai-icon-btn" onclick="exportHosts('csv')" title="Export CSV" aria-label="Export CSV">CSV</button>
+          <button type="button" class="ai-icon-btn" onclick="exportHosts('json')" title="Export JSON" aria-label="Export JSON">JSON</button>
         </div>
       </div>
       ${newHostsBanner}
       <div class="ai-filter">
         <div class="ai-search">
-          <span class="ai-search-ic">⌕</span>
-          <input id="sub-search" placeholder="Buscar dominio, subdominio, titulo, IP ou porta..." oninput="_subApplyFilter()">
+          <span class="ai-search-ic" aria-hidden="true">${icoHtml("search",16)}</span>
+          <label class="sr-only" for="sub-search">${esc(typeof t === "function" ? t("ai_search") : "Buscar host")}</label>
+          <input id="sub-search" placeholder="${esc(typeof t === "function" ? t("ai_search_ph") : "Buscar dominio, subdominio, titulo, IP ou porta...")}" oninput="_subApplyFilter()">
         </div>
-        <select class="ai-drop" id="sub-status" onchange="_subApplyFilter()">
-          <option value=""># Status HTTP</option>
+        <select class="ai-drop" id="sub-status" onchange="_subApplyFilter()" aria-label="Status HTTP">
+          <option value="">Status HTTP</option>
           <option value="2">2xx — OK</option>
           <option value="3">3xx — Redirect</option>
           <option value="4">4xx — Bloqueado/cliente</option>
           <option value="5">5xx — Erro/risco</option>
         </select>
-        <select class="ai-drop" id="sub-tech" onchange="_subApplyFilter()">
-          <option value="">⊞ Tech / Infra</option>
+        <select class="ai-drop" id="sub-tech" onchange="_subApplyFilter()" aria-label="Tech / Infra">
+          <option value="">Tech / Infra</option>
           ${techOptions}
         </select>
-        <select class="ai-drop" id="sub-port" onchange="_subApplyFilter()">
-          <option value="">${icoHtml("link",14)} Portas abertas</option>
+        <select class="ai-drop" id="sub-port" onchange="_subApplyFilter()" aria-label="${esc(typeof t === "function" ? t("ai_ports") : "Portas abertas")}">
+          <option value="">${esc(typeof t === "function" ? t("ai_ports") : "Portas abertas")}</option>
           ${portOptions}
         </select>
-        <select class="ai-drop" id="sub-risk" onchange="_subApplyFilter()">
-          <option value="">◇ Risco</option>
-          <option value="risk">Com risco</option>
-          <option value="clean">Sem risco</option>
+        <select class="ai-drop" id="sub-risk" onchange="_subApplyFilter()" aria-label="${esc(typeof t === "function" ? t("ai_risk") : "Risco")}">
+          <option value="">${esc(typeof t === "function" ? t("ai_risk") : "Risco")}</option>
+          <option value="risk">${esc(typeof t === "function" ? t("ai_risk_yes") : "Com risco")}</option>
+          <option value="clean">${esc(typeof t === "function" ? t("ai_risk_no") : "Sem risco")}</option>
         </select>
-        <select class="ai-drop" id="sub-waf" onchange="_subApplyFilter()">
-          <option value=""> More · WAF/CDN</option>
+        <select class="ai-drop" id="sub-waf" onchange="_subApplyFilter()" aria-label="WAF / CDN">
+          <option value="">WAF / CDN</option>
           <option value="Cloudflare">Cloudflare</option>
           <option value="Imperva">Imperva</option>
           <option value="AWS">AWS</option>
@@ -3542,26 +3709,28 @@ function _renderSubInventoryShell(co, inventory, el) {
           <thead><tr>
             <th onclick="_subSort('host')">URL ⇅</th>
             <th onclick="_subSort('status_code')">Status ⇅</th>
-            <th onclick="_subSort('ports')">Portas ⇅</th>
-            <th onclick="_subSort('title')">Title ⇅</th>
+            <th onclick="_subSort('ports')">${esc(typeof t === "function" ? t("ai_ports") : "Portas")} ⇅</th>
+            <th onclick="_subSort('title')">${esc(typeof t === "function" ? t("ai_col_title") : "Título")} ⇅</th>
             <th onclick="_subSort('ip')">Host IP ⇅</th>
             <th>Tech</th>
-            <th style="width:50px">Shot</th>
-            <th class="ai-actions-h">Actions</th>
+            <th style="width:88px">${esc(typeof t === "function" ? t("ai_shot") : "Captura")}</th>
+            <th class="ai-actions-h">${esc(typeof t === "function" ? t("ai_actions") : "Ações")}</th>
           </tr></thead>
           <tbody id="sub-tbody"></tbody>
         </table>
         <div class="pager">
           <span class="pager-info" id="sub-pinfo"></span>
           <div class="pager-btns">
-            <button class="pb" id="sub-prev" onclick="_subPageNav(-1)">← Prev</button>
+            <button type="button" class="pb" id="sub-prev" onclick="_subPageNav(-1)">${esc(typeof t === "function" ? t("ss_prev") : "Anterior")}</button>
             <span id="sub-pnums"></span>
-            <button class="pb" id="sub-next" onclick="_subPageNav(1)">Next →</button>
+            <button type="button" class="pb" id="sub-next" onclick="_subPageNav(1)">${esc(typeof t === "function" ? t("ss_next") : "Próximo")}</button>
           </div>
         </div>
       </div>
     </div>`;
   _subApplyFilter();
+  renderPlaywrightHostInventoryTab(co);
+  if (typeof hydrateIcons === "function") hydrateIcons(el);
 }
 
 // Asset status-code summary badges (Osmedeus-style)
@@ -3748,12 +3917,7 @@ function renderDomainsTab(co, historyRows = null) {
   const totalNew = checkpointInfo?.new_subdomains_count || 0;
   const totalDomains = rawDomains.length;
   const totalKnownTech = inventory.reduce((acc, h) => acc + ((h.technologies || []).length > 0 ? 1 : 0), 0);
-  const hostSelector = `
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-      <button class="btn ${state.hostPanel === 'domains' ? 'btn-primary' : 'btn-secondary'}" style="font-size:.68rem;padding:4px 10px" onclick="switchHostsPanel('domains')">Domains</button>
-      <button class="btn ${state.hostPanel === 'subdomains' ? 'btn-primary' : 'btn-secondary'}" style="font-size:.68rem;padding:4px 10px" onclick="switchHostsPanel('subdomains')">Hosts</button>
-      <span style="font-size:.68rem;color:var(--text3)">Current view: ${state.hostPanel === 'subdomains' ? 'Subdomains' : 'Domains'}</span>
-    </div>`;
+  const hostSelector = "";
 
   el.innerHTML = `
     <div class="section-shell">
@@ -3890,7 +4054,7 @@ function _subRenderTable(filtered){
   const tot=filtered.length, totPg=Math.ceil(tot/SUB_PER_PAGE);
   _sub_page = Math.max(1, Math.min(_sub_page, totPg||1));
   const st=(_sub_page-1)*SUB_PER_PAGE, pg=filtered.slice(st, st+SUB_PER_PAGE);
-  const pi=document.getElementById("sub-pinfo"); if(pi) pi.textContent=`${st+1}–${Math.min(st+SUB_PER_PAGE,tot)} of ${tot}`;
+  const pi=document.getElementById("sub-pinfo"); if(pi) pi.textContent=`${st+1}–${Math.min(st+SUB_PER_PAGE,tot)} de ${tot}`;
   const pr=document.getElementById("sub-prev"); if(pr) pr.disabled=_sub_page<=1;
   const nx=document.getElementById("sub-next"); if(nx) nx.disabled=_sub_page>=totPg;
   let pn="";
@@ -3908,13 +4072,18 @@ function _subRenderTable(filtered){
     const techCell = _hostTechCell(h);
     const title = h.title ? esc(h.title) : (collectionRunning ? _assetPendingCell() : '<span class="ai-dash">—</span>');
     const ipCell = h.ip ? esc(h.ip) : (collectionRunning ? _assetPendingCell() : '<span class="ai-dash">—</span>');
-    const shotCell = h.screenshot
-      ? `<img src="${esc('/' + h.screenshot)}" style="width:42px;height:26px;object-fit:cover;border-radius:3px;border:1px solid var(--border);cursor:pointer;vertical-align:middle" onerror="this.style.display='none'" onmouseenter="ssPopoverShow(event,${JSON.stringify('/' + h.screenshot).replace(/"/g,'&quot;')},${JSON.stringify(h.host || '').replace(/"/g,'&quot;')})" onmouseleave="ssPopoverHide()" onclick="event.stopPropagation()">`
+    const shotSrc = _shotSrc(h.screenshot);
+    const copyLbl = typeof t === "function" ? t("ai_copy_url") : "Copiar URL";
+    const openLbl = typeof t === "function" ? t("ai_open_url") : "Abrir URL";
+    const viewLbl = typeof t === "function" ? t("ai_view_host") : "Ver detalhes";
+    const shotLbl = typeof t === "function" ? t("ai_open_shot") : "Abrir screenshot";
+    const shotCell = shotSrc
+      ? `<button type="button" class="ai-shot-btn" aria-label="${esc(shotLbl + " · " + (h.host || ""))}" onmouseenter="ssPopoverShow(event,${_shotJs(shotSrc)},${_shotJs(h.host || "")})" onmouseleave="ssPopoverHide()" onclick="event.stopPropagation();ssLightboxOpen(${_shotJs(shotSrc)},${_shotJs(h.host || url)})"><img src="${esc(shotSrc)}" alt="${esc("Screenshot de " + (h.host || ""))}" onerror="this.closest('.ai-shot-btn').style.display='none'"></button>`
       : (collectionRunning ? _assetPendingCell() : '<span class="ai-dash">—</span>');
     return `<tr class="ai-row" onclick="openHostDrawer('${escAttr(h.host)}')">
       <td class="ai-url-cell">
-        <button class="ai-mini" title="Copy URL" onclick="event.stopPropagation();copyToClipboard('${escAttr(url)}')">⧉</button>
-        <a class="ai-mini" href="${escAttr(url)}" target="_blank" rel="noopener" title="Open" onclick="event.stopPropagation()">↗</a>
+        <button type="button" class="ai-mini" title="${esc(copyLbl)}" aria-label="${esc(copyLbl)}" onclick="event.stopPropagation();copyToClipboard('${escAttr(url)}')">${icoHtml("clipboard",16)}</button>
+        <a class="ai-mini" href="${escAttr(url)}" target="_blank" rel="noopener" title="${esc(openLbl)}" aria-label="${esc(openLbl)}" onclick="event.stopPropagation()">${icoHtml("link",16)}</a>
         <a class="ai-url" href="${escAttr(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(url)}</a>
       </td>
       <td>${scHtml}</td>
@@ -3923,7 +4092,7 @@ function _subRenderTable(filtered){
       <td class="ai-ip">${ipCell}</td>
       <td><div class="ai-tech-row">${techCell}</div></td>
       <td class="ai-shot">${shotCell}</td>
-      <td class="ai-actions"><button class="ai-eye" title="View details" onclick="event.stopPropagation();openHostDrawer('${escAttr(h.host)}')">◉</button></td>
+      <td class="ai-actions"><button type="button" class="ai-eye" title="${esc(viewLbl)}" aria-label="${esc(viewLbl)}" onclick="event.stopPropagation();openHostDrawer('${escAttr(h.host)}')">${icoHtml("eye",16)}</button></td>
     </tr>`;
   }).join('');
 }
@@ -4071,24 +4240,73 @@ function _classifyUrlMemo(url) {
 //  UNIFIED ENDPOINTS TAB — URLs + JS endpoints + secrets merged (v2)
 // ════════════════════════════════════════════════════════════════════════
 
+const _FP_PWD_RE = /(%filtered%|wrong.?password|forgot.?password|invalid.?password|missing.?password|need.?password|change.?password|reset.?password|show.?password|confirm.?password|enter.?password|password.?hint|password.?set|create.?password|redefine.?password|new.?password|old.?password|repeat.?password)/i;
+const _FP_LABEL_RE = /^[A-Z][A-Z0-9_\-]{3,}$|^[a-z][a-z0-9_]{4,}[a-z0-9]$/;
+const _JS_NOISE_HOSTS = new Set(["aadcdn.msauth.net","aadcdn.msftauth.net","ok1static.oktacdn.com","use.fontawesome.com","cdn-prod.securiti.ai","scripts.clarity.ms"]);
+const _JS_NOISE_SFX = [".securiti.ai",".clarity.ms",".hotjar.com",".googleapis.com",".gstatic.com",".googletagmanager.com",".google-analytics.com",".recaptcha.net"];
+
+function _isFpJsSecret(type, value) {
+  var v = value || "";
+  if (type === "password") {
+    var inner = v.replace(/^(?:password|passwd|pwd)\s*[=:]\s*['"]/i, "").replace(/['"]$/, "");
+    if (_FP_PWD_RE.test(inner)) return true;
+    if (/^[A-Z][A-Z0-9_\-.]+$/.test(inner) || /^[a-z][a-z\-.]+$/.test(inner)) return true;
+    if (/^['"']?passwords?['"']?$/i.test(inner)) return true;
+    if (/[\[\]{}&|?]|\.substring\(|\+[a-z]+\./.test(inner)) return true;
+    if (/^[A-Za-z][A-Za-z ]+$/.test(inner)) return true;
+    return false;
+  }
+  if (type === "access_token" || type === "secret_key") {
+    var inner2 = v.replace(/^[\w\-]+\s*[=:]\s*['"]/i, "").replace(/['"]$/, "");
+    return _FP_LABEL_RE.test(inner2);
+  }
+  if (type === "api_key") {
+    var inner3 = v.replace(/^[\w\-]+\s*[=:]\s*['"]/i, "").replace(/['"]$/, "");
+    return _FP_LABEL_RE.test(inner3);
+  }
+  if (type === "internal_ip") {
+    var m = v.match(/(\d+)\.(\d+)\.(\d+)\.(\d+)/);
+    if (!m) return true;
+    return [m[1], m[2], m[3], m[4]].some(function(o){ return parseInt(o, 10) > 255; });
+  }
+  return false;
+}
+
+function _jsHostIsNoise(host) {
+  var h = (host || "").toLowerCase();
+  if (_JS_NOISE_HOSTS.has(h)) return true;
+  return _JS_NOISE_SFX.some(function(sfx){ return h.endsWith(sfx); });
+}
+
+function _epDataStamp(co) {
+  var jd = co && co.js_data ? co.js_data : {};
+  var files = Array.isArray(jd.js_files) ? jd.js_files.length : 0;
+  var sf = Array.isArray(co && co.secrets_findings) ? co.secrets_findings.length : 0;
+  var wb = (co && co.wayback_data && co.wayback_data.interesting_count) || 0;
+  return [files, jd.total_secrets || 0, jd.total_endpoints || 0, sf, wb].join(":");
+}
+
 function invalidateEndpointCache(co) {
   if (co) {
     delete co._unifiedEndpoints;
     delete co._unifiedSecrets;
     delete co._unifiedSources;
     delete co._epStats;
+    delete co._epStamp;
   }
   _classifyCache = null;
 }
 
 function buildUnifiedEndpoints(co) {
-  if (co._unifiedEndpoints && co._unifiedSources) return;
+  const stamp = _epDataStamp(co);
+  if (co._unifiedEndpoints && co._unifiedSources && co._epStamp === stamp) return;
 
   const allEndpoints = [];
   const allSecrets = [];
   const sources = [];
   const addEndpoint = (rawUrl, method, source, meta = {}) => {
     if (!rawUrl || typeof rawUrl !== 'string') return;
+    if (source === 'js' && isJsPathNoise(rawUrl)) return;
     const cls = _classifyUrlMemo(rawUrl);
     allEndpoints.push({
       url: rawUrl,
@@ -4126,6 +4344,25 @@ function buildUnifiedEndpoints(co) {
       });
     });
     sources.push({ name: 'URLFinder', count: co.urlfinder_data.urls.length, key: 'urlfinder' });
+  }
+
+  // Param mine (ffuf parameters / paths)
+  if (co.param_mine_data) {
+    const pmItems = co.param_mine_data.findings || co.param_mine_data.parameters || co.param_mine_data.results || [];
+    let pmCount = 0;
+    pmItems.forEach(item => {
+      const rawUrl = typeof item === 'string' ? item : (item.url || item.path || '');
+      if (!rawUrl) return;
+      addEndpoint(rawUrl, 'GET', 'param_mine', {
+        host: typeof item === 'object' ? (item.host || '') : '',
+        path: typeof item === 'object' ? (item.path || '') : '',
+        status: typeof item === 'object' ? item.status : null,
+        type: 'Parameter',
+        severity: 'info',
+      });
+      pmCount += 1;
+    });
+    if (pmCount) sources.push({ name: 'Param mine', count: pmCount, key: 'param_mine' });
   }
 
   // Playwright browser crawler URLs + XHR/fetch
@@ -4172,11 +4409,37 @@ function buildUnifiedEndpoints(co) {
         });
       });
       (js.secrets || []).forEach(s => {
-        allSecrets.push({ type: s.type || 'Unknown', value: s.secret || s.value || s, file: js.file || js.url || '', host: js.host || '', severity: s.severity || 'high' });
+        const val = typeof s === 'string' ? s : (s.value || s.secret || '');
+        const stype = typeof s === 'object' ? (s.type || 'Unknown') : 'Unknown';
+        if (!val || _isFpJsSecret(stype, val) || _jsHostIsNoise(js.host || '')) return;
+        allSecrets.push({
+          type: stype,
+          value: val,
+          file: js.file || js.url || '',
+          host: js.host || '',
+          url: js.url || js.file || '',
+          severity: (typeof s === 'object' && s.severity) || 'high'
+        });
       });
     });
     sources.push({ name: 'JS Extraction', count: co.js_data.total_endpoints || 0, key: 'js' });
   }
+
+  (co.secrets_findings || []).forEach(sf => {
+    if (!sf || typeof sf !== 'object') return;
+    const meta = sf.metadata || {};
+    const val = sf.value || '';
+    const stype = meta.secret_type || (sf.type !== 'secret' ? sf.type : '') || 'secret';
+    if (!val || _isFpJsSecret(stype, val) || _jsHostIsNoise(sf.host || '')) return;
+    allSecrets.push({
+      type: stype,
+      value: val,
+      file: meta.source_url || '',
+      host: sf.host || '',
+      url: meta.source_url || '',
+      severity: sf.severity || 'high'
+    });
+  });
 
   // Runtime network captured while Playwright rendered JS-heavy pages.
   if (co.js_data?.runtime_network) {
@@ -4236,10 +4499,19 @@ function buildUnifiedEndpoints(co) {
     if (actualMethods.hasOwnProperty(m)) actualMethods[m]++;
   });
 
+  const seenSec = new Set();
+  const uniqueSecrets = allSecrets.filter(s => {
+    const k = String(s.type || '') + '|' + String(s.value || '') + '|' + String(s.file || s.url || '') + '|' + String(s.host || '');
+    if (seenSec.has(k)) return false;
+    seenSec.add(k);
+    return true;
+  });
+
   co._unifiedEndpoints = unique;
-  co._unifiedSecrets = allSecrets;
+  co._unifiedSecrets = uniqueSecrets;
   co._unifiedSources = sources;
   co._epStats = { stats, byType, actualMethods };
+  co._epStamp = stamp;
 }
 
 const SEV_CFG = {
@@ -4282,6 +4554,10 @@ function _renderEndpointsTabInner(co, el) {
   window._urlActiveSev = '';
   window._urlActiveMethod = '';
   window._urlGrouped = false;
+  if (_pendingFoundFilter && _pendingFoundFilter.tab === "endpoints") {
+    window._urlSearch = _pendingFoundFilter.q;
+    _pendingFoundFilter = null;
+  }
 
   const hasFilters = window._urlActiveSev || window._urlActiveMethod;
 
@@ -4291,7 +4567,7 @@ function _renderEndpointsTabInner(co, el) {
         <div class="section-head-main">
           <div class="section-kicker">Endpoint Inventory</div>
           <div class="section-title">URLs + JS routes + API panels — unified</div>
-          <div class="section-sub">Auto-classified by type and risk. Click severity or method stats to filter. Rows expand on click for full details.</div>
+          <div class="section-sub">${esc(typeof t === "function" ? (t("ep_sub_origin") || "Clique a URL, o host ou o arquivo JS para abrir o local em que foi achado. A linha expande os detalhes.") : "Clique a URL, o host ou o arquivo JS para abrir o local em que foi achado. A linha expande os detalhes.")}</div>
         </div>
         <div class="section-actions">
           ${hasFilters ? `<button class="btn btn-secondary" style="font-size:.68rem;padding:4px 10px" onclick="clearUrlFilters()">${icoHtml("x",14)} Clear Filters</button>` : ''}
@@ -4301,7 +4577,7 @@ function _renderEndpointsTabInner(co, el) {
       </div>
 
       ${unique.length === 0 && allSecrets.length === 0 ? `
-        <div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">No endpoints collected</div><div class="empty-state-copy">Run wayback, urlfinder, js_endpoints and api_panels modules.</div></div>
+        <div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">No endpoints collected</div><div class="empty-state-copy">Run wayback, urlfinder, js and api_panels modules.</div></div>
       ` : `
         <!-- Stat strip: totals + methods + secrets (all clickable) -->
         <div class="url-stat-strip">
@@ -4326,7 +4602,7 @@ function _renderEndpointsTabInner(co, el) {
             </div>
           `).join('')}
           ${allSecrets.length > 0 ? `
-            <div class="url-stat">
+            <div class="url-stat" role="button" tabindex="0" onclick="document.getElementById('endpoints-secrets')?.scrollIntoView({behavior:'smooth',block:'start'})">
               <div class="url-stat-num" style="color:var(--orange)">${allSecrets.length}</div>
               <div class="url-stat-lbl">SECRETS</div>
             </div>
@@ -4337,6 +4613,7 @@ function _renderEndpointsTabInner(co, el) {
         <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
           ${sources.map(s => `<span class="source-chip"><span style="color:var(--text3)">${s.name}:</span> <b>${s.count}</b></span>`).join('')}
         </div>
+        <div style="font-size:.68rem;color:var(--text3);margin:-4px 0 12px">${esc(typeof t === "function" ? (t("ep_js_noise") || "Imports de módulo, MIME e máscaras de data ficam de fora do inventário.") : "Imports de módulo, MIME e máscaras de data ficam de fora do inventário.")}</div>
 
         <!-- Filter bar -->
         <div class="filter-bar" style="margin-bottom:10px">
@@ -4368,36 +4645,44 @@ function _renderEndpointsTabInner(co, el) {
 
         <!-- Secrets section -->
         ${allSecrets.length > 0 ? `
+          <div id="endpoints-secrets" class="endpoints-secrets">
           <div class="section-head" style="margin-top:24px">
             <div class="section-head-main">
               <div class="section-kicker">${icoHtml("key",14)} Embedded Secrets</div>
               <div class="section-title">Credentials, tokens and keys from JS</div>
-              <div class="section-sub">Extracted from JavaScript bundles. Click masked values to reveal.</div>
+              <div class="section-sub">${esc(typeof t === "function" ? (t("ep_secrets_sub") || "Clique o arquivo ou o host para abrir o local em que o secret foi achado. O valor mascarado revela no clique.") : "Clique o arquivo ou o host para abrir o local em que o secret foi achado. O valor mascarado revela no clique.")}</div>
             </div>
           </div>
           <div class="url-table-wrap">
             <table class="url-table">
               <thead><tr>
-                <th style="width:15%">Type</th>
-                <th style="width:42%">Value (click to reveal)</th>
-                <th style="width:25%">File</th>
-                <th style="width:10%">Host</th>
-                <th style="width:8%">Risk</th>
+                <th style="width:14%">Type</th>
+                <th style="width:34%">Value (click to reveal)</th>
+                <th style="width:28%">File</th>
+                <th style="width:14%">Host</th>
+                <th style="width:10%">Risk</th>
               </tr></thead>
               <tbody>
                 ${allSecrets.map(s => {
                   const masked = maskSecret(s.value);
                   const sevColor = s.severity === 'critical' ? '#fb7185' : s.severity === 'high' ? '#fb923c' : '#fbbf24';
+                  const fileSrc = s.file || s.url || '';
+                  const fileHref = originHref(fileSrc, s.host);
+                  const fileLabel = fileSrc.replace(/^https?:\/\//, '').substring(0, 72) || fileSrc;
+                  const fileCell = fileHref
+                    ? originLinkHtml(fileSrc, fileLabel, { host: s.host, className: "origin-link origin-mono", title: _originTitle("js") })
+                    : `<button type="button" class="origin-jump" onclick="jumpToFound('jsreverse', ${_jsArg(fileSrc || s.host || s.type)})">${esc(fileSrc || "JS Reverse")}</button>`;
     return `<tr>
                     <td><span class="url-type-badge" style="background:rgba(251,146,60,0.1);color:#fb923c;border:1px solid rgba(251,146,60,0.2)">${esc(s.type)}</span></td>
                     <td><code class="secret-value" title="Click to reveal" onclick="this.textContent='${esc(s.value).replace(/'/g,"\\'")}';this.classList.add('revealed')">${esc(masked)}</code></td>
-                    <td><span style="font-size:.68rem;font-family:var(--mono);color:var(--text2)">${esc(s.file)}</span></td>
-                    <td><span style="font-size:.68rem;color:var(--text3)">${esc(s.host || '—')}</span></td>
+                    <td>${fileCell}</td>
+                    <td>${s.host ? originHostChip(s.host, "fg-host-chip origin-link") : '<span style="font-size:.68rem;color:var(--text3)">—</span>'}</td>
                     <td><span class="url-risk-badge" style="background:rgba(251,146,60,0.1);color:${sevColor}">${s.severity.toUpperCase()}</span></td>
                   </tr>`;
                 }).join('')}
               </tbody>
             </table>
+          </div>
           </div>
         ` : ''}
       `}
@@ -4525,33 +4810,34 @@ function _renderFlatTable(filtered) {
           const idx = start + i;
           const displayUrl = ep.url.length > 80 ? ep.url.substring(0, 77) + '\u2026' : ep.url;
           const hasQuery = ep.url.includes('?');
-          return `<tr class="ep-row" onclick="toggleEpRow(this,'${idx}')" title="Click to expand details">
+          return `<tr class="ep-row" onclick="toggleEpRow(this,'${idx}')" title="${esc(_originTitle())}">
             <td><span class="js-method-badge" style="background:${mc}12;color:${mc};border:1px solid ${mc}25;font-weight:700">${esc(ep.method)}</span>${ep.auth && ep.auth !== 'unknown' && ep.auth !== 'none_detected' ? `<span class="method-badge" style="background:var(--border);color:var(--teal);font-size:.58rem;padding:1px 5px;border-radius:3px;margin-left:3px" title="Auth: ${esc(ep.auth)}">${ep.auth === 'bearer' ? icoHtml("key",14)+'JWT' : ep.auth === 'api_key_header' ? icoHtml("key",14)+'API' : ep.auth === 'basic' ? icoHtml("lock",14)+'Basic' : ep.auth === 'oauth2' ? icoHtml("key",14)+'OAuth2' : ep.auth === 'cookie_session' ? icoHtml("tag",14)+'Session' : esc(ep.auth)}</span>` : ep.auth === 'none_detected' ? `<span class="method-badge" style="background:rgba(239,68,68,0.15);color:var(--red);font-size:.58rem;padding:1px 5px;border-radius:3px;margin-left:3px" title="No auth detected">${icoHtml("warning",14)} NOAUTH</span>` : ''}</td>
             <td>
               <div class="url-cell">
-                <span class="url-cell-link ep-url-main">${esc(displayUrl)}</span>
+                ${originLinkHtml(ep.url, displayUrl, { host: ep.host, className: "url-cell-link ep-url-main origin-link", title: _originTitle() })}
                 ${hasQuery ? '<span class="ep-expand-hint">\u25B6 Expand</span>' : ''}
               </div>
             </td>
             <td><span class="url-type-badge" style="background:${sc.bg};color:${sc.color};border:1px solid ${sc.color}22">${esc(ep.type)}</span></td>
-            <td><span class="url-cell-host">${esc(ep.host || '\u2014')}</span></td>
+            <td>${ep.host ? originHostChip(ep.host, "url-cell-host origin-link") : '<span class="url-cell-host">\u2014</span>'}</td>
             <td><span class="source-chip" style="font-size:.6rem">${esc(ep.source)}</span></td>
             <td><span class="url-risk-badge" style="background:${sc.bg};color:${sc.color};font-weight:700">${sc.labelShort}</span></td>
-            <td><button class="url-copy-btn" onclick="copyToClipboard('${escAttr(ep.url).replace(/'/g,"\\'")}');event.stopPropagation()" title="Copy URL">\uD83D\uDCCB</button></td>
+            <td><button class="url-copy-btn" onclick="copyToClipboard('${escAttr(ep.url).replace(/'/g,"\\'")}');event.stopPropagation()" title="${esc(typeof t === "function" ? (t("origin_copy") || "Copiar") : "Copiar")}">${icoHtml("clipboard",14)}</button></td>
           </tr>
           <tr class="ep-detail ep-detail-${idx}" style="display:none">
             <td colspan="7">
               <div class="ep-detail-box">
-                <div class="ep-detail-row"><span class="ep-detail-k">Full URL</span><a href="${escAttr(ep.url)}" target="_blank" rel="noopener" class="ep-detail-url">${esc(ep.url)}</a></div>
+                <div class="ep-detail-row"><span class="ep-detail-k">Full URL</span>${originLinkHtml(ep.url, ep.url, { host: ep.host, className: "ep-detail-url origin-link", title: _originTitle() })}</div>
                 <div class="ep-detail-row"><span class="ep-detail-k">Path</span><code class="ep-detail-code">${esc(ep.path || '/')}</code></div>
                 ${hasQuery ? `<div class="ep-detail-row"><span class="ep-detail-k">Query Params</span><code class="ep-detail-code">${esc(_extractQuery(ep.url))}</code></div>` : ''}
-                <div class="ep-detail-row"><span class="ep-detail-k">Host</span><span style="color:var(--text2)">${esc(ep.host || '\u2014')}</span></div>
+                <div class="ep-detail-row"><span class="ep-detail-k">Host</span>${ep.host ? originHostChip(ep.host, "origin-link") : '<span style="color:var(--text2)">\u2014</span>'}</div>
                 <div class="ep-detail-row"><span class="ep-detail-k">Source</span><span class="source-chip" style="font-size:.62rem">${esc(ep.source)}</span></div>
                 ${ep.status ? `<div class="ep-detail-row"><span class="ep-detail-k">Status</span><span style="color:var(--text2);font-family:var(--mono)">${ep.status}</span></div>` : ''}
-                ${ep.jsFile ? `<div class="ep-detail-row"><span class="ep-detail-k">JS File</span><span style="color:var(--text2);font-family:var(--mono)">${esc(ep.jsFile)}</span></div>` : ''}
+                ${ep.jsFile ? `<div class="ep-detail-row"><span class="ep-detail-k">JS File</span>${originLinkHtml(ep.jsFile, ep.jsFile, { host: ep.host, className: "origin-link origin-mono", title: _originTitle("js") })}</div>` : ''}
                 <div class="ep-detail-actions">
-                  <button class="btn btn-secondary" style="font-size:.62rem;padding:3px 8px" onclick="copyToClipboard('${escAttr(ep.url).replace(/'/g,"\\'")}')">\uD83D\uDCCB Copy URL</button>
-                  <a href="${escAttr(ep.url)}" target="_blank" rel="noopener" class="btn btn-secondary" style="font-size:.62rem;padding:3px 8px;text-decoration:none">\u2197 Open</a>
+                  <button class="btn btn-secondary" style="font-size:.62rem;padding:3px 8px" onclick="copyToClipboard('${escAttr(ep.url).replace(/'/g,"\\'")}')">${icoHtml("clipboard",14)} Copy URL</button>
+                  ${originHref(ep.url, ep.host) ? `<a href="${esc(originHref(ep.url, ep.host))}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="font-size:.62rem;padding:3px 8px;text-decoration:none">${icoHtml("link",14)} Abrir</a>` : ""}
+                  ${ep.jsFile ? `<button type="button" class="btn btn-secondary" style="font-size:.62rem;padding:3px 8px" onclick="jumpToFound('jsreverse', ${_jsArg(ep.jsFile)})">JS Reverse</button>` : ""}
                 </div>
               </div>
             </td>
@@ -4630,8 +4916,8 @@ function _renderGroupedView(filtered) {
           const displayUrl = ep.url.length > 100 ? ep.url.substring(0, 97) + '\u2026' : ep.url;
           return `<div class="ep-group-item">
             <span class="js-method-badge" style="font-size:.58rem;padding:1px 5px;background:${(_methodColor(ep.method))}12;color:${_methodColor(ep.method)};border:1px solid ${_methodColor(ep.method)}25">${esc(ep.method)}</span>${ep.auth && ep.auth !== 'unknown' && ep.auth !== 'none_detected' ? `<span class="method-badge" style="background:var(--border);color:var(--teal);font-size:.58rem;padding:1px 5px;border-radius:3px;margin-left:3px" title="Auth: ${esc(ep.auth)}">${ep.auth === 'bearer' ? icoHtml("key",14)+'JWT' : ep.auth === 'api_key_header' ? icoHtml("key",14)+'API' : ep.auth === 'basic' ? icoHtml("lock",14)+'Basic' : ep.auth === 'oauth2' ? icoHtml("key",14)+'OAuth2' : ep.auth === 'cookie_session' ? icoHtml("tag",14)+'Session' : esc(ep.auth)}</span>` : ep.auth === 'none_detected' ? `<span class="method-badge" style="background:rgba(239,68,68,0.15);color:var(--red);font-size:.58rem;padding:1px 5px;border-radius:3px;margin-left:3px" title="No auth detected">${icoHtml("warning",14)} NOAUTH</span>` : ''}
-            <a href="${escAttr(ep.url)}" target="_blank" rel="noopener" class="url-cell-link" style="font-size:.68rem" title="${esc(ep.url)}">${esc(displayUrl)}</a>
-            <button class="url-copy-btn" style="margin-left:auto" onclick="copyToClipboard('${escAttr(ep.url).replace(/'/g,"\\'")}');event.stopPropagation()">\uD83D\uDCCB</button>
+            ${originLinkHtml(ep.url, displayUrl, { host: ep.host, className: "url-cell-link origin-link", title: _originTitle() })}
+            <button class="url-copy-btn" style="margin-left:auto" onclick="copyToClipboard('${escAttr(ep.url).replace(/'/g,"\\'")}');event.stopPropagation()" title="${esc(typeof t === "function" ? (t("origin_copy") || "Copiar") : "Copiar")}">${icoHtml("clipboard",14)}</button>
           </div>`;
         }).join('')}
         ${eps.length > 12 ? `<div style="padding:4px 10px;font-size:.62rem;color:var(--text3)">+ ${eps.length - 12} more endpoints in this group</div>` : ''}
@@ -4972,61 +5258,6 @@ function renderInfraTab(co) {
     return;
   }
 
-  if (co.id === "portoseguro") {
-    el.innerHTML = shell(`
-      ${_infraCard("Azure AD / Microsoft Identity", [
-        _infraRow("Tenant ID", "ed7958eb-216a-4854-a42e-3c7127272021", "hi"),
-        _infraRow("Tenant Domain", "portoseguro.com.br"),
-        _infraRow("Namespace", "Managed (Azure AD)"),
-        _infraRow("App: Pagamentos", "f7803731-7830-4239-a811-fee25df9883a", "hi"),
-        _infraRow("App: SailPoint", "e488b780-0d92-4e92-8ea4-8b24849c0800", "hi"),
-        _infraRow("OAuth Token URL", "login.windows.net/ed7958eb.../oauth2/token", ""),
-      ])}
-      ${_infraCard("IAM / Identity Platforms", [
-        _infraRow("SailPoint Tenant", "portoseguro.login.sailpoint.com", "hi"),
-        _infraRow("SailPoint API", "portoseguro.api.identitynow.com"),
-        _infraRow("Portal Externo", "portaldeacessos.portoseguro.com.br"),
-        _infraRow("Formato usuário", "f0123456 (f + 7 dígitos)", "hi"),
-        _infraRow("Cognito PRD", "aem-prd.auth.ca-central-1.amazoncognito.com"),
-        _infraRow("Cognito HML", "aem-hml.auth.ca-central-1.amazoncognito.com"),
-        _infraRow("Citrix Gateway 1", "ho.portoseguro.com.br"),
-        _infraRow("Citrix Gateway 2", "ho.ctx.portoseguro.com.br"),
-      ])}
-      ${_infraCard("API Gateways", [
-        _infraRow("Sensedia PRD", "api-portoseg.sensedia.com", "hi"),
-        _infraRow("Sensedia HML", "apihlg-portoseg.sensedia.com"),
-        _infraRow("Sensedia DEV", "apidev-portoseg.sensedia.com"),
-        _infraRow("MuleSoft HML", "api.bap-hml.portoseguro.com.br"),
-        _infraRow("AWS GW 1", "bxn9o4w0pd.execute-api.ca-central-1.amazonaws.com", "hi"),
-        _infraRow("AWS GW 2", "47zimjues7.execute-api.us-west-2.amazonaws.com", "hi"),
-      ])}
-      ${_infraCard("WAF / CDN", [
-        _infraRow("Imperva IP 1", "45.223.45.75 (128 hosts)", "hi"),
-        _infraRow("Imperva IP 2", "45.223.41.75 (2 hosts)"),
-        _infraRow("Cloudflare", "~16 hosts"),
-        _infraRow("AWS CloudFront", "~41 hosts"),
-        _infraRow("Diretos (sem WAF)", "~56 hosts expostos", "warn"),
-      ])}
-      ${_infraCard("Internal Applications", [
-        _infraRow("MISP", "misp.portoseguro.com.br (131.161.97.x)", "warn"),
-        _infraRow("Tableau", "tableau.portoseguro.com.br (2023.1.7)", "warn"),
-        _infraRow("Orquestrador Pgmt", "portal.meiosdepagamento.portoseguro.com.br"),
-        _infraRow("Backoffice Loja", "psstore.portoseguro.com.br"),
-        _infraRow("Portal Prestador DEV", "dev.saude.portoseguro.com.br", "hi"),
-        _infraRow("API Marketplace", "developers.portoseguro.com.br (Axway)"),
-      ])}
-      ${_infraCard("Internal Network (DNS Leak)", [
-        _infraRow("Range principal", "131.161.96.x / 131.161.97.x", "hi"),
-        _infraRow("NAC Server 1", "nac11dc00-tlf → 172.28.1.172"),
-        _infraRow("NAC Server 2", "nac12db02-tlf → 172.28.1.173"),
-        _infraRow("ALM Server", "portoalm → 172.27.73.27"),
-        _infraRow("Hostname CSP leak", "nt50388.portoseguro.brasil", "warn"),
-        _infraRow("SBC (VoIP)", "sbc.portoseguro.com.br → 131.161.97.102"),
-      ])}
-    `);
-    return;
-  }
-
   const cidrs = co.cidr_ranges || [];
   const dns   = co.dns_data   || {};
   const waf   = co.waf_coverage || {};
@@ -5039,13 +5270,30 @@ function renderInfraTab(co) {
     acc[p].push(h.host);
     return acc;
   }, {});
+  const vendorsFound = co.vendors_found || [];
+  const vendorFp = co.vendor_fingerprints || [];
+  const relatedFound = (co.related_domains && (co.related_domains.found || co.related_domains.domains)) || [];
+  const shodanHosts = co.shodan_hosts || [];
+  const favMatches = (co.favicon_data && co.favicon_data.matches) || [];
+  const zoneAttempts = (co.zone_transfer_data && co.zone_transfer_data.attempts) || [];
+  const cmsRan = (co.cms_data && co.cms_data.ran) || [];
+  const certstreamSnap = (co.certstream_data && co.certstream_data.last_snapshot) || {};
+  const infraFindings = (co.infra_data && co.infra_data.findings) || [];
   const hasAny = cidrs.length ||
     (co.asn_numbers || []).length ||
     Object.keys(dns).length ||
     Object.keys(waf).length ||
     Object.keys(cloudAssets).length ||
     Object.keys(cloudHosts).length ||
-    cloudBucketFindings.length;
+    cloudBucketFindings.length ||
+    vendorsFound.length || vendorFp.length ||
+    relatedFound.length ||
+    shodanHosts.length ||
+    favMatches.length ||
+    zoneAttempts.length ||
+    cmsRan.length ||
+    (certstreamSnap.subdomains || []).length ||
+    infraFindings.length;
 
   if (!hasAny) {
     el.innerHTML = `<div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">No infrastructure data yet</div><div class="empty-state-copy">Run a pipeline scan to populate ASN, DNS, WAF and leak-related infrastructure details.</div></div>` + _emailPivotSection(co);
@@ -5099,6 +5347,67 @@ function renderInfraTab(co) {
       <div class="ic-row"><span class="ic-k">DMARC</span><span class="ic-v ${dmarc?'':'warn'}">${dmarc ? esc((dmarc.value||dmarc).slice(0,80)) : 'Missing'}</span></div>
       <div class="ic-row"><span class="ic-k">TXT records</span><span class="ic-v">${(dns.TXT||[]).length}</span></div>
     </div>`;
+  }
+
+  if (vendorsFound.length || vendorFp.length) {
+    const rows = [
+      _infraRow("Vendors", esc((vendorsFound.length ? vendorsFound : [...new Set(vendorFp.map(v => v.vendor).filter(Boolean))]).join(", ") || "—"), "hi"),
+      ...vendorFp.slice(0, 10).map(v => _infraRow(v.vendor || "appliance", esc((v.host || "") + (v.url ? " · " + v.url : "")), v.severity === "critical" || v.severity === "high" ? "warn" : "hi")),
+    ];
+    cards += _infraCard("Edge appliances", rows);
+  }
+
+  if (relatedFound.length) {
+    cards += _infraCard("Domínios relacionados", relatedFound.slice(0, 12).map(r => {
+      const d = typeof r === "string" ? r : (r.domain || "");
+      const extra = typeof r === "object" ? [r.status, (r.ips || []).slice(0, 2).join(", ")].filter(Boolean).join(" · ") : "";
+      return _infraRow(d, esc(extra || "resolvido"), "hi");
+    }));
+  }
+
+  if (shodanHosts.length) {
+    cards += _infraCard("Shodan", [
+      _infraRow("Hosts", String(shodanHosts.length), "hi"),
+      ...shodanHosts.slice(0, 8).map(h => {
+        const host = typeof h === "string" ? h : (h.host || h.ip || h.ip_str || "");
+        const ports = typeof h === "object" ? (h.ports || []).slice(0, 6).join(", ") : "";
+        return _infraRow(host, esc(ports || "visto"), "hi");
+      }),
+    ]);
+  }
+
+  if (favMatches.length) {
+    cards += _infraCard("Favicon hash", favMatches.slice(0, 8).map(m =>
+      _infraRow(m.product || m.title || m.hash || "match", esc([m.ip, m.port, m.hostname].filter(Boolean).join(" · ")), "hi")
+    ));
+  }
+
+  if (zoneAttempts.length) {
+    const ok = zoneAttempts.filter(a => a.success).length;
+    cards += _infraCard("Zone transfer", [
+      _infraRow("Tentativas", String(zoneAttempts.length)),
+      _infraRow("AXFR ok", String(ok), ok ? "warn" : ""),
+    ]);
+  }
+
+  if (cmsRan.length) {
+    cards += _infraCard("CMS scan", [
+      _infraRow("Rodou", esc(cmsRan.join(", ")), "hi"),
+    ]);
+  }
+
+  const csSubs = certstreamSnap.subdomains || [];
+  if (csSubs.length) {
+    cards += _infraCard("Certstream", [
+      _infraRow("Subdomínios", String(csSubs.length), "hi"),
+      ...csSubs.slice(0, 8).map(s => _infraRow("CT", esc(s))),
+    ]);
+  }
+
+  if (infraFindings.length) {
+    cards += _infraCard("Exposição de infra", infraFindings.slice(0, 8).map(f =>
+      _infraRow(f.service || f.host || "serviço", esc(f.title || f.url || f.host || ""), "warn")
+    ));
   }
 
   el.innerHTML = shell(cards) + _emailPivotSection(co);
@@ -6600,10 +6909,10 @@ function _playwrightInventorySummary(session) {
   }).join("");
   return `
     <div class="job-detail-grid">
-      <div><span class="job-detail-k">Discovered</span><div class="job-detail-v">${discovered}</div></div>
-      <div><span class="job-detail-k">Validated</span><div class="job-detail-v">${validated}</div></div>
-      <div><span class="job-detail-k">Pending</span><div class="job-detail-v">${pending}</div></div>
-      <div><span class="job-detail-k">Inventory</span><div class="job-detail-v">${items.length}</div></div>
+      <div><span class="job-detail-k">${esc(_opT("op_discovered", "Descobertos"))}</span><div class="job-detail-v">${discovered}</div></div>
+      <div><span class="job-detail-k">${esc(_opT("op_validated", "Validados"))}</span><div class="job-detail-v">${validated}</div></div>
+      <div><span class="job-detail-k">${esc(_opT("op_pending_hosts", "Pendentes"))}</span><div class="job-detail-v">${pending}</div></div>
+      <div><span class="job-detail-k">${esc(_opT("op_inventory", "Inventário"))}</span><div class="job-detail-v">${items.length}</div></div>
     </div>
     ${chips ? `<div class="chip-row" style="margin-top:10px">${chips}</div>` : ""}
   `;
@@ -6733,7 +7042,7 @@ async function renderCompanyPlaywrightPanel(cid) {
   panel.innerHTML = `
     <div class="job-detail-card">
       <div class="job-detail-title">Playwright Recon</div>
-      <div class="job-detail-copy">Loading latest job for this company...</div>
+      <div class="job-detail-copy">${esc(_opT("pipe_pw_loading", "Carregando o último job desta empresa…"))}</div>
     </div>
   `;
   try {
@@ -6745,7 +7054,7 @@ async function renderCompanyPlaywrightPanel(cid) {
       panel.innerHTML = `
         <div class="job-detail-card">
           <div class="job-detail-title">Playwright Recon</div>
-          <div class="job-detail-copy">${ready ? "No Playwright Recon jobs found for this company yet." : "Locked until the bug bounty pipeline scan finishes."}</div>
+          <div class="job-detail-copy">${esc(ready ? _opT("pipe_pw_none", "Nenhum job Playwright Recon nesta empresa.") : _opT("pipe_pw_locked", "Liberado quando o scan da pipeline terminar."))}</div>
         </div>
       `;
       return;
@@ -6768,20 +7077,20 @@ async function renderCompanyPlaywrightPanel(cid) {
             <div class="job-detail-copy">${esc(job.id)} · ${esc(job.status || "—")} · ${esc(job.created_at || "—")}</div>
           </div>
           <div class="job-actions">
-            <button class="btn btn-secondary btn-icon" onclick="openJobDetail(${_jsArg(job.id)})">Details</button>
-            ${canArtifacts ? `<a class="btn btn-secondary btn-icon" href="${_jobArtifactUrl(job.id, 'report')}" target="_blank" rel="noopener">Report</a>` : ""}
-            ${canArtifacts ? `<a class="btn btn-secondary btn-icon" href="${_jobArtifactUrl(job.id, 'session')}" target="_blank" rel="noopener">Session</a>` : ""}
+            <button type="button" class="btn btn-secondary btn-icon" onclick="openJobDetail(${_jsArg(job.id)})">${esc(_opT("op_details", "Detalhes"))}</button>
+            ${canArtifacts ? `<a class="btn btn-secondary btn-icon" href="${_jobArtifactUrl(job.id, 'report')}" target="_blank" rel="noopener">${esc(_opT("op_report", "Relatório"))}</a>` : ""}
+            ${canArtifacts ? `<a class="btn btn-secondary btn-icon" href="${_jobArtifactUrl(job.id, 'session')}" target="_blank" rel="noopener">${esc(_opT("op_session", "Sessão"))}</a>` : ""}
           </div>
         </div>
         <div class="job-detail-grid">
-          <div><span class="job-detail-k">Target</span><div class="job-detail-v">${esc(job.target || opts.target_url || "—")}</div></div>
-          <div><span class="job-detail-k">Started</span><div class="job-detail-v">${esc(_fmtJobTime(job.started_at))}</div></div>
-          <div><span class="job-detail-k">Finished</span><div class="job-detail-v">${esc(_fmtJobTime(job.finished_at))}</div></div>
-          <div><span class="job-detail-k">Attempts</span><div class="job-detail-v">${Number(job.attempts || 0)} / ${Number(job.max_attempts || 1)}</div></div>
+          <div><span class="job-detail-k">${esc(_opT("pipe_pw_target", "Alvo"))}</span><div class="job-detail-v">${esc(job.target || opts.target_url || "—")}</div></div>
+          <div><span class="job-detail-k">${esc(_opT("pipe_pw_started", "Início"))}</span><div class="job-detail-v">${esc(_fmtJobTime(job.started_at))}</div></div>
+          <div><span class="job-detail-k">${esc(_opT("pipe_pw_finished", "Fim"))}</span><div class="job-detail-v">${esc(_fmtJobTime(job.finished_at))}</div></div>
+          <div><span class="job-detail-k">${esc(_opT("pipe_pw_attempts", "Tentativas"))}</span><div class="job-detail-v">${Number(job.attempts || 0)} / ${Number(job.max_attempts || 1)}</div></div>
         </div>
         <div class="job-detail-copy">
-          Output: <code>${esc(opts.output || "—")}</code><br>
-          Evidence: <code>${esc(opts.evidence_dir || "—")}</code>
+          ${esc(_opT("pipe_pw_output", "Saída"))}: <code>${esc(opts.output || "—")}</code><br>
+          ${esc(_opT("pipe_pw_evidence", "Evidência"))}: <code>${esc(opts.evidence_dir || "—")}</code>
         </div>
         ${inventoryHtml}
       </div>
@@ -6790,7 +7099,7 @@ async function renderCompanyPlaywrightPanel(cid) {
     panel.innerHTML = `
       <div class="job-detail-card">
         <div class="job-detail-title">Playwright Recon</div>
-        <div class="job-detail-copy">Failed to load Playwright jobs: ${esc(e.message)}</div>
+        <div class="job-detail-copy">${esc(_opT("pipe_pw_fail", "Falha ao carregar jobs Playwright: {err}").replace("{err}", e.message || ""))}</div>
       </div>
     `;
   }
@@ -6819,282 +7128,513 @@ async function _fetchLatestPlaywrightBundle(cid) {
   return {job, session, report};
 }
 
-async function renderOperationTab(co) {
-  const el = document.getElementById("tab-operation");
+function _opT(key, fallback) {
+  if (typeof window.t === "function") {
+    const v = window.t(key);
+    if (v && v !== key) return v;
+  }
+  return fallback || key;
+}
+
+function _opSummarize(co) {
+  if (window.ASMOperation && typeof window.ASMOperation.summarize === "function") {
+    return window.ASMOperation.summarize(co);
+  }
+  return {
+    has: false, pages: [], crawl: [], apis: [], cookies: [], observations: [],
+    third: [], missingHeaders: [], forms: [], urls: [], runtimeJs: [],
+    runtimeNetwork: [], jsFiles: [], hostsScanned: 0, hostsCrawled: 0,
+    urlCount: 0, apiCount: 0, formCount: 0, cookieCount: 0, insecureCookies: 0,
+    shots: 0, scannedAt: "", badge: 0
+  };
+}
+
+function _opSetBadge(persist) {
+  const el = document.getElementById("tc-operation");
   if (!el) return;
-  el.innerHTML = `
-    <div class="section-shell">
-      <div class="section-head">
-        <div class="section-head-main">
-          <div class="section-kicker">Playwright Operation</div>
-          <div class="section-title">Browser-returned surface, session state and runtime evidence</div>
-          <div class="section-sub">This view shows everything the Playwright pass returned for the selected company.</div>
-        </div>
+  const n = persist && persist.badge;
+  el.textContent = n ? String(n) : "";
+}
+
+function _opShotUrl(cid, raw) {
+  if (window.ASMOperation && typeof window.ASMOperation.screenshotServeUrl === "function") {
+    return window.ASMOperation.screenshotServeUrl(cid, raw);
+  }
+  return "";
+}
+
+function _shotSrc(raw, cid) {
+  cid = cid || (typeof state !== "undefined" && state.currentId) || "";
+  return _opShotUrl(cid, raw);
+}
+
+function _shotMissingCid(cid, raw) {
+  var s = String(raw || "").replace(/\\/g, "/");
+  cid = String(cid || "").trim();
+  if (!s || !cid) return true;
+  return s.indexOf("screenshots/" + cid + "/") === -1;
+}
+
+function _shotJs(src) {
+  return JSON.stringify(src || "").replace(/"/g, "&quot;");
+}
+
+function _opClip(s, n) {
+  s = String(s || "");
+  n = n || 140;
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+function _opHydrate(el) {
+  if (el && typeof window.hydrateIcons === "function") window.hydrateIcons(el);
+}
+
+function _opCta(cid) {
+  return `<button type="button" class="btn btn-primary" id="playwright-btn-${escAttr(cid)}" onclick='openPlaywrightModal(${_jsArg(cid)})'>${icoHtml("play",14)} ${_opT("op_cta_playwright", "Enfileirar Playwright Recon")}</button>`;
+}
+
+function _opTable(headers, rowsHtml, emptyMsg) {
+  const cols = headers.length;
+  return `<div class="table-shell"><div class="tl-wrap"><table class="jobs-table compact-table">
+    <thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+    <tbody>${rowsHtml || `<tr><td colspan="${cols}" class="recon-empty-row">${esc(emptyMsg)}</td></tr>`}</tbody>
+  </table></div></div>`;
+}
+
+function _opCapNote(shown, total) {
+  if (!total || shown >= total) return "";
+  return `<div class="job-detail-copy">${esc(_opT("op_showing", "Mostrando {n} de {total}").replace("{n}", String(shown)).replace("{total}", String(total)))}</div>`;
+}
+
+function _renderOperationPersistCards(co, persist) {
+  const cid = co.id || "";
+  const pages = persist.pages || [];
+  const crawl = persist.crawl || [];
+  const apis = persist.apis || [];
+  const cookies = persist.cookies || [];
+  const observations = persist.observations || [];
+  const third = persist.third || [];
+  const forms = persist.forms || [];
+  const runtimeJs = persist.runtimeJs || [];
+  const network = persist.runtimeNetwork || [];
+  const pageCap = pages.slice(0, 30);
+  const apiCap = apis.slice(0, 40);
+  const cookieCap = cookies.slice(0, 30);
+  const obsCap = observations.slice(0, 20);
+  const formCap = forms.slice(0, 12);
+  const jsCap = runtimeJs.slice(0, 20);
+  const netCap = network.slice(0, 30);
+
+  const pageRows = pageCap.map(p => {
+    const shot = _opShotUrl(cid, p.screenshot);
+    const miss = Array.isArray(p.security_headers?.missing) ? p.security_headers.missing.join(", ") : "";
+    const shotCell = shot
+      ? `<a href="${escAttr(shot)}" target="_blank" rel="noopener"><img class="op-shot" src="${escAttr(shot)}" alt="" onerror="this.style.display='none'"> ${_opT("op_open", "Abrir")}</a>`
+      : "—";
+    return `<tr>
+      <td class="recon-mono">${originLinkHtml(p.url || "", p.url || "", { title: _originTitle() })}</td>
+      <td>${esc(String(p.status ?? "—"))}</td>
+      <td>${esc(p.title || "")}</td>
+      <td class="recon-mono">${esc(_opClip(miss, 80))}</td>
+      <td>${shotCell}</td>
+    </tr>`;
+  }).join("");
+
+  const crawlRows = crawl.map(r => `<tr>
+    <td class="recon-mono">${r.host ? originHostChip(r.host, "origin-link") : "—"}</td>
+    <td class="recon-mono">${originLinkHtml(r.url || "", r.url || "", { host: r.host, title: _originTitle() })}</td>
+    <td>${esc(String(r.pages ?? 0))}</td>
+    <td>${esc(String(Array.isArray(r.urls) ? r.urls.length : 0))}</td>
+    <td>${esc(String(Array.isArray(r.api_endpoints) ? r.api_endpoints.length : 0))}</td>
+    <td>${esc(String(Array.isArray(r.forms) ? r.forms.length : 0))}</td>
+  </tr>`).join("");
+
+  const apiRows = apiCap.map(e => `<tr>
+    <td>${esc(e.method || "GET")}</td>
+    <td class="recon-mono">${originLinkHtml(e.url || "", e.url || "", { title: _originTitle() })}</td>
+    <td>${esc(e.type || "")}</td>
+  </tr>`).join("");
+
+  const cookieRows = cookieCap.map(c => `<tr>
+    <td class="recon-mono">${esc(c.name || "")}</td>
+    <td class="recon-mono">${c.domain ? originHostChip(String(c.domain).replace(/^\./, ""), "origin-link") : "—"}</td>
+    <td>${c.httpOnly ? _opT("op_yes", "sim") : _opT("op_no", "não")}</td>
+    <td>${c.secure ? _opT("op_yes", "sim") : _opT("op_no", "não")}</td>
+    <td class="recon-mono">${originLinkHtml(c.page || "", c.page || "", { title: _originTitle() })}</td>
+  </tr>`).join("");
+
+  const obsRows = obsCap.map(o => `<tr>
+    <td class="recon-mono">${originLinkHtml(o.url || "", o.url || "", { title: _originTitle() })}</td>
+    <td>${esc(_opClip(o.text, 180))}</td>
+  </tr>`).join("");
+
+  const thirdChips = third.slice(0, 24).map(s => {
+    const href = originHref(s);
+    return href
+      ? originLinkHtml(s, s, { className: "op-chip origin-link", title: _originTitle() })
+      : `<span class="op-chip">${esc(s)}</span>`;
+  }).join("");
+  const formRows = formCap.map(f => `<tr>
+    <td>${esc((f && f.method) || "")}</td>
+    <td class="recon-mono">${originLinkHtml((f && f.action) || "", (f && f.action) || "", { title: _originTitle() })}</td>
+    <td class="recon-mono">${esc(Array.isArray(f && f.inputs) ? f.inputs.join(", ") : "")}</td>
+  </tr>`).join("");
+
+  const jsRows = jsCap.map(u => {
+    const url = typeof u === "string" ? u : (u && u.url) || "";
+    return `<tr><td class="recon-mono">${originLinkHtml(url, url, { title: _originTitle("js") })}</td></tr>`;
+  }).join("");
+
+  const netRows = netCap.map(n => `<tr>
+    <td>${esc(n.method || "GET")}</td>
+    <td>${esc(n.type || "")}</td>
+    <td class="recon-mono">${originLinkHtml(n.url || "", n.url || "", { title: _originTitle() })}</td>
+  </tr>`).join("");
+
+  return `
+    <div class="recon-kpi-grid">
+      ${_reconKpi(pages.length, _opT("op_pages", "Páginas"), `${persist.hostsScanned || 0} hosts`, "teal")}
+      ${_reconKpi(persist.urlCount, _opT("op_crawl_urls", "URLs crawl"), `${persist.hostsCrawled || 0} hosts`, "blue")}
+      ${_reconKpi(persist.apiCount, _opT("op_apis", "APIs"), `${persist.formCount || 0} forms`, "purple")}
+      ${_reconKpi(persist.insecureCookies, _opT("op_insecure", "Cookies inseguros"), `${persist.cookieCount || 0} cookies`, "orange")}
+      ${_reconKpi(runtimeJs.length, _opT("op_runtime_js", "JS runtime"), `${(persist.jsFiles || []).length} bundles`, "green")}
+      ${_reconKpi(persist.shots, _opT("op_shots", "Screenshots"), persist.scannedAt ? String(persist.scannedAt).slice(0, 19) : "", "red")}
+    </div>
+
+    <div class="job-detail-card" style="margin-top:16px;margin-bottom:14px">
+      <div class="job-detail-title">${esc(_opT("op_pages_title", "Páginas do browser"))}</div>
+      ${_opTable(
+        [_opT("op_col_url", "URL"), _opT("op_col_status", "Status"), _opT("op_col_title", "Título"), _opT("op_col_header", "Headers ausentes"), _opT("op_col_shot", "Screenshot")],
+        pageRows,
+        _opT("op_none_pages", "Nenhuma página persistida.")
+      )}
+      ${_opCapNote(pageCap.length, pages.length)}
+    </div>
+
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">${esc(_opT("op_crawl_title", "Crawl por host"))}</div>
+      ${_opTable(
+        [_opT("op_col_host", "Host"), _opT("op_col_url", "URL"), _opT("op_col_pages", "Páginas"), _opT("op_col_urls", "URLs"), _opT("op_col_apis", "APIs"), _opT("op_col_forms", "Forms")],
+        crawlRows,
+        _opT("op_none_crawl", "Nenhum host crawleado.")
+      )}
+    </div>
+
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">${esc(_opT("op_api_title", "Endpoints de API"))}</div>
+      ${_opTable(
+        [_opT("op_col_method", "Método"), _opT("op_col_url", "URL"), _opT("op_col_type", "Tipo")],
+        apiRows,
+        _opT("op_none_api", "Nenhuma API capturada.")
+      )}
+      ${_opCapNote(apiCap.length, apis.length)}
+    </div>
+
+    <div class="recon-two-col">
+      <div class="job-detail-card">
+        <div class="job-detail-title">${esc(_opT("op_cookie_title", "Cookies (nome e flags)"))}</div>
+        ${_opTable(
+          [_opT("op_col_name", "Nome"), _opT("op_col_domain", "Domínio"), "HttpOnly", "Secure", _opT("op_col_url", "Página")],
+          cookieRows,
+          _opT("op_none_cookie", "Nenhum cookie persistido.")
+        )}
+        ${_opCapNote(cookieCap.length, cookies.length)}
+      </div>
+      <div class="job-detail-card">
+        <div class="job-detail-title">${esc(_opT("op_obs_title", "Observações"))}</div>
+        ${_opTable(
+          [_opT("op_col_url", "URL"), _opT("op_col_obs", "Observação")],
+          obsRows,
+          _opT("op_none_obs", "Nenhuma observação.")
+        )}
+      </div>
+    </div>
+
+    <div class="job-detail-card" style="margin-top:14px;margin-bottom:14px">
+      <div class="job-detail-title">${esc(_opT("op_third_title", "Serviços de terceiros"))}</div>
+      ${thirdChips ? `<div class="op-chip-row">${thirdChips}</div>` : `<div class="job-detail-copy">${esc(_opT("op_none_third", "Nenhum terceiro listado."))}</div>`}
+    </div>
+
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">${esc(_opT("op_form_title", "Formulários"))}</div>
+      ${_opTable(
+        [_opT("op_col_method", "Método"), _opT("op_col_action", "Action"), _opT("op_col_inputs", "Campos")],
+        formRows,
+        _opT("op_none_form", "Nenhum formulário capturado.")
+      )}
+    </div>
+
+    <div class="recon-two-col">
+      <div class="job-detail-card">
+        <div class="job-detail-title">${esc(_opT("op_js_title", "JavaScript em runtime"))}</div>
+        ${_opTable([_opT("op_col_bundle", "Bundle")], jsRows, _opT("op_none_js", "Nenhum JS de runtime."))}
+        ${_opCapNote(jsCap.length, runtimeJs.length)}
+      </div>
+      <div class="job-detail-card">
+        <div class="job-detail-title">${esc(_opT("op_net_title", "Rede em runtime"))}</div>
+        ${_opTable(
+          [_opT("op_col_method", "Método"), _opT("op_col_type", "Tipo"), _opT("op_col_url", "URL")],
+          netRows,
+          _opT("op_none_net", "Nenhuma chamada de rede.")
+        )}
+        ${_opCapNote(netCap.length, network.length)}
       </div>
     </div>
   `;
+}
 
-  try {
-    const bundle = await _fetchLatestPlaywrightBundle(co.id);
-    const job = bundle.job;
-    const session = bundle.session;
-    if (!job) {
-      el.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div>
-          <div class="empty-state-title">No Playwright run found</div>
-          <div class="empty-state-copy">Run the bug bounty pipeline first, then queue Playwright Recon to populate this view.</div>
-        </div>`;
-      return;
-    }
-
-    const pages = Array.isArray(session?.pages) ? session.pages : [];
-    const endpoints = Array.isArray(session?.endpoints) ? session.endpoints : [];
-    const js = Array.isArray(session?.js) ? session.js : [];
-    const tech = Array.isArray(session?.tech) ? session.tech : [];
-    const consoleEvents = Array.isArray(session?.console) ? session.console : [];
-    const auth = session?.auth || {};
-    const confirmed = Array.isArray(session?.findings) ? session.findings.filter(f => String(f.status || "").includes("confirmed")) : [];
-    const idor = Array.isArray(session?.idor) ? session.idor : [];
-    const xss = Array.isArray(session?.xss) ? session.xss : [];
-    const race = Array.isArray(session?.race) ? session.race : [];
-    const inventory = session ? _playwrightInventorySummary(session) : "";
-    const report = bundle.report || "";
-    const storageKeys = session?.storage ? Object.keys(session.storage) : [];
-    const tokenCount = Array.isArray(session?.tokens) ? session.tokens.length : 0;
-
-    const finished = _fmtJobTime(job.finished_at);
-    const started = _fmtJobTime(job.started_at);
-    const canArtifacts = job.status === "done";
-    const cidJs = _jsArg(job.id);
-
-    if (document.getElementById("tc-operation")) {
-      document.getElementById("tc-operation").textContent = String(pages.length || endpoints.length || js.length || 0);
-    }
-
-    const pageRows = pages.slice(0, 30).map(p => `
+function _renderPlaywrightSessionHtml(job, session, report) {
+  if (!job) return "";
+  const pages = Array.isArray(session?.pages) ? session.pages : [];
+  const endpoints = Array.isArray(session?.endpoints) ? session.endpoints : [];
+  const js = Array.isArray(session?.js) ? session.js : [];
+  const tech = Array.isArray(session?.tech) ? session.tech : [];
+  const consoleEvents = Array.isArray(session?.console) ? session.console : [];
+  const auth = session?.auth || {};
+  const confirmed = Array.isArray(session?.findings) ? session.findings.filter(f => String(f.status || "").includes("confirmed")) : [];
+  const idor = Array.isArray(session?.idor) ? session.idor : [];
+  const xss = Array.isArray(session?.xss) ? session.xss : [];
+  const race = Array.isArray(session?.race) ? session.race : [];
+  const inventory = session ? _playwrightInventorySummary(session) : "";
+  const storageKeys = session?.storage ? Object.keys(session.storage) : [];
+  const tokenCount = Array.isArray(session?.tokens) ? session.tokens.length : 0;
+  const finished = _fmtJobTime(job.finished_at);
+  const started = _fmtJobTime(job.started_at);
+  const canArtifacts = job.status === "done";
+  const cidJs = _jsArg(job.id);
+  const pageRows = pages.slice(0, 30).map(p => `
       <tr>
-        <td style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${esc(p.url || "")}</td>
+        <td class="recon-mono">${originLinkHtml(p.url || "", p.url || "", { title: _originTitle() })}</td>
         <td>${esc(String(p.depth ?? ""))}</td>
         <td>${esc(String(p.status ?? ""))}</td>
         <td>${esc(p.title || "")}</td>
-        <td>${p.screenshot_path ? `<a href="${esc('/' + p.screenshot_path)}" target="_blank" rel="noopener">Open</a>` : "—"}</td>
+        <td>${p.screenshot_path ? `<a href="${esc(_shotSrc(p.screenshot_path))}" target="_blank" rel="noopener">${esc(_opT("op_open", "Abrir"))}</a>` : "—"}</td>
       </tr>`).join("");
-
-    const endpointRows = endpoints.slice(0, 40).map(e => `
+  const endpointRows = endpoints.slice(0, 40).map(e => `
       <tr>
         <td>${esc(e.method || "GET")}</td>
-        <td style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${esc(e.url || "")}</td>
+        <td class="recon-mono">${originLinkHtml(e.url || "", e.url || "", { title: _originTitle() })}</td>
         <td>${esc(String(e.status ?? "—"))}</td>
         <td>${esc(e.content_type || "")}</td>
-        <td>${e.auth_required === true ? "yes" : e.auth_required === false ? "no" : "—"}</td>
+        <td>${e.auth_required === true ? _opT("op_yes", "sim") : e.auth_required === false ? _opT("op_no", "não") : "—"}</td>
       </tr>`).join("");
-
-    const jsRows = js.slice(0, 30).map(j => `
+  const jsRows = js.slice(0, 30).map(j => `
       <tr>
-        <td style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${esc(j.file_url || "")}</td>
+        <td class="recon-mono">${originLinkHtml(j.file_url || "", j.file_url || "", { title: _originTitle("js") })}</td>
         <td>${esc(String(j.size || 0))}</td>
-        <td>${j.source_map_accessible ? "yes" : (j.source_map_url ? "ref" : "no")}</td>
+        <td>${j.source_map_accessible ? _opT("op_yes", "sim") : (j.source_map_url ? "ref" : _opT("op_no", "não"))}</td>
         <td>${esc(String((j.endpoints || []).length))}</td>
         <td>${esc(String((j.routes || []).length))}</td>
       </tr>`).join("");
-
-    const techRows = tech.slice(0, 30).map(t => `
+  const techRows = tech.slice(0, 30).map(t => `
       <tr>
         <td>${esc(t.name || "")}</td>
         <td>${esc(t.category || "")}</td>
         <td>${esc(t.confidence || "")}</td>
         <td>${esc(t.source || "")}</td>
       </tr>`).join("");
-
-    const consoleRows = consoleEvents.slice(0, 40).map(c => `
+  const consoleRows = consoleEvents.slice(0, 40).map(c => `
       <tr>
         <td>${esc(c.type || "")}</td>
-        <td style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${esc(c.message || "")}</td>
+        <td class="recon-mono">${esc(c.message || "")}</td>
         <td>${esc(c.classification || "")}</td>
-        <td>${esc(c.page_url || "")}</td>
+        <td class="recon-mono">${originLinkHtml(c.page_url || "", c.page_url || "", { title: _originTitle() })}</td>
       </tr>`).join("");
-
-    const authForms = Array.isArray(auth.login_forms) ? auth.login_forms : [];
-    const authRows = authForms.slice(0, 10).map(f => `
+  const authForms = Array.isArray(auth.login_forms) ? auth.login_forms : [];
+  const authRows = authForms.slice(0, 10).map(f => `
       <tr>
-        <td>${esc(f.action || "")}</td>
+        <td class="recon-mono">${originLinkHtml(f.action || "", f.action || "", { title: _originTitle() })}</td>
         <td>${esc(f.method || "")}</td>
         <td>${esc(f.password_field || "")}</td>
         <td>${esc(f.csrf_field || "")}</td>
       </tr>`).join("");
-
-    const findingsRows = confirmed.slice(0, 20).map(f => `
+  const findingsRows = confirmed.slice(0, 20).map(f => `
       <tr>
         <td>${esc(f.title || "")}</td>
         <td>${esc(f.severity || "")}</td>
-        <td style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${esc(f.endpoint || f.url || "")}</td>
+        <td class="recon-mono">${originLinkHtml(f.endpoint || f.url || "", f.endpoint || f.url || "", { title: _originTitle() })}</td>
         <td>${esc(f.status || "")}</td>
       </tr>`).join("");
-
-    const idorRows = idor.slice(0, 20).map(i => `
+  const idorRows = idor.slice(0, 20).map(i => `
       <tr>
-        <td style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${esc(i.url || "")}</td>
+        <td class="recon-mono">${originLinkHtml(i.url || "", i.url || "", { title: _originTitle() })}</td>
         <td>${esc(i.parameter || "")}</td>
         <td>${esc(i.status || "")}</td>
         <td>${esc((i.notes || []).join("; "))}</td>
       </tr>`).join("");
-
-    const xssRows = xss.slice(0, 20).map(x => `
+  const xssRows = xss.slice(0, 20).map(x => `
       <tr>
-        <td style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${esc(x.url || "")}</td>
+        <td class="recon-mono">${originLinkHtml(x.url || "", x.url || "", { title: _originTitle() })}</td>
         <td>${esc(x.parameter || "")}</td>
         <td>${esc(x.context || "")}</td>
         <td>${esc(x.status || "")}</td>
       </tr>`).join("");
-
-    const raceRows = race.slice(0, 20).map(r => `
+  const raceRows = race.slice(0, 20).map(r => `
       <tr>
-        <td style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${esc(r.url || "")}</td>
+        <td class="recon-mono">${originLinkHtml(r.url || "", r.url || "", { title: _originTitle() })}</td>
         <td>${esc(r.category || "")}</td>
         <td>${esc(r.probe_status || "")}</td>
         <td>${esc(r.reason || "")}</td>
       </tr>`).join("");
 
-    el.innerHTML = `
-      <div class="section-shell">
-        <div class="section-head">
-          <div class="section-head-main">
-            <div class="section-kicker">Playwright Operation</div>
-            <div class="section-title">${esc(job.company_id || "—")} · ${esc(_jobStatusLabel(job.status))}</div>
-            <div class="section-sub">${esc(job.id)} · started ${esc(started)} · finished ${esc(finished)}</div>
-          </div>
-          <div class="section-actions">
-            <div class="job-actions">
-              <button class="btn btn-secondary btn-icon" onclick='openJobDetail(${cidJs})'>Details</button>
-              ${canArtifacts ? `<a class="btn btn-secondary btn-icon" href="${_jobArtifactUrl(job.id, 'report')}" target="_blank" rel="noopener">Report</a>` : ""}
-              ${canArtifacts ? `<a class="btn btn-secondary btn-icon" href="${_jobArtifactUrl(job.id, 'session')}" target="_blank" rel="noopener">Session</a>` : ""}
-            </div>
-          </div>
+  if (!session) {
+    return `
+      <div class="op-banner">
+        <div>
+          <div class="job-detail-title">${esc(_opT("op_pw_title", "Sessão Playwright"))}</div>
+          <div class="job-detail-copy">${esc(job.id)} · ${esc(_jobStatusLabel(job.status))} · ${esc(_opT("op_pw_pending", "Sessão ainda não disponível. A evidência da pipeline permanece acima."))}</div>
         </div>
-
-        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
-          ${_jobKPICard("pages", pages.length)}
-          ${_jobKPICard("endpoints", endpoints.length)}
-          ${_jobKPICard("js", js.length)}
-          ${_jobKPICard("tech", tech.length)}
-          ${_jobKPICard("confirmed", confirmed.length)}
-          ${_jobKPICard("console", consoleEvents.length)}
+        <div class="section-actions">
+          <button type="button" class="btn btn-secondary" onclick='openJobDetail(${cidJs})'>${esc(_opT("op_cta_details", "Detalhes"))}</button>
         </div>
-
-        <div class="job-detail-card" style="margin-bottom:14px">
-          <div class="job-detail-title">Host inventory</div>
-          ${inventory || '<div class="job-detail-copy">No host inventory captured yet.</div>'}
-        </div>
-
-        <div class="job-detail-card" style="margin-bottom:14px">
-          <div class="job-detail-title">Captured pages</div>
-          <div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-            <thead><tr><th>URL</th><th>Depth</th><th>Status</th><th>Title</th><th>Screenshot</th></tr></thead>
-            <tbody>${pageRows || '<tr><td colspan="5" style="color:var(--text3);padding:18px">No pages captured.</td></tr>'}</tbody>
-          </table></div></div>
-        </div>
-
-        <div class="job-detail-card" style="margin-bottom:14px">
-          <div class="job-detail-title">Endpoints</div>
-          <div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-            <thead><tr><th>Method</th><th>URL</th><th>Status</th><th>Content-Type</th><th>Auth</th></tr></thead>
-            <tbody>${endpointRows || '<tr><td colspan="5" style="color:var(--text3);padding:18px">No endpoints captured.</td></tr>'}</tbody>
-          </table></div></div>
-        </div>
-
-        <div class="job-detail-card" style="margin-bottom:14px">
-          <div class="job-detail-title">JavaScript</div>
-          <div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-            <thead><tr><th>Bundle</th><th>Size</th><th>Source Map</th><th>Endpoints</th><th>Routes</th></tr></thead>
-            <tbody>${jsRows || '<tr><td colspan="5" style="color:var(--text3);padding:18px">No JS captured.</td></tr>'}</tbody>
-          </table></div></div>
-        </div>
-
-        <div class="job-detail-card" style="margin-bottom:14px">
-          <div class="job-detail-title">Technologies</div>
-          <div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-            <thead><tr><th>Name</th><th>Category</th><th>Confidence</th><th>Source</th></tr></thead>
-            <tbody>${techRows || '<tr><td colspan="4" style="color:var(--text3);padding:18px">No tech detected.</td></tr>'}</tbody>
-          </table></div></div>
-        </div>
-
-        <div class="job-detail-card" style="margin-bottom:14px">
-          <div class="job-detail-title">Console</div>
-          <div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-            <thead><tr><th>Type</th><th>Message</th><th>Classification</th><th>Page</th></tr></thead>
-            <tbody>${consoleRows || '<tr><td colspan="4" style="color:var(--text3);padding:18px">No console events captured.</td></tr>'}</tbody>
-          </table></div></div>
-        </div>
-
-        <div class="job-detail-card" style="margin-bottom:14px">
-          <div class="job-detail-title">Authentication</div>
-          <div class="job-detail-copy">
-            Login forms: <strong>${authForms.length}</strong> · CSRF fields: <strong>${(auth.csrf_fields || []).length || 0}</strong> · Cookies: <strong>${(auth.cookies || []).length || 0}</strong> · Session mechanisms: <strong>${(auth.session_mechanisms || []).length || 0}</strong>
-          </div>
-          ${authForms.length ? `<div class="table-shell" style="margin-top:10px"><div class="tl-wrap"><table class="jobs-table">
-            <thead><tr><th>Action</th><th>Method</th><th>Password Field</th><th>CSRF</th></tr></thead>
-            <tbody>${authRows}</tbody>
-          </table></div></div>` : '<div class="job-detail-copy">No login form detected.</div>'}
-        </div>
-
-        <div class="job-detail-card" style="margin-bottom:14px">
-          <div class="job-detail-title">Confirmed Findings</div>
-          ${confirmed.length ? `<div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-            <thead><tr><th>Title</th><th>Severity</th><th>Endpoint</th><th>Status</th></tr></thead>
-            <tbody>${findingsRows}</tbody>
-          </table></div></div>` : '<div class="job-detail-copy">No confirmed findings returned by Playwright.</div>'}
-        </div>
-
-        <div class="job-detail-card" style="margin-bottom:14px">
-          <div class="job-detail-title">IDOR / XSS / Race</div>
-          <div class="job-detail-copy">Storage keys: <strong>${storageKeys.length}</strong> · Tokens: <strong>${tokenCount}</strong> · WebSockets: <strong>${(session?.websockets || []).length || 0}</strong> · SSE: <strong>${(session?.sse || []).length || 0}</strong></div>
-          <div style="margin-top:10px;display:grid;gap:12px">
-            ${idor.length ? `<div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-              <thead><tr><th>IDOR URL</th><th>Param</th><th>Status</th><th>Notes</th></tr></thead>
-              <tbody>${idorRows}</tbody>
-            </table></div></div>` : '<div class="job-detail-copy">No IDOR candidates returned.</div>'}
-            ${xss.length ? `<div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-              <thead><tr><th>XSS URL</th><th>Param</th><th>Context</th><th>Status</th></tr></thead>
-              <tbody>${xssRows}</tbody>
-            </table></div></div>` : '<div class="job-detail-copy">No XSS checks returned.</div>'}
-            ${race.length ? `<div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-              <thead><tr><th>Race URL</th><th>Category</th><th>Status</th><th>Reason</th></tr></thead>
-              <tbody>${raceRows}</tbody>
-            </table></div></div>` : '<div class="job-detail-copy">No race probes returned.</div>'}
-          </div>
-        </div>
-
-        <div class="job-detail-card">
-          <div class="job-detail-title">Report Preview</div>
-          ${report ? `<pre class="job-detail-pre">${esc(report)}</pre>` : '<div class="job-detail-copy">No report preview available.</div>'}
-        </div>
-      </div>
-    `;
-  } catch(e) {
-    el.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div>
-        <div class="empty-state-title">Failed to load Playwright operation</div>
-        <div class="empty-state-copy">${esc(e.message)}</div>
       </div>`;
   }
+
+  return `
+    <div class="section-head recon-inner-head">
+      <div class="section-head-main">
+        <div class="section-kicker">${esc(_opT("op_pw_title", "Sessão Playwright"))}</div>
+        <div class="section-title">${esc(job.company_id || "—")} · ${esc(_jobStatusLabel(job.status))}</div>
+        <div class="section-sub">${esc(job.id)} · ${esc(started)} · ${esc(finished)}</div>
+      </div>
+      <div class="section-actions">
+        <button type="button" class="btn btn-secondary" onclick='openJobDetail(${cidJs})'>${esc(_opT("op_cta_details", "Detalhes"))}</button>
+        ${canArtifacts ? `<a class="btn btn-secondary" href="${_jobArtifactUrl(job.id, "report")}" target="_blank" rel="noopener">${esc(_opT("op_report", "Relatório"))}</a>` : ""}
+        ${canArtifacts ? `<a class="btn btn-secondary" href="${_jobArtifactUrl(job.id, "session")}" target="_blank" rel="noopener">${esc(_opT("op_session", "Sessão"))}</a>` : ""}
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      ${_jobKPICard("pages", pages.length)}
+      ${_jobKPICard("endpoints", endpoints.length)}
+      ${_jobKPICard("js", js.length)}
+      ${_jobKPICard("tech", tech.length)}
+      ${_jobKPICard("confirmed", confirmed.length)}
+      ${_jobKPICard("console", consoleEvents.length)}
+    </div>
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">${esc(_opT("op_hosts_title", "Inventário de hosts"))}</div>
+      ${inventory || `<div class="job-detail-copy">${esc(_opT("op_hosts_empty", "Nenhum host capturado nesta sessão."))}</div>`}
+    </div>
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">${esc(_opT("op_pages_title", "Páginas do browser"))}</div>
+      ${_opTable(["URL", "Depth", "Status", _opT("op_col_title", "Título"), "Screenshot"], pageRows, _opT("op_none_pages", "Nenhuma página persistida."))}
+    </div>
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">${esc(_opT("op_api_title", "Endpoints de API"))}</div>
+      ${_opTable(["Method", "URL", "Status", "Content-Type", "Auth"], endpointRows, _opT("op_none_api", "Nenhuma API capturada."))}
+    </div>
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">JavaScript</div>
+      ${_opTable(["Bundle", "Size", "Source Map", "Endpoints", "Routes"], jsRows, _opT("op_none_js", "Nenhum JS de runtime."))}
+    </div>
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">Technologies</div>
+      ${_opTable(["Name", "Category", "Confidence", "Source"], techRows, _opT("op_none_tech", "Nenhuma tecnologia detectada."))}
+    </div>
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">Console</div>
+      ${_opTable(["Type", "Message", "Classification", "Page"], consoleRows, _opT("op_none_console", "Nenhum evento de console."))}
+    </div>
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">Authentication</div>
+      <div class="job-detail-copy">
+        Login forms: <strong>${authForms.length}</strong> · CSRF: <strong>${(auth.csrf_fields || []).length || 0}</strong> · Cookies: <strong>${(auth.cookies || []).length || 0}</strong>
+      </div>
+      ${authForms.length ? _opTable(["Action", "Method", "Password Field", "CSRF"], authRows, "") : `<div class="job-detail-copy">${esc(_opT("op_none_form", "Nenhum formulário capturado."))}</div>`}
+    </div>
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">${esc(_opT("op_confirmed", "Findings confirmados"))}</div>
+      ${confirmed.length ? _opTable(["Title", "Severity", "Endpoint", "Status"], findingsRows, "") : `<div class="job-detail-copy">${esc(_opT("op_none_findings", "Nenhum finding confirmado no Playwright."))}</div>`}
+    </div>
+    <div class="job-detail-card" style="margin-bottom:14px">
+      <div class="job-detail-title">IDOR / XSS / Race</div>
+      <div class="job-detail-copy">Storage keys: <strong>${storageKeys.length}</strong> · Tokens: <strong>${tokenCount}</strong> · WebSockets: <strong>${(session?.websockets || []).length || 0}</strong></div>
+      <div style="margin-top:10px;display:grid;gap:12px">
+        ${idor.length ? _opTable(["IDOR URL", "Param", "Status", "Notes"], idorRows, "") : `<div class="job-detail-copy">${esc(_opT("op_none_idor", "Nenhum candidato IDOR."))}</div>`}
+        ${xss.length ? _opTable(["XSS URL", "Param", "Context", "Status"], xssRows, "") : `<div class="job-detail-copy">${esc(_opT("op_none_xss", "Nenhum check XSS."))}</div>`}
+        ${race.length ? _opTable(["Race URL", "Category", "Status", "Reason"], raceRows, "") : `<div class="job-detail-copy">${esc(_opT("op_none_race", "Nenhum probe de race."))}</div>`}
+      </div>
+    </div>
+    <div class="job-detail-card">
+      <div class="job-detail-title">${esc(_opT("op_report", "Relatório"))}</div>
+      ${report ? `<pre class="job-detail-pre">${esc(report)}</pre>` : `<div class="job-detail-copy">${esc(_opT("op_none_report", "Sem prévia de relatório."))}</div>`}
+    </div>
+  `;
+}
+
+function _renderOperationShell(co, persist, bundle) {
+  const job = bundle && bundle.job;
+  const session = bundle && bundle.session;
+  const report = (bundle && bundle.report) || "";
+  const cid = co.id || "";
+  const trueEmpty = !persist.has && !job;
+  if (trueEmpty) {
+    const err = bundle && bundle.error;
+    return `
+      <div class="empty-state">
+        <div class="empty-state-icon" data-ico="monitor" aria-hidden="true"></div>
+        <div class="empty-state-title">${esc(err ? _opT("op_load_fail", "Falha ao carregar a operação") : _opT("op_empty_title", "Nenhuma evidência de browser ainda"))}</div>
+        <div class="empty-state-copy">${esc(err || _opT("op_empty_copy", "Rode a pipeline para popular browser, crawl e JS. Depois enfileire o Playwright Recon para a sessão de pentest."))}</div>
+        <div class="op-empty-cta">${_opCta(cid)}</div>
+      </div>`;
+  }
+  return `
+    <div class="section-shell">
+      <div class="section-head">
+        <div class="section-head-main">
+          <div class="section-kicker">${esc(_opT("op_kicker", "Operação"))}</div>
+          <div class="section-title">${esc(_opT("op_title", "Superfície devolvida pelo browser"))}</div>
+          <div class="section-sub">${esc(_opT("op_sub", "Resultados da pipeline (browser_recon, crawl e JS). O Playwright Recon extra entra abaixo quando houver job."))}</div>
+        </div>
+        <div class="section-actions">${_opCta(cid)}</div>
+      </div>
+      ${persist.has ? _renderOperationPersistCards(co, persist) : ""}
+      ${job ? _renderPlaywrightSessionHtml(job, session, report) : ""}
+    </div>
+  `;
+}
+
+async function renderOperationTab(co) {
+  const el = document.getElementById("tab-operation");
+  if (!el) return;
+  const persist = _opSummarize(co);
+  _opSetBadge(persist);
+  el.innerHTML = _renderOperationShell(co, persist, { job: null, session: null, report: "" });
+  _opHydrate(el);
+  let bundle = { job: null, session: null, report: "" };
+  try {
+    bundle = await _fetchLatestPlaywrightBundle(co.id);
+  } catch (e) {
+    bundle = { job: null, session: null, report: "", error: e.message };
+  }
+  if (!el.isConnected) return;
+  if (document.getElementById("tc-operation") && bundle.session) {
+    const pages = Array.isArray(bundle.session.pages) ? bundle.session.pages.length : 0;
+    const endpoints = Array.isArray(bundle.session.endpoints) ? bundle.session.endpoints.length : 0;
+    const js = Array.isArray(bundle.session.js) ? bundle.session.js.length : 0;
+    const n = pages || endpoints || js || persist.badge;
+    document.getElementById("tc-operation").textContent = n ? String(n) : "";
+  }
+  el.innerHTML = _renderOperationShell(co, persist, bundle);
+  _opHydrate(el);
 }
 
 async function renderReconTab(cid) {
   const el = document.getElementById("tab-pipeline");
   if (!el) return;
   const activePipeline = _isPipelineActive(cid);
+  const runLbl = _opT("pipe_run", "Rodar pipeline");
+  const stopLbl = _opT("pipe_stop", "Parar pipeline");
   el.innerHTML = `
     <div class="section-shell">
       <div class="section-head">
         <div class="section-head-main">
-          <div class="section-kicker">Pipeline</div>
-          <div class="section-title">Scan execution and live phase status</div>
-          <div class="section-sub">Monitor the scan runner and the latest Playwright recon panel here.</div>
+          <div class="section-kicker">${esc(_opT("tab_pipeline", "Pipeline"))}</div>
+          <div class="section-title">${esc(_opT("pipe_title", "Execução do scan e status das fases"))}</div>
+          <div class="section-sub">${esc(_opT("pipe_sub", "Acompanhe o runner e o último painel Playwright Recon aqui."))}</div>
         </div>
         <div class="section-actions">
-          <button id="pipeline-btn-${escAttr(cid)}" class="btn ${activePipeline ? "btn-icon pipeline-stop-btn" : "btn-secondary btn-icon"}" onclick="handlePipelineAction('${escAttr(cid)}')">${activePipeline ? icoHtml("stop",14)+" Stop Pipeline" : icoHtml("play",14)+" Run Pipeline"}</button>
+          <button type="button" id="pipeline-btn-${escAttr(cid)}" class="btn ${activePipeline ? "btn-icon pipeline-stop-btn" : "btn-secondary btn-icon"}" aria-label="${esc(activePipeline ? stopLbl : runLbl)}" onclick="handlePipelineAction('${escAttr(cid)}')">${activePipeline ? icoHtml("stop",14)+" "+esc(stopLbl) : icoHtml("play",14)+" "+esc(runLbl)}</button>
         </div>
       </div>
       <div id="pipeline-status-${escAttr(cid)}" style="margin-top:12px"></div>
@@ -7109,17 +7649,44 @@ async function renderReconTab(cid) {
 // ── Screenshot lightbox ──────────────────────────────────────────────────────
 let _ssShots = [], _ssIdx = 0;
 
+function _ssIsOpen() {
+  const lb = document.getElementById('ss-lightbox');
+  return !!(lb && lb.classList.contains('open'));
+}
+
+function _ssOnKey(e) {
+  if (!_ssIsOpen()) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    window.ssLightboxClose();
+    return;
+  }
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    window.ssLightboxNav(-1);
+    return;
+  }
+  if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    window.ssLightboxNav(1);
+  }
+}
+
 window.ssLightboxOpen = function(shotUrl, pageUrl, shots, idx) {
   _ssShots = shots || [{shotUrl, pageUrl}];
   _ssIdx   = idx   || 0;
+  if (typeof window.ssPopoverHide === 'function') window.ssPopoverHide();
   _ssShow();
   const lb = document.getElementById('ss-lightbox');
   if (lb) { lb.classList.add('open'); lb.focus(); }
+  document.removeEventListener('keydown', _ssOnKey);
+  document.addEventListener('keydown', _ssOnKey);
 };
 
 window.ssLightboxClose = function() {
   const lb = document.getElementById('ss-lightbox');
   if (lb) lb.classList.remove('open');
+  document.removeEventListener('keydown', _ssOnKey);
 };
 
 window.ssLightboxNav = function(dir) {
@@ -7133,6 +7700,7 @@ window.ssLightboxNav = function(dir) {
 let _ssPopover = null;
 
 window.ssPopoverShow = function(e, shotUrl, pageUrl) {
+  if (window.matchMedia && window.matchMedia('(hover: none)').matches) return;
   if (!_ssPopover) {
     _ssPopover = document.createElement('div');
     _ssPopover.className = 'ss-popover';
@@ -7206,19 +7774,19 @@ function _renderReconEvidencePanel(co, shots, staticEndpoints, staticSecrets, se
   const cookieIssues = Number(co.headers_data?.cookie_issues || 0) + Number(browserData.insecure_cookies || 0);
 
   const modules = [
-    {name:"Subdomains", count: hosts.length || (co.ct_subdomains || []).length, desc:"Escopo descoberto e normalizado"},
-    {name:"URLs", count: endpointTotal, desc:"Wayback, URLFinder, JS e browser"},
-    {name:"Screenshots", count: screenshotTotal, desc:"Evidencias visuais em disco/API"},
-    {name:"Headers", count: headerResults.length, desc:`${missingHeaders} gaps · ${cookieIssues} cookie issues`},
-    {name:"Browser", count: browserResults.length || pwPages.length, desc:`${browserData.insecure_cookies || 0} cookies inseguros`},
-    {name:"Browser Crawl", count: Number(browserCrawl.url_count || 0) + Number(browserCrawl.api_endpoint_count || 0), desc:`${browserCrawl.hosts_crawled || 0} hosts · ${browserCrawl.form_count || 0} forms`},
-    {name:"Runtime JS", count: runtimeJsUrls.length || Number(co.js_data?.runtime_js_count || 0), desc:`${runtimeNetwork.length} network calls · chunks/scripts`},
-    {name:"JavaScript", count: Number(co.js_data?.js_files || 0), desc:`${co.js_data?.total_endpoints || 0} endpoints · ${co.js_data?.total_secrets || 0} secrets`},
-    {name:"CVEs", count: cves.length, desc:`${co.cve_summary?.critical || 0} critical · ${co.cve_summary?.high || 0} high`},
-    {name:"DNSSEC", count: Array.isArray(co.dnssec_data?.findings) ? co.dnssec_data.findings.length : 0, desc:"Problemas DNSSEC detectados"},
-    {name:"GitHub", count: Number(co.github_repos_data?.total_repos || 0), desc:"Repositorios e exposicoes"},
-    {name:"Cloud", count: co.cloud_assets ? Object.keys(co.cloud_assets).length : 0, desc:"Providers inferidos por IP"},
-    {name:"Tech", count: techCount, desc:"Tecnologias fingerprints"}
+    {name:_opT("recon_mod_sub","Subdomínios"), count: hosts.length || (co.ct_subdomains || []).length, desc:_opT("recon_mod_sub_d","Escopo descoberto e normalizado")},
+    {name:_opT("recon_mod_urls","URLs"), count: endpointTotal, desc:_opT("recon_mod_urls_d","Wayback, URLFinder, JS e browser")},
+    {name:_opT("recon_mod_shots","Screenshots"), count: screenshotTotal, desc:_opT("recon_mod_shots_d","Evidências visuais em disco/API")},
+    {name:_opT("recon_mod_hdr","Headers"), count: headerResults.length, desc:_opT("recon_mod_hdr_d","{g} gaps · {c} issues de cookie").replace("{g}", String(missingHeaders)).replace("{c}", String(cookieIssues))},
+    {name:_opT("recon_mod_br","Browser"), count: browserResults.length || pwPages.length, desc:_opT("recon_mod_br_d","{n} cookies inseguros").replace("{n}", String(browserData.insecure_cookies || 0))},
+    {name:_opT("recon_mod_crawl","Crawl do browser"), count: Number(browserCrawl.url_count || 0) + Number(browserCrawl.api_endpoint_count || 0), desc:_opT("recon_mod_crawl_d","{h} hosts · {f} forms").replace("{h}", String(browserCrawl.hosts_crawled || 0)).replace("{f}", String(browserCrawl.form_count || 0))},
+    {name:_opT("recon_mod_rjs","JS runtime"), count: runtimeJsUrls.length || Number(co.js_data?.runtime_js_count || 0), desc:_opT("recon_mod_rjs_d","{n} chamadas de rede · chunks/scripts").replace("{n}", String(runtimeNetwork.length))},
+    {name:_opT("recon_mod_js","JavaScript"), count: Array.isArray(co.js_data?.js_files) ? co.js_data.js_files.length : Number(co.js_data?.js_analyzed || co.js_data?.js_files_found || 0), desc:_opT("recon_mod_js_d","{e} endpoints · {s} secrets").replace("{e}", String(co.js_data?.total_endpoints || 0)).replace("{s}", String(co.js_data?.total_secrets || 0))},
+    {name:_opT("recon_mod_cve","CVEs"), count: cves.length, desc:_opT("recon_mod_cve_d","{c} críticas · {h} altas").replace("{c}", String(co.cve_summary?.critical || 0)).replace("{h}", String(co.cve_summary?.high || 0))},
+    {name:_opT("recon_mod_dns","DNSSEC"), count: Array.isArray(co.dnssec_data?.findings) ? co.dnssec_data.findings.length : 0, desc:_opT("recon_mod_dns_d","Problemas DNSSEC detectados")},
+    {name:_opT("recon_mod_gh","GitHub"), count: Number(co.github_repos_data?.total_repos || 0), desc:_opT("recon_mod_gh_d","Repositórios e exposições")},
+    {name:_opT("recon_mod_cloud","Cloud"), count: co.cloud_assets ? Object.keys(co.cloud_assets).length : 0, desc:_opT("recon_mod_cloud_d","Providers inferidos por IP")},
+    {name:_opT("recon_mod_tech","Tech"), count: techCount, desc:_opT("recon_mod_tech_d","Tecnologias fingerprintadas")}
   ];
 
   const sevRank = {critical:0, high:1, medium:2, low:3, info:4};
@@ -7230,53 +7798,53 @@ function _renderReconEvidencePanel(co, shots, staticEndpoints, staticSecrets, se
     <td>${esc(f.title || f.type || "Finding")}</td>
     <td class="recon-mono">${esc(f.host || f.value || "")}</td>
     <td>${esc(f.module || f.category || "")}</td>
-  </tr>`).join("") || `<tr><td colspan="4" class="recon-empty-row">Nenhum finding consolidado.</td></tr>`;
+  </tr>`).join("") || `<tr><td colspan="4" class="recon-empty-row">${esc(_opT("recon_find_empty","Nenhum finding consolidado."))}</td></tr>`;
 
   const hostRows = hosts.slice(0, 10).map(h => `<tr>
     <td class="recon-mono">${esc(h.host || "")}</td>
     <td>${h.status_code ? `<span class="status-code">${esc(h.status_code)}</span>` : "—"}</td>
     <td>${esc(h.title || h.server || "")}</td>
     <td>${(h.screenshot || h.browser_recon?.screenshot) ? icoHtml("check",14) : "—"}</td>
-  </tr>`).join("") || `<tr><td colspan="4" class="recon-empty-row">Nenhum host carregado.</td></tr>`;
+  </tr>`).join("") || `<tr><td colspan="4" class="recon-empty-row">${esc(_opT("recon_hosts_empty","Nenhum host carregado."))}</td></tr>`;
 
   const browserRows = browserResults.slice(0, 8).map(r => `<tr>
     <td class="recon-mono"><a href="${escAttr(r.url || "")}" target="_blank" rel="noopener">${esc(r.url || "")}</a></td>
     <td>${esc(r.status ?? "—")}</td>
     <td>${esc(r.title || "")}</td>
     <td>${Array.isArray(r.observations) ? r.observations.length : 0}</td>
-  </tr>`).join("") || `<tr><td colspan="4" class="recon-empty-row">Browser recon sem paginas persistidas.</td></tr>`;
+  </tr>`).join("") || `<tr><td colspan="4" class="recon-empty-row">${esc(_opT("recon_br_empty","Browser recon sem páginas persistidas."))}</td></tr>`;
 
   return `
     <div class="recon-kpi-grid">
-      ${_reconKpi(hosts.length, "Hosts", `${co.ct_subdomains?.length || 0} CT/subdomains`, "teal")}
-      ${_reconKpi(findings.length, "Findings", `${co.stats?.findings_critical || 0} critical · ${co.stats?.findings_high || 0} high`, "red")}
-      ${_reconKpi(endpointTotal, "URLs/Endpoints", `${staticEndpoints.length} static · ${pwEndpoints.length} PW`, "blue")}
-      ${_reconKpi(secretTotal, "Secrets", `${staticSecrets.length} JS/static`, "orange")}
-      ${_reconKpi(screenshotTotal, "Screenshots", "capturas disponiveis", "green")}
-      ${_reconKpi(browserResults.length || pwPages.length, "Browser", `${browserData.insecure_cookies || 0} insecure cookies`, "purple")}
+      ${_reconKpi(hosts.length, _opT("recon_kpi_hosts","Hosts"), _opT("recon_kpi_ct","{n} CT/subdomínios").replace("{n}", String(co.ct_subdomains?.length || 0)), "teal")}
+      ${_reconKpi(findings.length, _opT("recon_kpi_findings","Findings"), _opT("recon_kpi_crit","{c} críticas · {h} altas").replace("{c}", String(co.stats?.findings_critical || 0)).replace("{h}", String(co.stats?.findings_high || 0)), "red")}
+      ${_reconKpi(endpointTotal, _opT("recon_kpi_urls","URLs/Endpoints"), _opT("recon_kpi_static_pw","{s} estáticos · {p} PW").replace("{s}", String(staticEndpoints.length)).replace("{p}", String(pwEndpoints.length)), "blue")}
+      ${_reconKpi(secretTotal, _opT("recon_kpi_secrets","Secrets"), _opT("recon_kpi_js","{n} JS/estáticos").replace("{n}", String(staticSecrets.length)), "orange")}
+      ${_reconKpi(screenshotTotal, _opT("recon_kpi_shots","Screenshots"), _opT("recon_kpi_shots_sub","capturas disponíveis"), "green")}
+      ${_reconKpi(browserResults.length || pwPages.length, _opT("recon_kpi_browser","Browser"), _opT("recon_kpi_insecure","{n} cookies inseguros").replace("{n}", String(browserData.insecure_cookies || 0)), "purple")}
     </div>
 
     <div class="section-head recon-inner-head">
       <div class="section-head-main">
-        <div class="section-kicker">Coverage</div>
-        <div class="section-title">Resultados por modulo</div>
-        <div class="section-sub">Resumo operacional do que a pipeline ja consolidou para o alvo.</div>
+        <div class="section-kicker">${esc(_opT("recon_cov_kicker","Cobertura"))}</div>
+        <div class="section-title">${esc(_opT("recon_cov_title","Resultados por módulo"))}</div>
+        <div class="section-sub">${esc(_opT("recon_cov_sub","Resumo operacional do que a pipeline já consolidou para o alvo."))}</div>
       </div>
     </div>
     <div class="recon-module-grid">${modules.map(_reconModuleCard).join("")}</div>
 
     <div class="recon-two-col">
       <div>
-        <div class="recon-panel-title">Findings prioritarios</div>
+        <div class="recon-panel-title">${esc(_opT("recon_find_title","Findings prioritários"))}</div>
         <div class="table-shell"><div class="tl-wrap"><table class="jobs-table compact-table">
-          <thead><tr><th>Sev</th><th>Finding</th><th>Host/Valor</th><th>Modulo</th></tr></thead>
+          <thead><tr><th>Sev</th><th>Finding</th><th>${esc(_opT("recon_col_host_val","Host/Valor"))}</th><th>${esc(_opT("recon_col_module","Módulo"))}</th></tr></thead>
           <tbody>${topFindingRows}</tbody>
         </table></div></div>
       </div>
       <div>
-        <div class="recon-panel-title">Hosts em evidencia</div>
+        <div class="recon-panel-title">${esc(_opT("recon_hosts_title","Hosts em evidência"))}</div>
         <div class="table-shell"><div class="tl-wrap"><table class="jobs-table compact-table">
-          <thead><tr><th>Host</th><th>Status</th><th>Titulo/Server</th><th>Shot</th></tr></thead>
+          <thead><tr><th>Host</th><th>Status</th><th>${esc(_opT("recon_col_title_srv","Título/Server"))}</th><th>Shot</th></tr></thead>
           <tbody>${hostRows}</tbody>
         </table></div></div>
       </div>
@@ -7284,9 +7852,9 @@ function _renderReconEvidencePanel(co, shots, staticEndpoints, staticSecrets, se
 
     <div class="recon-two-col">
       <div>
-        <div class="recon-panel-title">Browser recon</div>
+        <div class="recon-panel-title">${esc(_opT("recon_br_title","Browser recon"))}</div>
         <div class="table-shell"><div class="tl-wrap"><table class="jobs-table compact-table">
-          <thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Obs</th></tr></thead>
+          <thead><tr><th>URL</th><th>Status</th><th>${esc(_opT("recon_col_title","Título"))}</th><th>${esc(_opT("recon_col_obs","Obs"))}</th></tr></thead>
           <tbody>${browserRows}</tbody>
         </table></div></div>
       </div>
@@ -7299,7 +7867,10 @@ function _ssShow() {
   const img = document.getElementById('ss-lightbox-img');
   const lbl = document.getElementById('ss-lightbox-url');
   const nav = document.getElementById('ss-lightbox-nav');
-  if (img) img.src = s.shotUrl || '';
+  if (img) {
+    img.src = s.shotUrl || '';
+    img.alt = s.pageUrl ? ('Screenshot de ' + s.pageUrl) : 'Screenshot';
+  }
   if (lbl) lbl.textContent = s.pageUrl || '';
   if (nav) nav.style.display = _ssShots.length > 1 ? 'flex' : 'none';
 }
@@ -7307,7 +7878,8 @@ function _ssShow() {
 async function loadScreenshots(cid, co) {
   const el = document.getElementById("tab-screenshots");
   if (!el) return;
-  el.innerHTML = `<div style="padding:24px;color:var(--text3);font-size:.8rem">Loading recon data…</div>`;
+  el.setAttribute("aria-busy", "true");
+  el.innerHTML = `<div class="recon-loading" role="status" style="padding:24px;color:var(--text3);font-size:.8rem;min-height:120px">${esc(_opT("recon_loading", "Carregando evidências de recon…"))}</div>`;
 
   const [shotsRes, bundleRes] = await Promise.allSettled([
     fetch(`/api/screenshots/${encodeURIComponent(cid)}`, {headers:_authHeaders()}).then(r=>r.ok?r.json():[]).catch(()=>[]),
@@ -7358,7 +7930,7 @@ async function loadScreenshots(cid, co) {
           <div class="section-title">${esc(title)}</div>
           <div class="section-sub">${esc(sub)}</div>
         </div>
-        ${count != null ? `<div class="section-actions"><span class="sec-cnt">${count} items</span></div>` : ''}
+        ${count != null ? `<div class="section-actions"><span class="sec-cnt">${esc(_opT("recon_items", "{n} itens").replace("{n}", String(count)))}</span></div>` : ''}
       </div>`;
   }
 
@@ -7371,14 +7943,14 @@ async function loadScreenshots(cid, co) {
     <div class="section-head">
       <div class="section-head-main">
         <div class="section-kicker">Recon</div>
-        <div class="section-title">Recon evidence and attack surface leads</div>
-        <div class="section-sub">Hosts, findings, URLs, browser evidence, screenshots and module coverage from the latest bug bounty pipeline.</div>
+        <div class="section-title">${esc(_opT("recon_title", "Evidências de recon e pistas da superfície de ataque"))}</div>
+        <div class="section-sub">${esc(_opT("recon_sub", "Hosts, findings, URLs, evidência do browser, screenshots e cobertura de módulos do último pipeline de bug bounty."))}</div>
       </div>
     </div>
     ${_renderReconEvidencePanel(co, shots, staticEndpoints, staticSecrets, session)}`;
 
   // ── CRAWLED URLS (playwright pages) ─────────────────────────────────────
-  html += _secHead(icoHtml("globe",14), `Crawled URLs (${crawledPages.length})`, 'Pages visited by the integrated browser recon phase or by a Playwright job.', null);
+  html += _secHead(icoHtml("globe",14), _opT("recon_crawled_title", "URLs crawleadas ({n})").replace("{n}", String(crawledPages.length)), _opT("recon_crawled_sub", "Páginas visitadas pela fase de browser recon da pipeline ou por um job Playwright."), null);
   if (crawledPages.length) {
     const pageRows = crawledPages.map(p => {
       const url = p.url || p.final_url || '';
@@ -7392,10 +7964,10 @@ async function loadScreenshots(cid, co) {
       </tr>`;
     }).join('');
     html += `<div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-      <thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Source</th></tr></thead>
+      <thead><tr><th>URL</th><th>Status</th><th>${esc(_opT("recon_col_title","Título"))}</th><th>${esc(_opT("recon_col_source","Fonte"))}</th></tr></thead>
       <tbody>${pageRows}</tbody></table></div></div>`;
   } else {
-    html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">No crawled pages yet. Run the browser phase in the bug bounty pipeline.</div>`;
+    html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">${esc(_opT("recon_crawled_empty", "Nenhuma página crawleada ainda. Rode a fase de browser na pipeline de bug bounty."))}</div>`;
   }
 
   // ── ENDPOINTS ────────────────────────────────────────────────────────────
@@ -7420,32 +7992,31 @@ async function loadScreenshots(cid, co) {
     return true;
   });
 
-  html += _secHead("", `Endpoints (${epFiltered.length})`, 'API paths and routes from JS analysis and browser crawl. Click row to copy URL.', null);
+  html += _secHead("", _opT("recon_ep_title", "Endpoints ({n})").replace("{n}", String(epFiltered.length)), _opT("recon_ep_sub", "Caminhos e rotas de API da análise JS e do crawl do browser. Clique a URL para abrir o local em que foi achada."), null);
   if (epFiltered.length) {
     html += `<div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0;align-items:center">
-      <input id="ep-filter" placeholder="Filter endpoints..." style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.7rem;width:200px" oninput="document.querySelectorAll('.ep-row').forEach(r=>{const t=r.textContent.toLowerCase();r.style.display=t.includes(this.value.toLowerCase())?'':'none'})">
+      <input id="ep-filter" placeholder="${escAttr(_opT("recon_ep_filter", "Filtrar endpoints…"))}" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.7rem;width:200px" oninput="document.querySelectorAll('.ep-row').forEach(r=>{const t=r.textContent.toLowerCase();r.style.display=t.includes(this.value.toLowerCase())?'':'none'})">
     </div>`;
 
     const SEV = {critical:'#fb7185',high:'#fb923c',medium:'#fbbf24',low:'#4ade80',info:'#94a3b8'};
     const epRows = epFiltered.slice(0, 500).map(e => {
       const mc = _methodColor ? _methodColor(e.method||'GET') : '#60a5fa';
-      const copyUrl = esc(e.url);
-      return `<tr class="ep-row" style="cursor:pointer" onclick="navigator.clipboard.writeText(this.getAttribute('data-copy')).then(()=>{this.style.background='rgba(0,201,167,.08)';setTimeout(()=>this.style.background='',600)})" data-copy="${copyUrl}" title="Click to copy URL">
+      return `<tr class="ep-row">
         <td style="width:60px">
           <span style="font-family:var(--mono);font-size:.64rem;font-weight:700;color:${mc}">${esc(e.method||'GET')}</span>
         </td>
-        <td style="font-family:var(--mono);font-size:.7rem;word-break:break-all;color:var(--text1)">${esc(e.url)} ${icoHtml("clipboard",14)}</td>
+        <td class="recon-mono">${originLinkHtml(e.url || "", e.url || "", { title: _originTitle() })}</td>
         <td style="font-size:.62rem;color:var(--teal);font-family:var(--mono)">${esc(e._src || e.source || '')}</td>
         <td style="font-size:.66rem;color:var(--text3)">${esc(e.type||'')}</td>
         <td style="font-size:.66rem;color:${e.severity?SEV[e.severity]||'#94a3b8':'var(--text3)'}">${e.severity?e.severity.toUpperCase():''}</td>
       </tr>`;
     }).join('');
-    const overflow = epFiltered.length > 500 ? `<tr><td colspan="5" style="padding:8px 12px;color:var(--text3);font-size:.7rem">${epFiltered.length - 500} more endpoints — use filter or export CSV.</td></tr>` : '';
+    const overflow = epFiltered.length > 500 ? `<tr><td colspan="5" style="padding:8px 12px;color:var(--text3);font-size:.7rem">${esc(_opT("recon_ep_more", "{n} endpoints a mais — use o filtro ou exporte CSV.").replace("{n}", String(epFiltered.length - 500)))}</td></tr>` : '';
     html += `<div class="table-shell"><div class="tl-wrap" style="max-height:360px;overflow-y:auto"><table class="jobs-table">
-      <thead><tr><th>Method</th><th>URL (click to copy)</th><th>Source</th><th>Type</th><th>Risk</th></tr></thead>
+      <thead><tr><th>Method</th><th>URL</th><th>Source</th><th>Type</th><th>Risk</th></tr></thead>
       <tbody>${epRows}${overflow}</tbody></table></div></div>`;
   } else {
-    html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">No endpoints discovered yet. Run wayback, urlfinder, js_endpoints or Playwright Recon.</div>`;
+    html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">${esc(_opT("recon_ep_empty", "Nenhum endpoint descoberto ainda. Rode wayback, urlfinder, js ou Playwright Recon."))}</div>`;
   }
 
   // ── SECRETS & HARDCODED KEYS ─────────────────────────────────────────────
@@ -7458,10 +8029,10 @@ async function loadScreenshots(cid, co) {
     secArr.push({type:s.type || "browser_secret", value:s.value || s.secret || JSON.stringify(s), file:r.url || "", host:"", severity:s.severity || "high", _src:"browser"});
   }));
 
-  html += _secHead(icoHtml("key",14), `Secrets & Hardcoded Keys (${secArr.length})`, 'Credentials, tokens and API keys extracted from JS bundles and browser globals. Click value to reveal. Click file path to copy.', null);
+  html += _secHead(icoHtml("key",14), _opT("recon_sec_title", "Secrets e chaves hardcoded ({n})").replace("{n}", String(secArr.length)), _opT("recon_sec_sub", "Credenciais, tokens e chaves de API extraídos de bundles JS e globais do browser. Clique o arquivo ou o host para abrir o local. O valor mascarado revela no clique."), null);
   if (secArr.length) {
     html += `<div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0;align-items:center">
-      <input id="sec-filter" placeholder="Filter secrets..." style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.7rem;width:200px" oninput="document.querySelectorAll('.sec-row').forEach(r=>{const t=r.textContent.toLowerCase();r.style.display=t.includes(this.value.toLowerCase())?'':'none'})">
+      <input id="sec-filter" placeholder="${escAttr(_opT("recon_sec_filter", "Filtrar secrets…"))}" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.7rem;width:200px" oninput="document.querySelectorAll('.sec-row').forEach(r=>{const t=r.textContent.toLowerCase();r.style.display=t.includes(this.value.toLowerCase())?'':'none'})">
     </div>`;
     const SEVC = {critical:'#fb7185',high:'#fb923c',medium:'#fbbf24',low:'#4ade80'};
     function maskVal(v) {
@@ -7472,24 +8043,26 @@ async function loadScreenshots(cid, co) {
     const secRows = secArr.map((s, i) => {
       const clr = SEVC[s.severity] || '#94a3b8';
       const src = s._src === 'playwright' ? `<span style="font-size:.56rem;color:var(--teal);opacity:.7;margin-left:3px">PW</span>` : '';
-      const filePath = esc(s.file||'');
+      const fileHref = originHref(s.file, s.host);
       const fileCell = s.file
-        ? `<span title="${filePath}&#10;Click to copy path" onclick="event.stopPropagation();navigator.clipboard.writeText(this.getAttribute('data-path')).then(()=>{this.style.color='var(--teal)';setTimeout(()=>this.style.color='',1200)});return false" data-path="${filePath}" style="cursor:pointer;border-bottom:1px dashed var(--text3);font-size:.67rem;font-family:var(--mono);word-break:break-all">${filePath}</span>`
+        ? (fileHref
+            ? originLinkHtml(s.file, s.file, { host: s.host, className: "origin-link origin-mono", title: _originTitle("js") })
+            : `<button type="button" class="origin-jump" onclick="jumpToFound('jsreverse', ${_jsArg(s.file)})">${esc(s.file)}</button>`)
         : '<span style="font-size:.67rem;color:var(--text3)">—</span>';
       return `<tr class="sec-row">
         <td><span style="font-size:.68rem;background:rgba(251,146,60,.1);color:#fb923c;border:1px solid rgba(251,146,60,.2);border-radius:4px;padding:1px 6px">${esc(s.type)}</span>${src}</td>
         <td><code class="secret-value" style="cursor:pointer;font-size:.7rem;font-family:var(--mono);color:var(--text2)"
           onclick="var m=this.getAttribute('data-masked'),v=this.getAttribute('data-value');if(this.textContent===m){this.textContent=v;this.style.color='var(--teal)';this.style.cursor='pointer'}else{this.textContent=m;this.style.color='var(--text2)';this.style.cursor='pointer'}" data-masked="${esc(maskVal(s.value))}" data-value="${esc(String(s.value||''))}">${esc(maskVal(s.value))}</code></td>
         <td style="max-width:260px">${fileCell}</td>
-        <td style="font-size:.67rem;color:var(--text3)">${esc(s.host||'—')}</td>
+        <td>${s.host ? originHostChip(s.host, "origin-link") : '<span style="font-size:.67rem;color:var(--text3)">—</span>'}</td>
         <td><span style="font-size:.62rem;font-weight:700;color:${clr}">${s.severity.toUpperCase()}</span></td>
       </tr>`;
     }).join('');
     html += `<div class="table-shell"><div class="tl-wrap" style="max-height:320px;overflow-y:auto"><table class="jobs-table">
-      <thead><tr><th>Type</th><th>Value (click to reveal)</th><th>File (click to copy path)</th><th>Host</th><th>Risk</th></tr></thead>
+      <thead><tr><th>${esc(_opT("recon_col_type","Tipo"))}</th><th>${esc(_opT("recon_sec_value","Valor (clique para revelar)"))}</th><th>${esc(_opT("recon_col_file","Arquivo"))}</th><th>Host</th><th>Risk</th></tr></thead>
       <tbody>${secRows}</tbody></table></div></div>`;
   } else {
-    html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">No secrets or hardcoded keys found. Run js_secrets, trufflehog or Playwright Recon.</div>`;
+    html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">${esc(_opT("recon_sec_empty", "Nenhum secret ou chave hardcoded encontrado. Rode js, trufflehog ou Playwright Recon."))}</div>`;
   }
 
   // ── POSTMAN COLLECTIONS ─────────────────────────────────────────────────
@@ -7500,45 +8073,50 @@ async function loadScreenshots(cid, co) {
   const pmHasData     = pmCollections.length + pmGithubHits.length + pmSecrets.length > 0;
   const pmTotal       = postmanData?.total || pmCollections.length + pmGithubHits.length;
 
-  html += _secHead("", `Postman Collections (${pmTotal})`, 'Public Postman collections and GitHub-committed postman files referencing the target. Click URLs to open.', null);
+  html += _secHead("", _opT("recon_pm_title", "Coleções Postman ({n})").replace("{n}", String(pmTotal)), _opT("recon_pm_sub", "Coleções públicas do Postman e arquivos postman no GitHub que citam o alvo. Clique as URLs para abrir."), null);
   if (pmHasData) {
     // Collections
     if (pmCollections.length) {
-      html += `<div style="padding:4px 0 12px;font-size:.7rem;color:var(--text3)"><strong>Public Collections (${pmCollections.length})</strong></div>`;
+      html += `<div style="padding:4px 0 12px;font-size:.7rem;color:var(--text3)"><strong>${esc(_opT("recon_pm_public", "Coleções públicas ({n})").replace("{n}", String(pmCollections.length)))}</strong></div>`;
       const pmcRows = pmCollections.slice(0, 20).map(c => `<tr>
         <td style="font-size:.72rem"><a href="${esc(c.url||'')}" target="_blank" style="color:var(--teal);text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${esc(c.name||c.id||'?')}</a></td>
         <td style="font-size:.67rem;color:var(--text3)">${esc(c.owner||'')}</td>
         <td style="font-size:.64rem;color:var(--teal)">${esc(c.id||'')}</td>
       </tr>`).join('');
       html += `<div class="table-shell"><div class="tl-wrap" style="max-height:240px;overflow-y:auto"><table class="jobs-table">
-        <thead><tr><th>Collection</th><th>Owner</th><th>ID</th></tr></thead>
+        <thead><tr><th>${esc(_opT("recon_col_collection","Coleção"))}</th><th>${esc(_opT("recon_col_owner","Dono"))}</th><th>ID</th></tr></thead>
         <tbody>${pmcRows}</tbody></table></div></div>`;
     }
     // GitHub hits
     if (pmGithubHits.length) {
-      html += `<div style="padding:8px 0 4px;font-size:.7rem;color:var(--text3)"><strong>GitHub Files (${pmGithubHits.length})</strong></div>`;
+      html += `<div style="padding:8px 0 4px;font-size:.7rem;color:var(--text3)"><strong>${esc(_opT("recon_pm_github", "Arquivos no GitHub ({n})").replace("{n}", String(pmGithubHits.length)))}</strong></div>`;
       const pmgRows = pmGithubHits.slice(0, 15).map(g => `<tr>
         <td style="font-size:.7rem"><a href="${esc(g.url||'')}" target="_blank" style="color:var(--teal);text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${esc(g.repo||'')}/${esc(g.file||'')}</a></td>
         <td style="font-size:.67rem;color:var(--text3)">${esc(g.repo||'')}</td>
       </tr>`).join('');
       html += `<div class="table-shell"><div class="tl-wrap" style="max-height:200px;overflow-y:auto"><table class="jobs-table">
-        <thead><tr><th>File</th><th>Repository</th></tr></thead>
+        <thead><tr><th>${esc(_opT("recon_col_file","Arquivo"))}</th><th>${esc(_opT("recon_col_repo","Repositório"))}</th></tr></thead>
         <tbody>${pmgRows}</tbody></table></div></div>`;
     }
     // Secrets from Postman files
     if (pmSecrets.length) {
-      html += `<div style="padding:8px 0 4px;font-size:.7rem;color:var(--text3)"><strong>Extracted Secrets (${pmSecrets.length})</strong></div>`;
-      const pmsRows = pmSecrets.slice(0, 15).map(s => `<tr>
+      html += `<div style="padding:8px 0 4px;font-size:.7rem;color:var(--text3)"><strong>${esc(_opT("recon_pm_secrets", "Secrets extraídos ({n})").replace("{n}", String(pmSecrets.length)))}</strong></div>`;
+      const pmsRows = pmSecrets.slice(0, 15).map(s => {
+        const raw = String(s.value || '');
+        const masked = raw.length <= 6 ? '••••••' : raw.slice(0, 3) + '••••••' + raw.slice(-3);
+        return `<tr>
         <td style="font-size:.7rem"><code style="font-family:var(--mono);font-size:.66rem;color:var(--text2)">${esc(s.type||'secret')}</code></td>
-        <td style="font-size:.67rem;color:var(--text3);font-family:var(--mono);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.value||'')}">${esc((s.value||'').slice(0,40))}...</td>
+        <td><code class="secret-value" style="cursor:pointer;font-size:.67rem;font-family:var(--mono);color:var(--text2)"
+          onclick="var m=this.getAttribute('data-masked'),v=this.getAttribute('data-value');if(this.textContent===m){this.textContent=v;this.style.color='var(--teal)'}else{this.textContent=m;this.style.color='var(--text2)'}" data-masked="${esc(masked)}" data-value="${esc(raw)}">${esc(masked)}</code></td>
         <td style="font-size:.64rem;color:var(--teal)">${esc(s.repo||'')}</td>
-      </tr>`).join('');
+      </tr>`;
+      }).join('');
       html += `<div class="table-shell"><div class="tl-wrap" style="max-height:200px;overflow-y:auto"><table class="jobs-table">
-        <thead><tr><th>Type</th><th>Value</th><th>Repo</th></tr></thead>
+        <thead><tr><th>${esc(_opT("recon_col_type","Tipo"))}</th><th>${esc(_opT("recon_col_value","Valor"))}</th><th>Repo</th></tr></thead>
         <tbody>${pmsRows}</tbody></table></div></div>`;
     }
   } else {
-    html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">No Postman collections found. Run postman_collections module to discover exposed API collections.</div>`;
+    html += `<div style="padding:12px 0;color:var(--text3);font-size:.78rem">${esc(_opT("recon_pm_empty", "Nenhuma coleção Postman encontrada. Rode o módulo postman_collections para descobrir coleções de API expostas."))}</div>`;
   }
 
   // ── VULNERABILITY FINDINGS (host header, redirect, CORS, CRLF, XSS, etc) ───
@@ -7554,43 +8132,45 @@ async function loadScreenshots(cid, co) {
     // Filter chips
     const vulnModulesUniq = [...new Set(vulnFindings.map(f => f.module))].sort();
     const vulnFilterId = 'vuln-filter';
-    html += _secHead(icoHtml("target",14), `Vulnerability Findings (${vulnFindings.length})`, 'Host header injection, open redirects, CORS misconfigs, XSS, CRLF, default creds, and other active checks.', null);
+    html += _secHead(icoHtml("target",14), _opT("recon_vuln_title", "Findings de vulnerabilidade ({n})").replace("{n}", String(vulnFindings.length)), _opT("recon_vuln_sub", "Host header injection, open redirects, CORS mal configurado, XSS, CRLF, credenciais padrão e outros checks ativos."), null);
     html += `<div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0;align-items:center">
-      <input id="${vulnFilterId}" placeholder="Filter findings..." style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.7rem;width:180px" oninput="document.querySelectorAll('.vuln-row').forEach(r=>{const t=r.textContent.toLowerCase();r.style.display=t.includes(this.value.toLowerCase())?'':'none'})">
+      <input id="${vulnFilterId}" placeholder="${escAttr(_opT("recon_vuln_filter", "Filtrar findings…"))}" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.7rem;width:180px" oninput="document.querySelectorAll('.vuln-row').forEach(r=>{const t=r.textContent.toLowerCase();r.style.display=t.includes(this.value.toLowerCase())?'':'none'})">
     </div>`;
 
     const vulnRows = vulnFindings.slice(0, 100).map(f => {
       const clr = f.severity === 'critical' ? '#fb7185' : f.severity === 'high' ? '#fb923c' : f.severity === 'medium' ? '#fbbf24' : f.severity === 'low' ? '#4ade80' : '#94a3b8';
       const moduleLabel = f.module ? f.module.replace(/_/g, ' ') : '';
-      const copyVal = esc(f.url||f.value||'');
-      return `<tr class="vuln-row" style="cursor:pointer" onclick="navigator.clipboard.writeText(this.getAttribute('data-copy')).then(()=>{this.style.background='rgba(0,201,167,.08)';setTimeout(()=>this.style.background='',600)})" data-copy="${copyVal}" title="Click to copy: ${copyVal}">
+      const loc = f.url || "";
+      const locLabel = (loc || f.value || "").slice(0, 50);
+      return `<tr class="vuln-row">
         <td><span style="font-size:.62rem;font-weight:700;color:${clr}">${(f.severity||'').toUpperCase()}</span></td>
         <td style="font-size:.72rem"><span style="color:var(--teal);font-size:.6rem;opacity:.7">${esc(moduleLabel)}</span> ${esc(f.title||f.type||'')}</td>
-        <td style="font-size:.67rem;color:var(--text3);font-family:var(--mono);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(f.host||'')}">${esc((f.host||'—').slice(0,35))}</td>
-        <td style="font-size:.64rem;color:var(--teal);font-family:var(--mono);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${copyVal}">${esc((f.url||f.value||'').slice(0,50))} ${icoHtml("clipboard",14)}</td>
+        <td>${f.host ? originHostChip(f.host, "origin-link") : '<span style="font-size:.67rem;color:var(--text3)">—</span>'}</td>
+        <td class="recon-mono">${originHref(loc, f.host) ? originLinkHtml(loc, locLabel, { host: f.host, title: _originTitle() }) : esc(locLabel)}</td>
       </tr>`;
     }).join('');
 
     html += `<div class="table-shell"><div class="tl-wrap" style="max-height:400px;overflow-y:auto"><table class="jobs-table">
-      <thead><tr><th>Sev</th><th>Finding</th><th>Host</th><th>URL / Value (click to copy)</th></tr></thead>
+      <thead><tr><th>Sev</th><th>Finding</th><th>Host</th><th>URL</th></tr></thead>
       <tbody>${vulnRows}</tbody></table></div></div>`;
   }
 
   // ── Playwright findings summary (if any) ─────────────────────────────────
   if (pwFindings.length) {
-    html += _secHead(icoHtml("bolt",14), `Playwright Findings (${pwFindings.length})`, 'Issues flagged by the automated browser agent.', null);
+    html += _secHead(icoHtml("bolt",14), _opT("recon_pw_title", "Findings do Playwright ({n})").replace("{n}", String(pwFindings.length)), _opT("recon_pw_sub", "Issues apontados pelo agente de browser automatizado."), null);
     const fRows = pwFindings.map(f => `<tr>
       <td style="font-size:.7rem;font-weight:600;color:${f.severity==='critical'?'#fb7185':f.severity==='high'?'#fb923c':'#fbbf24'}">${esc(f.severity||'').toUpperCase()}</td>
       <td style="font-size:.75rem">${esc(f.title||f.type||'')}</td>
-      <td style="font-size:.68rem;color:var(--text3);font-family:var(--mono);word-break:break-all">${esc(f.url||f.evidence||'')}</td>
+      <td class="recon-mono">${originHref(f.url, "") ? originLinkHtml(f.url, f.url, { title: _originTitle() }) : esc(f.url||f.evidence||'')}</td>
     </tr>`).join('');
     html += `<div class="table-shell"><div class="tl-wrap"><table class="jobs-table">
-      <thead><tr><th>Sev</th><th>Finding</th><th>URL / Evidence</th></tr></thead>
+      <thead><tr><th>Sev</th><th>Finding</th><th>${esc(_opT("recon_col_evidence","URL / Evidência"))}</th></tr></thead>
       <tbody>${fRows}</tbody></table></div></div>`;
   }
 
   html += `</div>`;
   el.innerHTML = html;
+  el.removeAttribute("aria-busy");
 }
 
 function renderPlaywrightOverview(jobs) {
@@ -9439,7 +10019,7 @@ function renderPipelineStatus(cid) {
 
   // ── Last log line ────────────────────────────────────────────────────────
   const logLines = ps.log || [];
-  const lastLog  = logLines.length ? logLines[logLines.length-1].msg : (isQueued ? "Waiting in queue…" : isRunning ? "Waiting for start…" : "");
+  const lastLog  = logLines.length ? logLines[logLines.length-1].msg : (isQueued ? _opT("pipe_queued", "Na fila…") : isRunning ? _opT("pipe_waiting", "Aguardando início…") : "");
 
   // ── Cleanup badge ────────────────────────────────────────────────────────
   const cleanupData = (ps.phases||[]).find(p => p.id === "cleanup");
@@ -9458,7 +10038,7 @@ function renderPipelineStatus(cid) {
   const notDone = (ps.not_done||[]);
   const notDoneHtml = (isDone && notDone.length) ? `
     <div style="margin-top:10px;padding:8px 12px;background:rgba(251,146,60,0.08);border:1px solid rgba(251,146,60,0.2);border-radius:7px;font-size:.63rem;">
-      <span style="color:var(--orange);font-weight:700;">${icoHtml("warning",14)} ${notDone.length} module(s) not completed:</span>
+      <span style="color:var(--orange);font-weight:700;">${icoHtml("warning",14)} ${esc(_opT("pipe_not_done", "{n} módulo(s) não concluído(s):").replace("{n}", String(notDone.length)))}</span>
       <span style="color:var(--text3);margin-left:6px">${notDone.slice(0,6).map(n=>{
         const reason = (n.reason||"").trim();
         return reason && reason !== "not executed"
@@ -9473,7 +10053,7 @@ function renderPipelineStatus(cid) {
 
       <div class="phud-header">
         <span class="phud-title">${icoHtml("layers",14)} Pipeline</span>
-        <span class="phud-badge ${isRunning?"running":isQueued?"idle":isDone?"done":"idle"}">${isRunning?"RUNNING":isQueued?"QUEUED":isDone?"DONE":"IDLE"}</span>
+        <span class="phud-badge ${isRunning?"running":isQueued?"idle":isDone?"done":"idle"}">${isRunning?esc(_opT("pipe_status_running","RODANDO")):isQueued?esc(_opT("pipe_status_queued","NA FILA")):isDone?esc(_opT("pipe_status_done","CONCLUÍDO")):esc(_opT("pipe_status_idle","PARADO"))}</span>
         ${modeIcon ? `<span class="phud-badge idle">${icoHtml(modeIcon,12)} ${ps.mode||""}</span>` : ""}
         ${cfBadge}${cleanupBadge}${mullvadBadge}
         <div class="phud-meta">
@@ -9568,9 +10148,11 @@ function _syncPipelineActionButton(cid) {
   const btn = document.getElementById(`pipeline-btn-${cid}`);
   if (!btn) return;
   const active = _isPipelineActive(cid);
+  const label = active ? _opT("pipe_stop", "Parar pipeline") : _opT("pipe_run", "Rodar pipeline");
   btn.disabled = false;
   btn.className = `btn btn-icon ${active ? "pipeline-stop-btn" : "btn-secondary"}`;
- btn.textContent = active ? " Stop Pipeline" : " Run Pipeline";
+  btn.setAttribute("aria-label", label);
+  _setIconLabel(btn, active ? "stop" : "play", label);
 }
 
 async function handlePipelineAction(cid) {
@@ -9581,7 +10163,7 @@ async function handlePipelineAction(cid) {
 async function stopPipeline(cid, {notify = true} = {}) {
   if (!cid) return;
   const btn = document.getElementById(`pipeline-btn-${cid}`);
-  if (btn) { btn.disabled = true; btn.textContent = "Stopping..."; }
+  if (btn) { btn.disabled = true; _setIconLabel(btn, "stop", _opT("pipe_stopping", "Parando…")); }
   try {
     const r = await fetch('/api/recon/' + encodeURIComponent(cid) + '/pipeline', {method:'DELETE', headers:_authHeaders()});
     if (!r.ok) throw await _apiErr(r);
@@ -9785,58 +10367,27 @@ function renderJsReverseTab(co) {
   if (tc) tc.textContent = totalSecrets || "";
 
   if (!jsFiles.length) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">No JS analysis data yet</div><div class="empty-state-copy">Run the pipeline with the js_scan module enabled.</div></div>';
+    el.innerHTML = '<div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">No JS analysis data yet</div><div class="empty-state-copy">Run the pipeline with the js module enabled (JS Discovery). js_endpoints and js_secrets flatten those results.</div></div>';
     return;
-  }
-
-  // FP filter — mirrors recon.py _is_fp_secret logic, applied retroactively to stored data
-  var _FP_PWD_RE = /(%filtered%|wrong.?password|forgot.?password|invalid.?password|missing.?password|need.?password|change.?password|reset.?password|show.?password|confirm.?password|enter.?password|password.?hint|password.?set|create.?password|redefine.?password|new.?password|old.?password|repeat.?password)/i;
-  var _FP_LABEL_RE = /^[A-Z][A-Z0-9_\-]{3,}$|^[a-z][a-z0-9_]{4,}[a-z0-9]$/;
-  function _jsFP(type, value) {
-    var v = value || "";
-    if (type === "password") {
-      // Strip key name to get inner value
-      var inner = v.replace(/^(?:password|passwd|pwd)\s*[=:]\s*['"]/i, "").replace(/['"]$/, "");
-      if (_FP_PWD_RE.test(inner)) return true;
-      if (/^[A-Z][A-Z0-9_\-.]+$/.test(inner) || /^[a-z][a-z\-.]+$/.test(inner)) return true;
-      if (/^['"']?passwords?['"']?$/i.test(inner)) return true;
-      // JS code fragments: WebRTC pwd: parsing, template strings, +var. concatenation
-      if (/[\[\]{}&|?]|\.substring\(|\+[a-z]+\./.test(inner)) return true;
-      // Sentence-like phrases: only letters and spaces
-      if (/^[A-Za-z][A-Za-z ]+$/.test(inner)) return true;
-      return false;
-    }
-    if (type === "access_token" || type === "secret_key") {
-      var inner2 = v.replace(/^[\w\-]+\s*[=:]\s*['"]/i, "").replace(/['"]$/, "");
-      return _FP_LABEL_RE.test(inner2);
-    }
-    if (type === "api_key") {
-      var inner3 = v.replace(/^[\w\-]+\s*[=:]\s*['"]/i, "").replace(/['"]$/, "");
-      return _FP_LABEL_RE.test(inner3);
-    }
-    if (type === "internal_ip") {
-      // Validate each octet ≤ 255
-      var m = v.match(/(\d+)\.(\d+)\.(\d+)\.(\d+)/);
-      if (!m) return true;
-      return [m[1],m[2],m[3],m[4]].some(function(o){ return parseInt(o,10) > 255; });
-    }
-    return false;
   }
 
   // Collect all secrets and endpoints from all files
   var allSecrets = [];
   var allEndpoints = [];
-  var noiseHosts = new Set(["aadcdn.msauth.net","aadcdn.msftauth.net","ok1static.oktacdn.com","use.fontawesome.com"]);
+  var droppedEp = 0;
 
   jsFiles.forEach(function(f) {
     var host = f.host || "";
     var url = f.url || "";
+    var noisy = _jsHostIsNoise(host);
     (f.secrets || []).forEach(function(s) {
-      if (_jsFP(s.type, s.value)) return;
-      allSecrets.push({ severity: s.severity || "medium", type: s.type || "unknown", host: host, value: s.value || "", context: s.context || "", url: url });
+      if (_isFpJsSecret(s.type, s.value)) return;
+      allSecrets.push({ severity: s.severity || "medium", type: s.type || "unknown", host: host, value: s.value || "", context: s.context || "", url: url, noise: noisy });
     });
     (f.endpoints || []).forEach(function(ep) {
-      allEndpoints.push({ host: host, path: ep.path || ep.url || "", kind: ep.kind || "path", url: url });
+      var path = typeof ep === "string" ? ep : (ep.path || ep.url || "");
+      if (isJsPathNoise(path)) { droppedEp += 1; return; }
+      allEndpoints.push({ host: host, path: path, kind: (typeof ep === "object" && ep.kind) || "path", url: url, noise: noisy, source: f.source || "" });
     });
   });
 
@@ -9865,15 +10416,25 @@ function renderJsReverseTab(co) {
   html += _statCard("Critical", critCnt, "var(--red)");
   html += _statCard("High", highCnt, "var(--orange)");
   html += _statCard("Medium", medCnt, "var(--yellow)");
-  html += _statCard("Total Secrets", totalSecrets, "var(--teal)");
-  html += _statCard("Endpoints", totalEndpoints, "var(--text2)");
+  html += _statCard("Total Secrets", allSecrets.length || totalSecrets, "var(--teal)");
+  html += _statCard("Endpoints", allEndpoints.length || totalEndpoints, "var(--text2)");
+  html += _statCard("JS files", (jd.js_analyzed || jsFiles.length) + (jd.js_files_found ? "/" + jd.js_files_found : ""), "var(--text)");
+  if (jd.source_maps_count) html += _statCard("Source maps", jd.source_maps_count, "var(--teal)");
   html += '</div>';
+  var maps = jd.source_maps || [];
+  if (maps.length) {
+    html += '<div style="margin:-8px 0 18px;font-size:.72rem;color:var(--text2)">Source maps públicos:';
+    maps.slice(0, 8).forEach(function(m) {
+      html += '<div style="font-family:monospace;margin-top:2px">' + originLinkHtml(m.url || "", m.url || "", { className: "origin-link", title: _originTitle("js") }) + (m.sources_count ? " · " + m.sources_count + " sources" : "") + "</div>";
+    });
+    html += "</div>";
+  }
 
   // ── SECRETS SECTION ──────────────────────────────────────────────────────
   html += '<div style="margin-bottom:32px">';
   html += '<div style="font-size:.9rem;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">';
   html += '<span>Secrets Found (' + allSecrets.length + ')</span>';
-  html += '<button onclick="_jsrExportSecretsCsv()" style="background:var(--card);border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:3px 10px;font-size:.68rem;cursor:pointer">${icoHtml("chevron-down",14)} CSV</button>';
+  html += '<button onclick="_jsrExportSecretsCsv()" style="background:var(--card);border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:3px 10px;font-size:.68rem;cursor:pointer">' + icoHtml("chevron-down",14) + ' CSV</button>';
   html += '</div>';
 
   // Filter bar
@@ -9899,8 +10460,8 @@ function renderJsReverseTab(co) {
   // ── ENDPOINTS SECTION ────────────────────────────────────────────────────
   html += '<div>';
   html += '<div style="font-size:.9rem;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">';
-  html += '<span>Discovered Endpoints</span>';
-  html += '<button onclick="_jsrExportEndpointsCsv()" style="background:var(--card);border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:3px 10px;font-size:.68rem;cursor:pointer">${icoHtml("chevron-down",14)} CSV</button>';
+  html += '<span>Discovered Endpoints (' + allEndpoints.length + (droppedEp ? ' · ' + droppedEp + ' omitidos' : '') + ')</span>';
+  html += '<button onclick="_jsrExportEndpointsCsv()" style="background:var(--card);border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:3px 10px;font-size:.68rem;cursor:pointer">' + icoHtml("chevron-down",14) + ' CSV</button>';
   html += '</div>';
 
   html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">';
@@ -9930,7 +10491,7 @@ function renderJsReverseTab(co) {
     html += '<select id="jsr-net-method" onchange="_jsrRenderNet()" style="background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:4px 8px;font-size:.72rem"><option value="">All Methods</option>';
     methods.forEach(function(m){ html += '<option>' + esc(m) + '</option>'; });
     html += '</select>';
-    html += '<button onclick="_jsrExportNetCsv()" style="background:var(--card);border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:3px 10px;font-size:.68rem;cursor:pointer">${icoHtml("chevron-down",14)} CSV</button>';
+    html += '<button onclick="_jsrExportNetCsv()" style="background:var(--card);border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:3px 10px;font-size:.68rem;cursor:pointer">' + icoHtml("chevron-down",14) + ' CSV</button>';
     html += '</div>';
     html += '<div id="jsr-net-table"></div>';
   }
@@ -9944,8 +10505,18 @@ function renderJsReverseTab(co) {
   window._jsrAllSecrets   = allSecrets;
   window._jsrAllEndpoints = allEndpoints;
   window._jsrRuntimeNet   = runtimeNet;
-  window._jsrNoiseHosts   = noiseHosts;
+  window._jsrNoiseHosts   = _JS_NOISE_HOSTS;
   window._jsrRevealSet    = new Set();
+  window._jsrDroppedEp    = droppedEp;
+
+  if (_pendingFoundFilter && _pendingFoundFilter.tab === "jsreverse") {
+    var q = _pendingFoundFilter.q;
+    _pendingFoundFilter = null;
+    var sevEl = document.getElementById("jsr-text-filter");
+    var epEl = document.getElementById("jsr-ep-text");
+    if (sevEl) sevEl.value = q;
+    if (epEl) epEl.value = q;
+  }
 
   _jsrRender();
   _jsrRenderEp();
@@ -9968,7 +10539,7 @@ function _jsrRender() {
   var rows = (window._jsrAllSecrets || []).filter(function(s) {
     if (sev  && s.severity !== sev) return false;
     if (typ  && s.type     !== typ) return false;
-    if (noise && (window._jsrNoiseHosts||new Set()).has(s.host)) return false;
+    if (noise && (s.noise || (window._jsrNoiseHosts||new Set()).has(s.host))) return false;
     if (txt  && !((s.value||"").toLowerCase().includes(txt) || (s.host||"").toLowerCase().includes(txt) || (s.type||"").toLowerCase().includes(txt))) return false;
     return true;
   });
@@ -9993,12 +10564,12 @@ function _jsrRender() {
     h += '<tr style="border-bottom:1px solid var(--border)22;hover:background:var(--card2)">';
     h += '<td style="padding:6px 10px">' + _sevBadge(s.severity) + '</td>';
     h += '<td style="padding:6px 10px;color:var(--text2);font-family:monospace">' + esc(s.type) + '</td>';
-    h += '<td style="padding:6px 10px;color:var(--teal)">' + esc(s.host) + '</td>';
+    h += '<td style="padding:6px 10px">' + (s.host ? originHostChip(s.host, "origin-link") : "—") + '</td>';
     h += '<td style="padding:6px 10px;font-family:monospace;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(s.value) + '">';
     h += '<span id="jsr-val-' + i + '">' + display + '</span> ';
     h += '<button onclick="_jsrToggleReveal(' + i + ')" style="background:none;border:none;color:var(--teal);cursor:pointer;font-size:.65rem;padding:0 4px">' + btnLabel + '</button></td>';
     h += '<td style="padding:6px 10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">';
-    if (s.url) h += '<a href="' + esc(s.url) + '" target="_blank" rel="noopener" style="color:var(--text3);text-decoration:none" title="' + esc(s.url) + '">' + esc(shortUrl) + '</a>';
+    if (s.url) h += originLinkHtml(s.url, shortUrl, { className: "origin-link", title: _originTitle("js") });
     h += '</td></tr>';
   });
   h += '</tbody></table>';
@@ -10018,7 +10589,9 @@ function _jsrRenderEp() {
   var tbl     = document.getElementById("jsr-endpoints-table");
   if (!tbl) return;
 
+  var noise = (document.getElementById("jsr-noise-filter")||{}).checked;
   var rows = (window._jsrAllEndpoints || []).filter(function(ep) {
+    if (noise && ep.noise) return false;
     if (apiOnly && !/(\/api\/|\/auth\/|\/oauth|\/login|\/graphql|\/v[0-9])/i.test(ep.path)) return false;
     if (txt && !((ep.path||"").toLowerCase().includes(txt) || (ep.host||"").toLowerCase().includes(txt))) return false;
     return true;
@@ -10035,17 +10608,24 @@ function _jsrRenderEp() {
   var h = '<div style="font-size:.68rem;color:var(--text3);margin-bottom:6px">Showing ' + shown.length + (rows.length > maxRows ? ' of ' + rows.length : '') + ' endpoints</div>';
   h += '<table style="width:100%;border-collapse:collapse;font-size:.72rem">';
   h += '<thead><tr style="border-bottom:1px solid var(--border)">';
-  ['Host','Path','Kind'].forEach(function(col) {
+  ['Host','Path','Kind','Fonte JS'].forEach(function(col) {
     h += '<th style="text-align:left;padding:6px 10px;color:var(--text3);font-weight:600;font-size:.68rem;text-transform:uppercase">' + col + '</th>';
   });
   h += '</tr></thead><tbody>';
 
   shown.forEach(function(ep) {
+    var pathHref = originHref(ep.path, ep.host);
+    var pathLabel = ep.path || "";
+    var jsShort = ep.url ? String(ep.url).replace(/^https?:\/\//, "").substring(0, 48) : "";
     h += '<tr style="border-bottom:1px solid var(--border)22">';
-    h += '<td style="padding:6px 10px;color:var(--teal)">' + esc(ep.host) + '</td>';
-    h += '<td style="padding:6px 10px;font-family:monospace;color:var(--text)">' + esc(ep.path) + '</td>';
+    h += '<td style="padding:6px 10px">' + (ep.host ? originHostChip(ep.host, "origin-link") : "—") + '</td>';
+    h += '<td style="padding:6px 10px;font-family:monospace">';
+    h += pathHref ? originLinkHtml(ep.path, pathLabel, { host: ep.host, className: "origin-link origin-mono", title: _originTitle() }) : esc(pathLabel);
+    h += '</td>';
     h += '<td style="padding:6px 10px;color:var(--text3)">' + esc(ep.kind) + '</td>';
-    h += '</tr>';
+    h += '<td style="padding:6px 10px">';
+    if (ep.url) h += originLinkHtml(ep.url, jsShort, { className: "origin-link", title: _originTitle("js") });
+    h += '</td></tr>';
   });
   h += '</tbody></table>';
   tbl.innerHTML = h;
@@ -10104,8 +10684,8 @@ function _jsrRenderNet() {
     h += '<tr style="border-bottom:1px solid var(--border)22">';
     h += '<td style="padding:5px 10px;font-weight:700;color:' + mc + ';font-family:monospace;white-space:nowrap">' + esc(c.method) + '</td>';
     h += '<td style="padding:5px 10px;color:var(--text3);white-space:nowrap">' + esc(c.type||'') + '</td>';
-    h += '<td style="padding:5px 10px;font-family:monospace;color:var(--text2);word-break:break-all">';
-    h += '<a href="' + esc(c.url||'') + '" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="' + esc(c.url||'') + '">' + esc(shortUrl) + '</a>';
+    h += '<td style="padding:5px 10px;font-family:monospace;word-break:break-all">';
+    h += originLinkHtml(c.url || "", shortUrl, { className: "origin-link origin-mono", title: _originTitle() });
     h += '</td></tr>';
   });
   h += '</tbody></table>';
@@ -10135,9 +10715,10 @@ async function renderVulnsTab(co) {
   const el = document.getElementById("tab-vulns");
   if (!el) return;
 
-  el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text3)">
+  el.setAttribute("aria-busy", "true");
+  el.innerHTML = `<div class="vuln-loading" role="status" style="padding:40px;text-align:center;color:var(--text3);min-height:120px">
     <div class="pulse" style="width:12px;height:12px;background:var(--teal);border-radius:50%;margin:0 auto 12px"></div>
-    Loading vulnerability data...</div>`;
+    ${esc(_opT("vuln_loading", "Carregando vulnerabilidades…"))}</div>`;
 
   let data;
   try {
@@ -10145,7 +10726,8 @@ async function renderVulnsTab(co) {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     data = await resp.json();
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">Failed to load vuln data</div><div class="empty-state-copy">${esc(String(e))}</div></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">${esc(_opT("vuln_fail", "Falha ao carregar vulnerabilidades"))}</div><div class="empty-state-copy">${esc(String(e))}</div></div>`;
+    el.removeAttribute("aria-busy");
     return;
   }
 
@@ -10181,18 +10763,18 @@ async function renderVulnsTab(co) {
   let html = `<div class="section-shell" style="padding:18px">
     <div class="section-head">
       <div class="section-head-main">
-        <div class="section-kicker">Confirmed Vulnerabilities</div>
-        <div class="section-title">Confirmed vulnerability findings only</div>
-        <div class="section-sub">Recon noise, brand intelligence, phishing and other non-vulnerability leads are filtered out.</div>
+        <div class="section-kicker">${esc(_opT("vuln_kicker", "Vulnerabilidades confirmadas"))}</div>
+        <div class="section-title">${esc(_opT("vuln_title", "Só findings de vulnerabilidade confirmados"))}</div>
+        <div class="section-sub">${esc(_opT("vuln_sub", "Ruído de recon, intel de marca, phishing e outras pistas que não são vulnerabilidade ficam de fora."))}</div>
       </div>
     </div>`;
 
   html += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
-    ${_vStatCard("Confirmed", findings.length, "var(--green)")}
-    ${_vStatCard("Critical", summaryCards.critical, "var(--red)")}
-    ${_vStatCard("High", summaryCards.high, "var(--orange)")}
-    ${_vStatCard("Medium", summaryCards.medium, "var(--yellow)")}
-    ${_vStatCard("Low", summaryCards.low, "var(--blue)")}
+    ${_vStatCard(esc(_opT("vuln_kpi_confirmed", "Confirmadas")), findings.length, "var(--green)")}
+    ${_vStatCard(esc(_opT("vuln_kpi_critical", "Críticas")), summaryCards.critical, "var(--red)")}
+    ${_vStatCard(esc(_opT("vuln_kpi_high", "Altas")), summaryCards.high, "var(--orange)")}
+    ${_vStatCard(esc(_opT("vuln_kpi_medium", "Médias")), summaryCards.medium, "var(--yellow)")}
+    ${_vStatCard(esc(_opT("vuln_kpi_low", "Baixas")), summaryCards.low, "var(--blue)")}
     ${_vStatCard("CORS", cors.length, "var(--red)")}
     ${_vStatCard("GraphQL", graphql.length, "var(--teal)")}
     ${_vStatCard("Nuclei", nuclei.length, "var(--orange)")}
@@ -10207,11 +10789,11 @@ async function renderVulnsTab(co) {
       ${_severityCard("low", summaryCards.low, co.id)}
     </div>`;
     html += `<div class="filter-bar">
-      <input type="text" class="fi grow" id="f-search" placeholder="Search confirmed vulns, hosts, descriptions..." oninput='applyFindFilter(${cidJs})'>
+      <input type="text" class="fi grow" id="f-search" placeholder="${escAttr(_opT("vuln_search", "Buscar vulns confirmadas, hosts, descrições…"))}" oninput='applyFindFilter(${cidJs})'>
       <select class="fi" id="f-sev" onchange='applyFindFilter(${cidJs})'>
-        <option value="">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
+        <option value="">${esc(_opT("vuln_all_sev", "Todas as severidades"))}</option><option value="critical">${esc(_opT("vuln_kpi_critical", "Críticas"))}</option><option value="high">${esc(_opT("vuln_kpi_high", "Altas"))}</option><option value="medium">${esc(_opT("vuln_kpi_medium", "Médias"))}</option><option value="low">${esc(_opT("vuln_kpi_low", "Baixas"))}</option>
       </select>
-      <select class="fi" id="f-cat" onchange='applyFindFilter(${cidJs})'><option value="">All categories</option>${cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select>
+      <select class="fi" id="f-cat" onchange='applyFindFilter(${cidJs})'><option value="">${esc(_opT("vuln_all_cat", "Todas as categorias"))}</option>${cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select>
       <select class="fi" id="f-triage" onchange='applyFindFilter(${cidJs})'>
         <option value="">Todos os status</option>
         ${Object.entries(FINDING_TRIAGE_LABELS).map(([val,lbl])=>`<option value="${val}">${lbl}</option>`).join("")}
@@ -10224,14 +10806,14 @@ async function renderVulnsTab(co) {
     <div class="pager" id="f-pager" style="display:none">
       <span class="pager-info" id="f-pinfo"></span>
       <div class="pager-btns">
-        <button class="pb" id="f-prev" onclick="findsPageNav(-1)">← Prev</button>
+        <button class="pb" id="f-prev" onclick="findsPageNav(-1)">${esc(_opT("vuln_prev", "← Anterior"))}</button>
         <span id="f-pnums"></span>
-        <button class="pb" id="f-next" onclick="findsPageNav(1)">Next →</button>
+        <button class="pb" id="f-next" onclick="findsPageNav(1)">${esc(_opT("vuln_next", "Próxima →"))}</button>
       </div>
     </div>
-    <div class="empty-state" id="f-empty" style="display:none"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">No confirmed vulns match the current filters</div><div class="empty-state-copy">Try widening the search terms or clearing severity/category filters.</div></div>`;
+    <div class="empty-state" id="f-empty" style="display:none"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">${esc(_opT("vuln_empty_filter_t", "Nenhuma vuln confirmada bate com os filtros"))}</div><div class="empty-state-copy">${esc(_opT("vuln_empty_filter_c", "Amplie a busca ou limpe os filtros de severidade e categoria."))}</div></div>`;
   } else {
-    html += `<div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">No confirmed vulnerabilities yet</div><div class="empty-state-copy">Run the bug bounty pipeline to populate this view.</div></div>`;
+    html += `<div class="empty-state"><div class="empty-state-icon" data-ico="inbox" aria-hidden="true"></div><div class="empty-state-title">${esc(_opT("vuln_empty_t", "Nenhuma vulnerabilidade confirmada ainda"))}</div><div class="empty-state-copy">${esc(_opT("vuln_empty_c", "Rode a pipeline de bug bounty para preencher esta vista."))}</div></div>`;
   }
 
   html += `<div style="margin-top:18px">`;
@@ -10239,9 +10821,9 @@ async function renderVulnsTab(co) {
   const _sectionHdr = (title, count) => `<div style="font-size:.9rem;font-weight:700;color:var(--text);margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)">${esc(title)} <span style="color:var(--text3);font-weight:400">(${count})</span></div>`;
   const _emptySection = msg => `<div style="padding:12px 16px;color:var(--text3);font-size:.8rem;background:var(--card);border:1px solid var(--border);border-radius:8px">${esc(msg)}</div>`;
 
-  html += _sectionHdr("CORS Misconfigurations", cors.length);
+  html += _sectionHdr(_opT("vuln_cors_title", "CORS mal configurado"), cors.length);
   if (!cors.length) {
-    html += _emptySection("No CORS misconfigurations found.");
+    html += _emptySection(_opT("vuln_cors_empty", "Nenhum CORS mal configurado encontrado."));
   } else {
     html += `<div style="display:grid;gap:10px">` + cors.map(f => {
       const acac = f.acac === true || f.acac === "true" || f.acac === 1;
@@ -10253,15 +10835,15 @@ async function renderVulnsTab(co) {
         </div>
         <div style="font-size:.72rem;color:var(--text2);margin-bottom:6px">
           <span style="color:var(--text3)">ACAO: </span><code style="color:var(--text)">${esc(f.acao || "")}</code>
-          ${acac ? `<span style="background:#fb718522;color:#fb7185;border:1px solid #fb718544;border-radius:4px;padding:1px 7px;font-size:.65rem;font-weight:700;margin-left:6px">${icoHtml("warning",14)} Credentials</span>` : ""}
+          ${acac ? `<span style="background:#fb718522;color:#fb7185;border:1px solid #fb718544;border-radius:4px;padding:1px 7px;font-size:.65rem;font-weight:700;margin-left:6px">${icoHtml("warning",14)} ${esc(_opT("vuln_credentials", "Credenciais"))}</span>` : ""}
         </div>
-        <div style="font-size:.7rem;color:var(--text3)">Origin sent: <code>${esc(f.origin_sent || "")}</code></div>
+        <div style="font-size:.7rem;color:var(--text3)">${esc(_opT("vuln_origin_sent", "Origin enviada:"))} <code>${esc(f.origin_sent || "")}</code></div>
         ${f.url ? `<div style="margin-top:6px"><a href="${esc(f.url)}" target="_blank" rel="noopener" style="color:var(--teal);font-size:.7rem;text-decoration:none">${esc(f.url.substring(0,80))}</a></div>` : ""}
       </div>`;
     }).join("") + `</div>`;
   }
 
-  html += _sectionHdr("GraphQL Endpoints", graphql.length);
+  html += _sectionHdr(_opT("vuln_gql_title", "Endpoints GraphQL"), graphql.length);
   html += graphql.length ? `<div style="display:grid;gap:10px">${graphql.map(f => `
     <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -10270,9 +10852,9 @@ async function renderVulnsTab(co) {
         <span style="font-size:.72rem;color:var(--text3)">${esc(f.url || "")}</span>
       </div>
       <div style="font-size:.72rem;color:var(--text2)">${esc(f.desc || f.title || "")}</div>
-    </div>`).join("")}</div>` : _emptySection("No GraphQL endpoints detected.");
+    </div>`).join("")}</div>` : _emptySection(_opT("vuln_gql_empty", "Nenhum endpoint GraphQL detectado."));
 
-  html += _sectionHdr("Nuclei Findings", nuclei.length);
+  html += _sectionHdr(_opT("vuln_nuclei_title", "Findings do Nuclei"), nuclei.length);
   html += nuclei.length ? `<div style="display:grid;gap:10px">${nuclei.map(f => `
     <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -10281,9 +10863,9 @@ async function renderVulnsTab(co) {
         <span style="font-size:.72rem;color:var(--text3)">${esc(f.template || f.name || "")}</span>
       </div>
       <div style="font-size:.72rem;color:var(--text2)">${esc(f.desc || "")}</div>
-    </div>`).join("")}</div>` : _emptySection("No nuclei findings detected.");
+    </div>`).join("")}</div>` : _emptySection(_opT("vuln_nuclei_empty", "Nenhum finding do Nuclei detectado."));
 
-  html += _sectionHdr("Takeover Candidates", takeover.length);
+  html += _sectionHdr(_opT("vuln_takeover_title", "Candidatos a takeover"), takeover.length);
   html += takeover.length ? `<div style="display:grid;gap:10px">${takeover.map(f => `
     <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -10291,10 +10873,11 @@ async function renderVulnsTab(co) {
         <span style="font-weight:700;color:var(--teal)">${esc(f.host || "")}</span>
       </div>
       <div style="font-size:.72rem;color:var(--text2)">${esc(f.desc || "")}</div>
-    </div>`).join("")}</div>` : _emptySection("No takeover candidates detected.");
+    </div>`).join("")}</div>` : _emptySection(_opT("vuln_takeover_empty", "Nenhum candidato a takeover detectado."));
 
   html += `</div></div>`;
   el.innerHTML = html;
+  el.removeAttribute("aria-busy");
   _finds_page = 1;
   if (!_applyPendingVulnFilter(co.id) && findings.length) applyFindFilter(co.id);
 }
@@ -10965,7 +11548,7 @@ function renderLiveTerminal(cid) {
           <span>scantrely@asm:~$ pipeline monitor — ${esc(cid)}</span>
           <span style="margin-left:auto;display:flex;gap:8px">
             <span id="lt-live-badge" style="display:none;color:#4ade80;font-weight:600">⬤ LIVE</span>
-            <button id="lt-pause-btn" class="btn btn-secondary btn-icon" onclick="toggleLTPause()">${_ltPaused ? icoHtml("play",14)+' Resume' : '⏸ Pause'}</button>
+            <button id="lt-pause-btn" class="btn btn-secondary btn-icon" onclick="toggleLTPause()">${_ltPaused ? icoHtml("play",14)+' Resume' : icoHtml("pause",14)+' Pause'}</button>
             <button class="btn btn-secondary btn-icon" onclick="_ltModules={};_ltSince=Date.now()/1000;_renderLTTerminal()" aria-label="Clear terminal">↻ Clear</button>
           </span>
         </div>
@@ -10980,7 +11563,7 @@ function stopLTPoll() { if (_ltPoll) { clearInterval(_ltPoll); _ltPoll = null; }
 function toggleLTPause() {
   _ltPaused = !_ltPaused;
   const btn = document.getElementById("lt-pause-btn");
- if (btn) btn.textContent = _ltPaused ? " Resume" : "⏸ Pause";
+ if (btn) btn.innerHTML = _ltPaused ? icoHtml("play",14)+" Resume" : icoHtml("pause",14)+" Pause";
 }
 async function fetchLT(cid) { _ltActiveCid = cid; return _fetchLT(); }
 
@@ -11459,20 +12042,25 @@ function openHostDrawer(hostname) {
     </div>`
     : '';
 
+  const shotSrc = _shotSrc(h.screenshot);
+  const shotHtml = shotSrc
+    ? `<div class="hd-section"><div class="hd-section-title">Screenshot</div>
+      <a href="${esc(shotSrc)}" target="_blank" rel="noopener" aria-label="${esc("Abrir screenshot de " + (h.host || ""))}">
+        <img src="${esc(shotSrc)}" style="width:100%;max-width:400px;border-radius:8px;border:1px solid var(--border);cursor:pointer" onerror="this.style.display='none'" alt="${esc("Screenshot de " + (h.host || ""))}">
+      </a></div>`
+    : '';
+
   bodyEl.innerHTML = `
     <div class="hd-section">
       <div class="hd-section-title">Identity</div>
-      <div class="hd-row"><span class="hd-k">Host</span><span class="hd-v hi">${esc(h.host||'—')}</span></div>
+      <div class="hd-row"><span class="hd-k">Host</span><span class="hd-v hi">${h.host ? originHostChip(h.host, "origin-link") : "—"}</span></div>
       <div class="hd-row"><span class="hd-k">IP</span><span class="hd-v">${esc(h.ip||'—')}</span></div>
       <div class="hd-row"><span class="hd-k">Title</span><span class="hd-v">${esc(h.title||'No title')}</span></div>
       <div class="hd-row"><span class="hd-k">WAF/CDN</span><span class="hd-v">${esc(h.waf||'Direct')}</span></div>
       ${h.cloud_provider ? `<div class="hd-row"><span class="hd-k">Cloud</span><span class="hd-v hi">${icoHtml("cloud",14)} ${esc(h.cloud_provider)}</span></div>` : ''}
       ${h.asn ? `<div class="hd-row"><span class="hd-k">ASN</span><span class="hd-v">${esc(h.asn)}</span></div>` : ''}
     </div>
-    ${h.screenshot ? `<div class="hd-section"><div class="hd-section-title">Screenshot</div>
-      <a href="${esc('/' + h.screenshot)}" target="_blank" rel="noopener">
-        <img src="${esc('/' + h.screenshot)}" style="width:100%;max-width:400px;border-radius:8px;border:1px solid var(--border);cursor:pointer" onerror="this.style.display='none'" alt="Screenshot of ${esc(h.host)}">
-      </a></div>` : ''}
+    ${shotHtml}
     ${portsHtml}
     ${cnameHtml}
     ${certHtml}
