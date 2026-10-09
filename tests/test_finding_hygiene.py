@@ -99,3 +99,10 @@ def test_priorities_caps_hygiene_types():
                        {"key": "v", "type": "vhost", "severity": "high", "host": "b", "title": "y"}]}
     sev = {a["type"]: a["severity"] for a in build_priorities(co)["actions"]}
     assert sev == {"header": "medium", "vhost": "low"}
+
+
+def test_repair_deep_fixes_nested_strings():
+    from core.finding_hygiene import repair_deep
+    bad = "Ã¢â‚¬â€\x9d"
+    data = {"a": [{"obs": f"X {bad} y"}], "b": f"k{bad}"}
+    assert repair_deep(data) == {"a": [{"obs": "X — y"}], "b": "k—"}

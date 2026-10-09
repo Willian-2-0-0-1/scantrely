@@ -63,7 +63,11 @@ function _opCta(cid) {
   return `<button type="button" class="btn btn-primary" id="playwright-btn-${escAttr(cid)}" onclick='openPlaywrightModal(${_jsArg(cid)})'>${icoHtml("play",14)} ${_opT("op_cta_playwright", "Enfileirar Playwright Recon")}</button>`;
 }
 
+// Seção sem dados não aparece: o marcador faz o CSS esconder o cartão inteiro (ver .op-empty-marker).
+const _OP_EMPTY = `<span class="op-empty-marker" hidden></span>`;
+
 function _opTable(headers, rowsHtml, emptyMsg) {
+  if (!rowsHtml) return _OP_EMPTY;
   const cols = headers.length;
   return `<div class="table-shell"><div class="tl-wrap"><table class="jobs-table compact-table">
     <thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead>
@@ -222,7 +226,7 @@ function _renderOperationPersistCards(co, persist) {
 
     <div class="job-detail-card" style="margin-top:14px;margin-bottom:14px">
       <div class="job-detail-title">${esc(_opT("op_third_title", "Serviços de terceiros"))}</div>
-      ${thirdChips ? `<div class="op-chip-row">${thirdChips}</div>` : `<div class="job-detail-copy">${esc(_opT("op_none_third", "Nenhum terceiro listado."))}</div>`}
+      ${thirdChips ? `<div class="op-chip-row">${thirdChips}</div>` : _OP_EMPTY}
     </div>
 
     <div class="job-detail-card" style="margin-bottom:14px">
@@ -668,21 +672,21 @@ function _renderReconEvidencePanel(co, shots, staticEndpoints, staticSecrets, se
     <td>${esc(f.title || f.type || "Finding")}</td>
     <td class="recon-mono">${esc(f.host || f.value || "")}</td>
     <td>${esc(f.module || f.category || "")}</td>
-  </tr>`).join("") || `<tr><td colspan="4" class="recon-empty-row">${esc(_opT("recon_find_empty","Nenhum finding consolidado."))}</td></tr>`;
+  </tr>`).join("");
 
   const hostRows = hosts.slice(0, 10).map(h => `<tr>
     <td class="recon-mono">${esc(h.host || "")}</td>
     <td>${h.status_code ? `<span class="status-code">${esc(h.status_code)}</span>` : "—"}</td>
     <td>${esc(h.title || h.server || "")}</td>
     <td>${(h.screenshot || h.browser_recon?.screenshot) ? icoHtml("check",14) : "—"}</td>
-  </tr>`).join("") || `<tr><td colspan="4" class="recon-empty-row">${esc(_opT("recon_hosts_empty","Nenhum host carregado."))}</td></tr>`;
+  </tr>`).join("");
 
   const browserRows = browserResults.slice(0, 8).map(r => `<tr>
     <td class="recon-mono"><a href="${escAttr(r.url || "")}" target="_blank" rel="noopener">${esc(r.url || "")}</a></td>
     <td>${esc(r.status ?? "—")}</td>
     <td>${esc(r.title || "")}</td>
     <td>${Array.isArray(r.observations) ? r.observations.length : 0}</td>
-  </tr>`).join("") || `<tr><td colspan="4" class="recon-empty-row">${esc(_opT("recon_br_empty","Browser recon sem páginas persistidas."))}</td></tr>`;
+  </tr>`).join("");
 
   return `
     <div class="recon-kpi-grid">
@@ -701,26 +705,26 @@ function _renderReconEvidencePanel(co, shots, staticEndpoints, staticSecrets, se
         <div class="section-sub">${esc(_opT("recon_cov_sub","Resumo operacional do que a pipeline já consolidou para o alvo."))}</div>
       </div>
     </div>
-    <div class="recon-module-grid">${modules.map(_reconModuleCard).join("")}</div>
+    <div class="recon-module-grid">${modules.filter(m => Number(m.count) > 0).map(_reconModuleCard).join("")}</div>
 
     <div class="recon-two-col">
-      <div>
+      ${topFindingRows ? `<div>
         <div class="recon-panel-title">${esc(_opT("recon_find_title","Findings prioritários"))}</div>
         <div class="table-shell"><div class="tl-wrap"><table class="jobs-table compact-table">
           <thead><tr><th>Sev</th><th>Finding</th><th>${esc(_opT("recon_col_host_val","Host/Valor"))}</th><th>${esc(_opT("recon_col_module","Módulo"))}</th></tr></thead>
           <tbody>${topFindingRows}</tbody>
         </table></div></div>
-      </div>
-      <div>
+      </div>` : ""}
+      ${hostRows ? `<div>
         <div class="recon-panel-title">${esc(_opT("recon_hosts_title","Hosts em evidência"))}</div>
         <div class="table-shell"><div class="tl-wrap"><table class="jobs-table compact-table">
           <thead><tr><th>Host</th><th>Status</th><th>${esc(_opT("recon_col_title_srv","Título/Server"))}</th><th>Shot</th></tr></thead>
           <tbody>${hostRows}</tbody>
         </table></div></div>
-      </div>
+      </div>` : ""}
     </div>
 
-    <div class="recon-two-col">
+    ${browserRows ? `<div class="recon-two-col">
       <div>
         <div class="recon-panel-title">${esc(_opT("recon_br_title","Browser recon"))}</div>
         <div class="table-shell"><div class="tl-wrap"><table class="jobs-table compact-table">
@@ -728,7 +732,7 @@ function _renderReconEvidencePanel(co, shots, staticEndpoints, staticSecrets, se
           <tbody>${browserRows}</tbody>
         </table></div></div>
       </div>
-    </div>
+    </div>` : ""}
   `;
 }
 

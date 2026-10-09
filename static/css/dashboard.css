@@ -4194,3 +4194,9 @@ a.op-chip.origin-link:hover { text-decoration: underline; }
 .co-menu-list button { background:none; border:0; color:var(--text2); text-align:left; padding:7px 10px; border-radius:6px; font-size:.78rem; cursor:pointer; }
 .co-menu-list button:hover { background:var(--card2); color:var(--text1); }
 .co-menu-list button.danger { color:var(--red); }
+
+/* ── Seções vazias não aparecem (operação / Playwright) ─────────────── */
+.job-detail-card:has(.op-empty-marker) { display: none; }
+.recon-two-col:has(> .job-detail-card .op-empty-marker) { grid-template-columns: 1fr; }
+.recon-two-col:not(:has(> .job-detail-card:not(:has(.op-empty-marker)))) { display: none; }
+.recon-two-col:has(> :only-child) { grid-template-columns: 1fr; }

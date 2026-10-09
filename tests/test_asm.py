@@ -3550,7 +3550,7 @@ class TestOriginLink:
         assert "⧉" not in js
         assert "hostPanel = \"subdomains\"" in js
         assert "js/dashboard/17-terminal-alerts-init.js" in html
-        assert "dashboard.css?v=35" in html
+        assert "dashboard.css?v=36" in html
         assert "i18n.js?v=21" in html
         assert "exposure.js?v=3" in html
         assert "Prévia do screenshot" in html

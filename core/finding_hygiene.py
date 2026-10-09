@@ -50,6 +50,25 @@ def repair_mojibake(text: str) -> str:
     return _MOJIBAKE.sub(lambda m: _unmojibake_run(m.group(0)), text)
 
 
+def repair_deep(obj):
+    """repair_mojibake em todas as strings (valores e chaves) de uma estrutura JSON, in-place quando possível."""
+    if isinstance(obj, str):
+        return repair_mojibake(obj)
+    if isinstance(obj, list):
+        for i, v in enumerate(obj):
+            obj[i] = repair_deep(v)
+        return obj
+    if isinstance(obj, dict):
+        for k in list(obj):
+            v = repair_deep(obj[k])
+            nk = repair_mojibake(k) if isinstance(k, str) else k
+            if nk != k:
+                del obj[k]
+            obj[nk] = v
+        return obj
+    return obj
+
+
 # ── VHost ──────────────────────────────────────────────────────────────────
 def vhost_findings(vhost_data: dict) -> list[dict]:
     """Converte a saída crua do módulo vhost em achados, sem falsos positivos.
@@ -154,6 +173,7 @@ def count_by_severity(findings: list[dict]) -> dict[str, int]:
 def tidy_stored(data: dict) -> dict:
     """Reaplica a higiene a todas as empresas de um asm_data. Retorna antes/depois."""
     report = {}
+    repair_deep(data)   # acentuação corrompida em qualquer campo gravado (observações do browser recon etc.)
     for co in data.get("companies", []):
         before = list(co.get("findings") or [])
         if not before:
