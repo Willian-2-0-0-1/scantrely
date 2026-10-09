@@ -63,9 +63,9 @@ def test_single_header_finding_not_grouped():
     assert tidy_findings([f], {}) == [f]
 
 
-def test_brand_exposure_capped_at_high():
+def test_brand_exposure_capped_at_medium():
     f = {"key": "t", "type": "brand_domain_exposure", "severity": "critical", "title": "x", "host": "p0rto.com"}
-    assert tidy_findings([f], {})[0]["severity"] == "high"
+    assert tidy_findings([f], {})[0]["severity"] == "medium"
 
 
 def test_stored_chains_are_recomputed_over_inventory_hosts_only():
@@ -240,5 +240,14 @@ def test_weak_evidence_types_are_capped():
     assert cap_severity("cors", "critical") == "medium" and cap_severity("cors", "low") == "low"
     assert cap_severity("vendor_fingerprint", "high") == "medium" and cap_severity("waf_bypass", "critical") == "medium"
     assert cap_severity("header", "high") == "medium" and cap_severity("staging_in_csp", "high") == "low"
+    assert cap_severity("email_security", "high") == "medium" and cap_severity("brand_domain_exposure", "critical") == "medium"
     assert cap_severity("git_exposed", "critical") == "critical"      # sem teto: exige prova (conteúdo de git)
     assert SEVERITY_CAPS["cors"] == "medium"
+
+
+def test_public_google_key_is_capped_but_real_secret_is_not():
+    from core.finding_hygiene import tidy_findings
+    gk = {"key": "s1", "type": "secret", "severity": "high", "title": "Secret exposto: google_api_key em a.x.com", "host": "a.x.com", "metadata": {"secret_type": "google_api_key"}}
+    aws = {"key": "s2", "type": "secret", "severity": "critical", "title": "Secret exposto: aws_secret_key em a.x.com", "host": "a.x.com", "metadata": {"secret_type": "aws_secret_key"}}
+    out = {f["key"]: f["severity"] for f in tidy_findings([gk, aws], {})}
+    assert out == {"s1": "medium", "s2": "critical"}

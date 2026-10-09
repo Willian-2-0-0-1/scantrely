@@ -21,7 +21,8 @@ SEVERITY_CAPS = {
     "vendor_fingerprint": "medium", # só a presença do produto; não prova a versão vulnerável
     "waf_bypass": "medium",         # heurística: tamanho da resposta mudou com X-Forwarded-For
     "staging_in_csp": "low",        # referência a staging na CSP
-    "brand_domain_exposure": "high",
+    "brand_domain_exposure": "medium",  # domínio parecido: risco de marca/monitoramento, sem prova de uso malicioso
+    "email_security": "medium",     # SPF/DKIM/DMARC ausente
 }
 _RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
@@ -198,6 +199,16 @@ def cap_unversioned_cves(co_data: dict) -> set[str]:
     return capped
 
 
+_PUBLIC_KEY_TYPES = ("google_api_key", "google_maps", "firebase_api_key", "recaptcha_site_key", "mapbox_public", "stripe_publishable")
+
+
+def _is_public_client_key(f: dict) -> bool:
+    """Chaves feitas para ir no JavaScript do navegador (Maps, Firebase, reCAPTCHA site key…): não são segredo por si só."""
+    stype = str((f.get("metadata") or {}).get("secret_type") or "").lower()
+    title = str(f.get("title") or "").lower()
+    return any(t in stype or t in title for t in _PUBLIC_KEY_TYPES)
+
+
 def dismiss_false_positives(findings: list[dict], co_data: dict) -> list[dict]:
     """Tira da lista achados que não resistem à verificação e guarda o motivo em `auto_dismissed`."""
     keep, dismissed = [], co_data.setdefault("auto_dismissed", [])
@@ -230,6 +241,8 @@ def tidy_findings(findings: list[dict], co_data: dict) -> list[dict]:
             if k in f:
                 f[k] = repair_mojibake(f[k])
         f["severity"] = cap_severity(f.get("type"), f.get("severity"))
+        if f.get("type") == "secret" and _is_public_client_key(f):
+            f["severity"] = cap_severity("header", f.get("severity"))   # chave pública de front-end: no máximo médio
         out.append(f)
 
     vd = co_data.get("vhost_data")
