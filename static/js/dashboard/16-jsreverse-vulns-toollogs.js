@@ -378,7 +378,10 @@ async function renderVulnsTab(co) {
   const nuclei   = data.nuclei || [];
   const takeover = data.takeover || [];
   const summary   = data.summary || {};
-  const findings  = _confirmedVulnFindings(co.findings || []);
+  // Achados confirmados: contagens e categorias vêm do servidor; a lista é paginada em applyFindFilter.
+  let fg0 = {confirmed_total: 0, severity: {}, categories: []};
+  try { fg0 = await fetchFindingGroups(co.id, {page: 1, per_page: 1}); } catch (e) {}
+  const findings = {length: fg0.confirmed_total};
   const apiTotal  = Number(summary.total || (cors.length + graphql.length + nuclei.length + takeover.length));
 
   const tcv = document.getElementById("tc-vulns");
@@ -393,12 +396,12 @@ async function renderVulnsTab(co) {
     }
   } catch(e) {}
 
-  const cats = [...new Set(findings.map(f => f.category).filter(Boolean))].sort();
+  const cats = fg0.categories || [];
   const summaryCards = {
-    critical: findings.filter(f => f.severity === "critical").length,
-    high:     findings.filter(f => f.severity === "high").length,
-    medium:   findings.filter(f => f.severity === "medium").length,
-    low:      findings.filter(f => f.severity === "low").length,
+    critical: fg0.severity.critical || 0,
+    high:     fg0.severity.high || 0,
+    medium:   fg0.severity.medium || 0,
+    low:      fg0.severity.low || 0,
   };
 
   const cidJs = _jsArg(co.id);

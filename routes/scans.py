@@ -180,6 +180,24 @@ def create_scan_blueprint(
         return jsonify(db.query_hosts(cid, q=a.get("q", "").strip(), live=a.get("live", ""),
                                       waf=a.get("waf", ""), page=a.get("page"), per_page=a.get("per_page")))
 
+    @bp.route("/api/data/company/<cid>/finding-groups", methods=["GET"])
+    @require_auth
+    def api_company_finding_groups(cid: str):
+        """Achados confirmados agrupados e paginados (aba Vulnerabilidades):
+        ?q=&severity=&category=&triage=&page=&per_page="""
+        from core.finding_groups import build_groups
+        co = _visible_company(cid)
+        if not co:
+            return jsonify({"error": "Company not found"}), 404
+        a = request.args
+        try:
+            triage = db.get_finding_triage(cid) if hasattr(db, "get_finding_triage") else {}
+        except Exception:
+            triage = {}
+        return jsonify(build_groups(
+            co.get("findings") or [], q=a.get("q", ""), severity=a.get("severity", ""), category=a.get("category", ""),
+            triage=a.get("triage", ""), triage_map=triage, page=a.get("page", 1), per_page=a.get("per_page", 25)))
+
     @bp.route("/api/data/company/<cid>/priorities", methods=["GET"])
     @require_auth
     def api_company_priorities(cid: str):
