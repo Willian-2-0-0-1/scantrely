@@ -126,6 +126,13 @@ def create_scan_blueprint(
         data["companies"] = visible
         return jsonify(data)
 
+    def _visible_company(cid: str) -> dict | None:
+        """Empresa pelo id, respeitando o escopo do admin logado."""
+        company_ids, is_super = _scope_from_session()
+        if not (is_super or company_ids is None) and cid not in company_ids:
+            return None
+        return next((c for c in load_asm_data().get("companies", []) if c.get("id") == cid), None)
+
     @bp.route("/api/data/summary", methods=["GET"])
     @require_auth
     def api_get_data_summary():
@@ -145,11 +152,21 @@ def create_scan_blueprint(
     @bp.route("/api/data/company/<cid>", methods=["GET"])
     @require_auth
     def api_get_company_data(cid: str):
-        data = load_asm_data()
-        co = next((c for c in data.get("companies", []) if c.get("id") == cid), None)
+        co = _visible_company(cid)
         if not co:
             return jsonify({"error": "Company not found"}), 404
         return jsonify(co)
+
+    @bp.route("/api/data/company/<cid>/priorities", methods=["GET"])
+    @require_auth
+    def api_company_priorities(cid: str):
+        """Lista curta de ações ordenadas (o que fazer primeiro)."""
+        from core.priorities import build_priorities
+        co = _visible_company(cid)
+        if not co:
+            return jsonify({"error": "Company not found"}), 404
+        limit = max(1, min(int(request.args.get("limit", 10) or 10), 50))
+        return jsonify(build_priorities(co, limit=limit))
 
     @bp.route("/api/data/ts", methods=["GET"])
     @require_auth

@@ -4141,3 +4141,56 @@ a.op-chip.origin-link:hover { text-decoration: underline; }
 .origin-jump:hover { background: rgba(0,201,167,0.08); border-radius: 4px; }
 .origin-jump:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .url-copy-btn { min-width: 28px; min-height: 28px; }
+
+/* ── Prioridades (visão geral) ─────────────────────────────────────── */
+.ov-priorities { margin-bottom: 20px; }
+.pr-title-bar { display:flex; align-items:baseline; gap:12px; margin-bottom:12px; }
+.pr-title-bar h2 { margin:0; font-size:1.15rem; color:var(--text1); }
+.pr-sub { color:var(--text3); font-size:.78rem; }
+.pr-list { display:flex; flex-direction:column; gap:10px; }
+.pr-card { display:grid; grid-template-columns:36px 1fr auto; gap:14px; align-items:start;
+  background:var(--card); border:1px solid var(--border); border-left-width:4px; border-radius:10px; padding:14px 16px; }
+.pr-card.pr-crit { border-left-color:var(--red); }
+.pr-card.pr-high { border-left-color:var(--orange); }
+.pr-card.pr-med  { border-left-color:var(--yellow); }
+.pr-card.pr-low, .pr-card.pr-info { border-left-color:var(--blue); }
+.pr-rank { width:30px; height:30px; border-radius:50%; background:var(--card2); color:var(--text2);
+  display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.85rem; }
+.pr-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.pr-title { margin:0; font-size:.98rem; color:var(--text1); font-weight:600; }
+.pr-sev { font-size:.66rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 8px; border-radius:99px; }
+.pr-sev-crit { background:var(--red-dim); color:#fb7185; }
+.pr-sev-high { background:var(--orange-dim); color:#fb923c; }
+.pr-sev-med  { background:var(--yellow-dim); color:#facc15; }
+.pr-sev-low, .pr-sev-info { background:var(--blue-dim); color:#60a5fa; }
+.pr-tag, .pr-count { font-size:.7rem; color:var(--text3); }
+.pr-kev { color:#fb7185; font-weight:700; }
+.pr-hosts { margin:6px 0 2px; display:flex; flex-wrap:wrap; gap:6px; }
+.pr-hosts code { font-size:.72rem; background:var(--surface); padding:1px 6px; border-radius:4px; color:var(--text2); }
+.pr-more { font-size:.72rem; color:var(--text3); }
+.pr-why, .pr-fix { margin:6px 0 0; font-size:.82rem; color:var(--text2); line-height:1.45; }
+.pr-why b, .pr-fix b { color:var(--text1); font-weight:600; }
+.pr-open { white-space:nowrap; font-size:.75rem; padding:5px 12px; }
+.pr-all { margin-top:12px; }
+.pr-empty { padding:18px; border:1px dashed var(--border); border-radius:10px; color:var(--text3); font-size:.85rem; }
+.pr-error { color:var(--red); }
+.ov-kpis { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px; }
+.ov-kpi { display:flex; flex-direction:column; align-items:flex-start; gap:2px; min-width:110px; padding:10px 14px;
+  background:var(--card); border:1px solid var(--border); border-radius:10px; color:inherit; font:inherit; text-align:left; }
+.ov-kpi b { font-size:1.35rem; color:var(--text1); }
+.ov-kpi span { font-size:.72rem; color:var(--text3); }
+.ov-kpi-sev { cursor:pointer; }
+.ov-kpi-sev:hover { border-color:var(--teal-border); }
+.ov-kpi .c-crit { color:#fb7185; } .ov-kpi .c-high { color:#fb923c; }
+@media (max-width: 720px) { .pr-card { grid-template-columns:1fr; } .pr-rank { display:none; } }
+
+/* ── Ações da empresa: poucos botões, resto em menus ─────────────────── */
+.co-actions { display:flex; gap:8px; align-items:flex-start; flex-shrink:0; margin-top:2px; }
+.co-actions .btn { font-size:.74rem; padding:5px 12px; cursor:pointer; list-style:none; }
+.co-menu { position:relative; }
+.co-menu > summary::-webkit-details-marker { display:none; }
+.co-menu-list { position:absolute; right:0; top:calc(100% + 4px); z-index:30; min-width:190px; display:flex; flex-direction:column;
+  background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.co-menu-list button { background:none; border:0; color:var(--text2); text-align:left; padding:7px 10px; border-radius:6px; font-size:.78rem; cursor:pointer; }
+.co-menu-list button:hover { background:var(--card2); color:var(--text1); }
+.co-menu-list button.danger { color:var(--red); }

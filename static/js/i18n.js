@@ -91,6 +91,9 @@ window.I18N_STRINGS = {
   // Company tab bar
   tab_overview:        {en:"Overview", "pt-br":"Visão Geral", es:"Resumen"},
   tab_hosts:           {en:"Hosts", "pt-br":"Hosts", es:"Hosts"},
+  tab_priorities:      {en:"Priorities", "pt-br":"Prioridades", es:"Prioridades"},
+  tab_assets:          {en:"Assets", "pt-br":"Ativos", es:"Activos"},
+  tab_technical:       {en:"Technical", "pt-br":"Técnico", es:"Técnico"},
   tab_vulns:           {en:"Vulnerabilities", "pt-br":"Vulnerabilidades", es:"Vulnerabilidades"},
   tab_infra:           {en:"Infrastructure", "pt-br":"Infraestrutura", es:"Infraestructura"},
   tab_recon:           {en:"Recon", "pt-br":"Recon", es:"Recon"},

@@ -195,21 +195,24 @@
           <div class="page-title" id="co-title"></div>
           <div class="page-desc" id="co-desc"></div>
         </div>
-        <div style="display:flex;gap:8px;flex-shrink:0;margin-top:2px">
-          <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="openEditCompanyModal(state.currentId)" title="Edit scope"><span data-ico="pencil" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_edit_scope">Editar Escopo</span></button>
-          <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="exportHTMLReport(allCompanies().find(c=>c.id===state.currentId))" title="Export HTML report"><span data-ico="file" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_export_html">Exportar Relatório</span></button>
-          <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="exportPDFReport(allCompanies().find(c=>c.id===state.currentId))" title="Export PDF report"><span data-ico="printer" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_export_pdf">Exportar PDF</span></button>
-          <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="exportServerPdf(state.currentId)" title="PDF gerado no servidor">PDF servidor</button>
-          <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="exportSarif(state.currentId)" title="Export SARIF">SARIF</button>
-          <button class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px"
-                  onclick="pushDefectDojo(state.currentId)" title="Enviar ao DefectDojo">DefectDojo</button>
-          <button id="clear-data-btn" class="btn btn-secondary" style="font-size:.72rem;padding:5px 12px;color:var(--red)"
-                  onclick="clearReconData(state.currentId)" title="Clear all scan findings from DB"><span data-ico="trash" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_clear_data">Limpar Dados</span></button>
+        <div class="co-actions">
+          <button class="btn btn-secondary" onclick="openEditCompanyModal(state.currentId)" title="Editar escopo"><span data-ico="pencil" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_edit_scope">Editar Escopo</span></button>
+          <details class="co-menu">
+            <summary class="btn btn-secondary">Exportar ▾</summary>
+            <div class="co-menu-list">
+              <button type="button" onclick="exportHTMLReport(allCompanies().find(c=>c.id===state.currentId))">Relatório HTML</button>
+              <button type="button" onclick="exportPDFReport(allCompanies().find(c=>c.id===state.currentId))">PDF (navegador)</button>
+              <button type="button" onclick="exportServerPdf(state.currentId)">PDF (servidor)</button>
+              <button type="button" onclick="exportSarif(state.currentId)">SARIF</button>
+              <button type="button" onclick="pushDefectDojo(state.currentId)">Enviar ao DefectDojo</button>
+            </div>
+          </details>
+          <details class="co-menu co-menu-danger">
+            <summary class="btn btn-secondary" aria-label="Mais ações">⋯</summary>
+            <div class="co-menu-list">
+              <button type="button" id="clear-data-btn" class="danger" onclick="clearReconData(state.currentId)" title="Apaga todos os resultados desta empresa"><span data-ico="trash" data-ico-size="14" aria-hidden="true"></span> <span data-i18n-key="btn_clear_data">Limpar Dados</span></button>
+            </div>
+          </details>
         </div>
       </div>
       <!-- Individual tab counts — read by JS, aggregated into group buttons -->
@@ -225,16 +228,11 @@
       <div class="tab-bar-wrap">
         <button class="tab-scroll-btn tab-scroll-left" id="tab-scroll-left" onclick="scrollTabBar(-1)" aria-label="Scroll tabs left" style="display:none">‹</button>
       <div class="tab-bar" id="co-tabs" role="tablist" aria-label="Company sections" onscroll="updateTabScrollBtns()">
-        <button class="tab-btn active" data-group="overview"   onclick="switchGroup('overview',this)"><span data-i18n-key="tab_overview">Overview</span></button>
-        <button class="tab-btn"        data-group="hosts"      onclick="switchGroup('hosts',this)"><span data-i18n-key="tab_hosts">Hosts</span> <span class="tab-count" id="gc-hosts"></span></button>
+        <button class="tab-btn active" data-group="overview"   onclick="switchGroup('overview',this)"><span data-i18n-key="tab_priorities">Prioridades</span></button>
+        <button class="tab-btn"        data-group="hosts"      onclick="switchGroup('hosts',this)"><span data-i18n-key="tab_assets">Ativos</span> <span class="tab-count" id="gc-hosts"></span></button>
         <button class="tab-btn"        data-group="vulns"      onclick="switchGroup('vulns',this)"><span data-i18n-key="tab_vulns">Vulnerabilidades</span> <span class="tab-count" id="gc-vulns"></span></button>
-        <button class="tab-btn"        data-group="infragroup" onclick="switchGroup('infragroup',this)"><span data-i18n-key="tab_infra">Infraestrutura</span></button>
-        <button class="tab-btn"        data-group="screenshots" onclick="switchGroup('screenshots',this)"><span data-i18n-key="tab_recon">Recon</span> <span class="tab-count" id="gc-screenshots"></span></button>
-        <button class="tab-btn"        data-group="operation"  onclick="switchGroup('operation',this)"><span data-i18n-key="tab_operation">Operation</span> <span class="tab-count" id="gc-operation"></span></button>
-        <button class="tab-btn"        data-group="logs"       onclick="switchGroup('logs',this)"><span data-i18n-key="tab_logs">Logs</span> <span class="tab-count" id="gc-logs"></span></button>
-        <button class="tab-btn"        data-group="pipeline"   onclick="switchGroup('pipeline',this)"><span data-i18n-key="tab_pipeline">Pipeline</span></button>
-        <button class="tab-btn"        data-group="graph"      onclick="switchGroup('graph',this)"><span data-i18n-key="tab_graph">Grafo</span></button>
         <button class="tab-btn"        data-group="exposure"   onclick="switchGroup('exposure',this)"><span data-i18n-key="tab_exposure">Exposição</span> <span class="tab-count" id="gc-exposure"></span></button>
+        <button class="tab-btn"        data-group="operation"  onclick="switchGroup('operation',this)"><span data-i18n-key="tab_technical">Técnico</span> <span class="tab-count" id="gc-operation"></span></button>
         </div>
         <button class="tab-scroll-btn tab-scroll-right" id="tab-scroll-right" onclick="scrollTabBar(1)" aria-label="Scroll tabs right">›</button>
       </div>
@@ -889,9 +887,10 @@
 <script src="js/exposure.js?v=3"></script>
 <script src="js/operation-persist.js?v=2"></script>
 <script src="js/origin-link.js?v=2"></script>
+<script src="js/priorities.js?v=1"></script>
 
 <!-- ── Optional: load generated data from parser ── -->
-<script src="dashboard.js?v=81"></script>
+<script src="dashboard.js?v=82"></script>
 
 </body>
 </html>

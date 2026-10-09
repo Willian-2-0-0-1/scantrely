@@ -1141,15 +1141,10 @@ async function selectCompany(id) {
 
 const TAB_GROUPS = {
   overview:    ['overview'],
-  hosts:       ['domains', 'subdomains', 'endpoints', 'ports', 'typosquat'],
-  screenshots: ['screenshots'],
-  operation:   ['operation', 'alerts', 'timeline', 'diff', 'suppressed'],
-  infragroup:  ['infra'],
+  hosts:       ['subdomains', 'domains', 'endpoints', 'ports', 'infra', 'screenshots', 'graph', 'typosquat'],
   vulns:       ['vulns', 'cve', 'supplychain', 'jsreverse'],
-  logs:        ['toollogs'],
-  pipeline:    ['pipeline', 'terminal'],
-  graph:       ['graph'],
-  exposure:    ['exposure']
+  exposure:    ['exposure'],
+  operation:   ['operation', 'alerts', 'timeline', 'diff', 'suppressed', 'toollogs', 'pipeline', 'terminal']
 };
 const TAB_TO_GROUP = {};
 (function() { for (const [g, tabs] of Object.entries(TAB_GROUPS)) tabs.forEach(t => TAB_TO_GROUP[t] = g); })();
@@ -1337,9 +1332,7 @@ function updateTabScrollBtns() {
 const _GC_DEFS = {
   hosts:      ['subdomains'],
   vulns:      ['vulns', 'cve', 'supplychain', 'jsreverse'],
-  screenshots:['screenshots'],
   operation:  ['operation', 'alerts'],
-  logs:       ['toollogs'],
   exposure:   ['exposure'],
 };
 
@@ -1936,7 +1929,7 @@ function performGlobalSearch(query) {
       if (hay.includes(q)) {
         results.push({
           group: 'Pessoas', ico: 'person', title: d.email || '', sub: `${name || co.name || co.id}${d.position ? ' · ' + d.position : ''}`,
-          action: { type: 'company', cid: co.id, group: 'infragroup' },
+          action: { type: 'company', cid: co.id, group: 'hosts', panel: 'infra' },
         });
       }
     }
@@ -2013,7 +2006,7 @@ async function selectGlobalSearchResult(idx) {
     }
     if (action.group) {
       const btn = document.querySelector(`.tab-btn[data-group="${action.group}"]`);
-      if (btn) switchGroup(action.group, btn);
+      if (btn) switchGroup(action.group, btn, action.panel);
     }
   }
 }
@@ -2034,6 +2027,7 @@ function _renderRiskGauge(crit, high, med, info, total) {
 }
 
 function renderOverview(co) {
+  setTimeout(() => { if (typeof renderPriorities === "function") renderPriorities(co.id); }, 0);
   const s = co.stats || {};
   const hosts = co.hosts || [];
 
@@ -2045,35 +2039,16 @@ function renderOverview(co) {
   const risk = riskLevel(co);
   const directHosts = hosts.length - (s.waf_protected || 0);
 
+  const exposed = Math.max(0, hosts.length - (s.waf_protected || 0));
   document.getElementById("tab-overview").innerHTML = `
-    <div class="overview-hero overview-hero-clean">
-      <div class="ov-hero-left">
-        ${_renderRiskGauge(crit, high, med, info, totalFindings)}
-        <div class="ov-hero-sub">${riskLabel(risk)} · ${co.domains?.[0] || co.name}</div>
-      </div>
-      <div class="ov-hero-right">
-        <div class="ov-hero-metrics">
-          <div class="ov-metric"><span class="ov-metric-num">${s.subdomains || hosts.length || 0}</span><span class="ov-metric-lbl">assets</span></div>
-          <div class="ov-metric"><span class="ov-metric-num">${s.live_hosts || 0}</span><span class="ov-metric-lbl">live hosts</span></div>
-          <div class="ov-metric"><span class="ov-metric-num">${s.open_ports || 0}</span><span class="ov-metric-lbl">open ports</span></div>
-          <div class="ov-metric"><span class="ov-metric-num">${s.waf_protected || 0}</span><span class="ov-metric-lbl">behind WAF</span></div>
-          <div class="ov-metric"><span class="ov-metric-num">${directHosts}</span><span class="ov-metric-lbl" style="color:${directHosts > 0 ? 'var(--red)' : 'var(--text3)'}">direct</span></div>
-        </div>
-        <div class="ov-sev-pills">
-          <span class="ov-sev-pill crit">${crit}<span>critical</span></span>
-          <span class="ov-sev-pill high">${high}<span>high</span></span>
-          <span class="ov-sev-pill med">${med}<span>medium</span></span>
-          <span class="ov-sev-pill info">${info}<span>info</span></span>
-        </div>
-      </div>
-    </div>
-    <div class="ov-jump" aria-label="Atalhos de resultado">
-      <button type="button" class="ov-jump-btn" onclick="switchTab('jsreverse')">${_panelLabel("jsreverse")}<span>${Number(co.js_data?.total_secrets || 0) || (Array.isArray(co.js_data?.js_files) ? co.js_data.js_files.length : 0)}</span></button>
-      <button type="button" class="ov-jump-btn" onclick="switchTab('endpoints')">${_panelLabel("endpoints")}<span>${Number(co.js_data?.total_endpoints || 0) + Number(co.wayback_data?.interesting_count || 0) + (Array.isArray(co.urlfinder_data?.urls) ? co.urlfinder_data.urls.length : 0) + Number(co.api_exposure?.total || 0)}</span></button>
-      <button type="button" class="ov-jump-btn" onclick="switchTab('ports')">${_panelLabel("ports")}<span>${s.open_ports || 0}</span></button>
-      <button type="button" class="ov-jump-btn" onclick="switchTab('cve')">${_panelLabel("cve")}<span>${co.cve_summary?.total || 0}</span></button>
-      <button type="button" class="ov-jump-btn" onclick="switchTab('supplychain')">${_panelLabel("supplychain")}<span>${co.supply_chain_summary?.total || 0}</span></button>
-      <button type="button" class="ov-jump-btn" onclick="switchTab('vulns')">${_panelLabel("vulns")}<span>${totalFindings}</span></button>
+    <div id="ov-priorities" class="ov-priorities"></div>
+    <div class="ov-kpis" aria-label="Resumo">
+      <div class="ov-kpi"><b>${s.subdomains || hosts.length || 0}</b><span>ativos</span></div>
+      <div class="ov-kpi"><b>${s.live_hosts || 0}</b><span>no ar</span></div>
+      <div class="ov-kpi"><b>${s.open_ports || 0}</b><span>portas abertas</span></div>
+      <div class="ov-kpi"><b>${exposed}</b><span>sem WAF</span></div>
+      <button type="button" class="ov-kpi ov-kpi-sev" onclick="switchTab('vulns')" title="Ver achados"><b class="c-crit">${crit}</b><span>críticos</span></button>
+      <button type="button" class="ov-kpi ov-kpi-sev" onclick="switchTab('vulns')" title="Ver achados"><b class="c-high">${high}</b><span>altos</span></button>
     </div>
     <div id="ov-trends" style="margin-top:16px"></div>
     ${typeof renderExposureTeaser === "function" ? renderExposureTeaser(co) : ""}`;
@@ -10347,7 +10322,7 @@ function _startPipelinePoll(cid) {
         if (co) { renderOverview(co); renderDomainsTab(co); renderSubdomainsTab(co); renderFindingsTab(co); }
         // Refresh the recon tab once now that the scan is done so the Playwright
         // panel unlocks/updates — this is the only place it re-renders post-scan.
-        if (state.currentId === cid && (state.activeGroup === "pipeline" || state.tab === "pipeline")) {
+        if (state.currentId === cid && (state.activeGroup === "operation" || state.tab === "pipeline")) {
           renderReconTab(cid);
         }
       }

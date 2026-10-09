@@ -872,6 +872,21 @@ class TestAuth:
         upd = analyst.put("/api/companies/beta", json={"name": "Beta2"})
         assert upd.status_code == 403
 
+    def test_priorities_endpoint_respects_scope_and_ranks(self, flask_app, db, auth_client):
+        auth_client.post("/api/companies", json={"name": "Alpha", "domains": ["alpha.com"]})
+        auth_client.post("/api/companies", json={"name": "Beta", "domains": ["beta.com"]})
+        db.save_asm_data({"companies": [
+            {"id": "alpha", "name": "Alpha", "findings": [
+                {"key": "1", "type": "header", "severity": "medium", "host": "a.alpha.com", "title": "h"},
+                {"key": "2", "type": "git_exposed", "severity": "critical", "host": "dev.alpha.com", "title": ".git"}]},
+            {"id": "beta", "name": "Beta", "findings": []},
+        ]})
+        out = auth_client.get("/api/data/company/alpha/priorities").get_json()
+        assert [a["type"] for a in out["actions"]] == ["git_exposed", "header"]
+        analyst = login_as_admin(flask_app, db, "analyst3", "password123", role="analyst", scoped_companies=["beta"])
+        assert analyst.get("/api/data/company/alpha/priorities").status_code in (403, 404)
+        assert analyst.get("/api/data/company/beta/priorities").status_code == 200
+
     def test_empty_scope_sees_nothing(self, flask_app, db):
         analyst = login_as_admin(flask_app, db, "analyst2", "password123", role="analyst", scoped_companies=[])
         resp = analyst.get("/api/companies")
@@ -3487,7 +3502,7 @@ class TestOriginLink:
         assert "Click file path to copy" not in js
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
         assert "origin-link.js" in html
-        assert "dashboard.js?v=81" in html
+        assert "dashboard.js?v=82" in html
         assert "operation-persist.js?v=2" in html
         assert "function isJsPathNoise" in js
         assert 'id="endpoints-secrets"' in js
@@ -3510,7 +3525,7 @@ class TestOriginLink:
         assert "_ssOnKey" in js
         assert "⧉" not in js
         assert "hostPanel = \"subdomains\"" in js
-        assert "dashboard.js?v=81" in html
+        assert "dashboard.js?v=82" in html
         assert "dashboard.css?v=35" in html
         assert "i18n.js?v=21" in html
         assert "exposure.js?v=3" in html
@@ -3538,7 +3553,7 @@ class TestOriginLink:
         assert "Run Pipeline" not in js
         assert "Stop Pipeline" not in js
         assert 'pipe_title' in i18n
-        assert "dashboard.js?v=81" in html
+        assert "dashboard.js?v=82" in html
         assert "exposure.js?v=3" in html
         assert "_setIconLabel(btn, active ? \"stop\" : \"play\", label)" in js or "_setIconLabel(btn, active ? 'stop' : 'play', label)" in js
 
@@ -3573,7 +3588,7 @@ class TestOriginLink:
         assert "recon_crawled_empty" in i18n
         assert "_opT(\"recon_cov_kicker\"" in panel or "_opT('recon_cov_kicker'" in panel
         assert "s.value||'').slice(0,40)" not in body
-        assert "dashboard.js?v=81" in html
+        assert "dashboard.js?v=82" in html
         assert "i18n.js?v=21" in html
 
     def test_confirmed_vulns_copy_is_localized(self):
@@ -3605,5 +3620,5 @@ class TestOriginLink:
         assert "vuln_title" in i18n
         assert "vuln_loading" in i18n
         assert "vuln_cnt" in i18n
-        assert "dashboard.js?v=81" in html
+        assert "dashboard.js?v=82" in html
         assert "i18n.js?v=21" in html

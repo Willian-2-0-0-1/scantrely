@@ -77,3 +77,17 @@ def test_stored_chains_on_non_inventory_hosts_removed_and_stats_updated():
     rep = tidy_stored({"companies": [co]})
     assert rep == {"c": (2, 1)}
     assert co["stats"]["findings_critical"] == 1
+
+
+def test_priorities_rank_and_skip_derived_chains():
+    from core.priorities import build_priorities
+    co = {"findings": [
+        {"key": "a", "type": "attack_chain", "severity": "critical", "host": "x.com", "title": "chain"},
+        {"key": "b", "type": "header", "severity": "medium", "host": "x.com", "title": "h"},
+        {"key": "c", "type": "git_exposed", "severity": "critical", "host": "dev.x.com", "title": ".git"},
+        {"key": "d", "type": "cve", "severity": "high", "host": "y.x.com", "title": "CVE-1", "kev": True},
+    ]}
+    out = build_priorities(co)
+    assert [a["type"] for a in out["actions"]] == ["git_exposed", "cve", "header"]
+    assert out["actions"][0]["rank"] == 1 and out["actions"][0]["fix"]
+    assert out["hidden"] == 0
