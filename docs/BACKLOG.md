@@ -13,7 +13,6 @@
 | P2 | 🟡 | Dividir `core/recon.py` (~11 mil linhas) por fase em `core/recon/`; manter `core.recon` como reexport. |
 | P3 | 🟡 | Trocar os ~180 `except Exception: pass` por log no mínimo; começar por `core/pipeline.py`. |
 | P4 | 🟡 | Dividir `static/js/dashboard.js` (~12 mil linhas) por aba; remover estilos inline. |
-| P5 | 🟢 | Remover os shims da raiz (`pipeline.py`, `database.py`, `*_routes.py`) quando os testes importarem de `core/`/`routes/`. |
 | P6 | 🟢 | Marcar achados "não vistos no último scan" como resolvidos em vez de mantê-los. |
 
 ---

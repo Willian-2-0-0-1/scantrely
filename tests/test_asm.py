@@ -28,7 +28,7 @@ def tmp_dir(tmp_path):
 
 @pytest.fixture()
 def db(tmp_path):
-    from database import ASMDatabase
+    from core.database import ASMDatabase
 
     db = ASMDatabase(
         tmp_path / "test.db",
@@ -50,14 +50,14 @@ def db(tmp_path):
 def flask_app(tmp_path, db):
     """Minimal Flask app with all blueprints registered using mock dependencies."""
     from flask import Flask
-    from core_routes import create_core_blueprint
-    from ops_routes import create_ops_blueprint
-    from asset_routes import create_asset_blueprint
-    from scan_routes import create_scan_blueprint
-    from recon_routes import create_recon_blueprint
-    from reporting_routes import create_reporting_blueprint
+    from routes.core import create_core_blueprint
+    from routes.ops import create_ops_blueprint
+    from routes.assets import create_asset_blueprint
+    from routes.scans import create_scan_blueprint
+    from routes.recon import create_recon_blueprint
+    from routes.reporting import create_reporting_blueprint
     from core.jobs import JobScheduler
-    from pipeline import ReconRunner, PIPELINE_PHASES, SELF_CONTAINED_MODULES
+    from core.pipeline import ReconRunner, PIPELINE_PHASES, SELF_CONTAINED_MODULES
 
     app = Flask(__name__)
     app.config["TESTING"] = True
@@ -413,7 +413,7 @@ def login_as_admin(flask_app, db, username: str, password: str, role: str = "ana
 class TestPasswordHashing:
     def test_round_trip(self, flask_app):
         h = flask_app._test_hash_pw("secret123")
-        from core_routes import create_core_blueprint
+        from routes.core import create_core_blueprint
         # hash contains pbkdf2 prefix
         assert h.startswith("pbkdf2:sha256:")
 
@@ -485,36 +485,36 @@ class TestRiskScore:
 
 class TestGowitnessNameToUrl:
     def test_https_443(self):
-        from scan_routes import _gowitness_name_to_url
+        from routes.scans import _gowitness_name_to_url
         assert _gowitness_name_to_url("https---example.com-443") == "https://example.com"
 
     def test_http_80(self):
-        from scan_routes import _gowitness_name_to_url
+        from routes.scans import _gowitness_name_to_url
         assert _gowitness_name_to_url("http---example.com-80") == "http://example.com"
 
     def test_custom_port(self):
-        from scan_routes import _gowitness_name_to_url
+        from routes.scans import _gowitness_name_to_url
         url = _gowitness_name_to_url("https---example.com-8443")
         assert "8443" in url
 
     def test_unknown_stem_returned_as_is(self):
-        from scan_routes import _gowitness_name_to_url
+        from routes.scans import _gowitness_name_to_url
         assert _gowitness_name_to_url("no-match-here") == "no-match-here"
 
 
 class TestJsonDumps:
     def test_basic(self):
-        from reporting_routes import json_dumps
+        from routes.reporting import json_dumps
         out = json_dumps({"a": 1})
         assert json.loads(out) == {"a": 1}
 
     def test_indent(self):
-        from reporting_routes import json_dumps
+        from routes.reporting import json_dumps
         out = json_dumps({"a": 1}, indent=2)
         assert "\n" in out
 
     def test_non_ascii(self):
-        from reporting_routes import json_dumps
+        from routes.reporting import json_dumps
         out = json_dumps({"k": "ação"})
         assert "ação" in out  # ensure_ascii=False
 
@@ -611,7 +611,7 @@ class TestCommandRunner:
 class TestPipelineReconRunner:
     def test_run_services_no_recon(self, db, tmp_path):
         """_run_services must return empty list when recon module is None (regression)."""
-        from pipeline import ReconRunner
+        from core.pipeline import ReconRunner
         runner = ReconRunner(
             db=db, base_dir=tmp_path, get_settings=lambda: {},
             load_hosts_fn=lambda cid: [],
@@ -623,7 +623,7 @@ class TestPipelineReconRunner:
 
     def test_run_module_request_recon_unavailable(self, db, tmp_path):
         """Module that requires recon.py must return error when unavailable."""
-        from pipeline import ReconRunner
+        from core.pipeline import ReconRunner
         runner = ReconRunner(
             db=db, base_dir=tmp_path, get_settings=lambda: {},
             load_hosts_fn=lambda cid: [],
@@ -644,7 +644,7 @@ class TestPipelineReconRunner:
 
     def test_run_module_request_wappalyzer_self_contained(self, db, tmp_path):
         """wappalyzer runs even when recon_available=False."""
-        from pipeline import ReconRunner
+        from core.pipeline import ReconRunner
         called = []
 
         def fake_wap(cid, co):
@@ -673,7 +673,7 @@ class TestPipelineReconRunner:
 
     def test_duplicate_module_request_rejected(self, db, tmp_path):
         """Second request while module is running returns 409."""
-        from pipeline import ReconRunner
+        from core.pipeline import ReconRunner
         runner = ReconRunner(
             db=db, base_dir=tmp_path, get_settings=lambda: {},
             load_hosts_fn=lambda cid: [],
@@ -689,7 +689,7 @@ class TestPipelineReconRunner:
             assert code == 409
 
     def test_collect_new_subdomains(self, db, tmp_path):
-        from pipeline import ReconRunner
+        from core.pipeline import ReconRunner
         runner = ReconRunner(
             db=db, base_dir=tmp_path, get_settings=lambda: {},
             load_hosts_fn=lambda cid: [],
@@ -705,7 +705,7 @@ class TestPipelineReconRunner:
         assert not any(s.startswith("*") for s in subs)
 
     def test_merge_hosts_adds_new_only(self, db, tmp_path):
-        from pipeline import ReconRunner
+        from core.pipeline import ReconRunner
         runner = ReconRunner(
             db=db, base_dir=tmp_path, get_settings=lambda: {},
             load_hosts_fn=lambda cid: [],
@@ -722,7 +722,7 @@ class TestPipelineReconRunner:
         assert any(h["host"] == "new.com" for h in hosts)
 
     def test_merge_hosts_handles_new_host_ports(self, db, tmp_path):
-        from pipeline import ReconRunner
+        from core.pipeline import ReconRunner
         runner = ReconRunner(
             db=db, base_dir=tmp_path, get_settings=lambda: {},
             load_hosts_fn=lambda cid: [],
@@ -746,7 +746,7 @@ class TestPipelineReconRunner:
         assert hosts[0]["ports"] == ["80", "443"]
 
     def test_discovered_hosts_are_persisted_before_httpx_validation(self, db, tmp_path):
-        from pipeline import ReconRunner
+        from core.pipeline import ReconRunner
         runner = ReconRunner(
             db=db, base_dir=tmp_path, get_settings=lambda: {},
             load_hosts_fn=lambda cid: [],
@@ -785,7 +785,7 @@ class TestWappalyzerKeyRegression:
     """Regression: auto-wappalyzer in _run_job used wrong key 'total_techs' (now 'tech_count')."""
 
     def test_pipeline_returns_tech_count_key(self, db, tmp_path):
-        from pipeline import ReconRunner
+        from core.pipeline import ReconRunner
         runner = ReconRunner(
             db=db, base_dir=tmp_path, get_settings=lambda: {},
             load_hosts_fn=lambda cid: [],
@@ -1317,7 +1317,7 @@ class TestDatabase:
         assert db.load_snapshot("co", slot="previous")["hosts"] == ["b.com"]
 
     def test_smart_scan_checkpoint_invalidation(self, db, tmp_path):
-        from pipeline import ReconRunner
+        from core.pipeline import ReconRunner
 
         runner = ReconRunner(
             db=db,
@@ -2111,7 +2111,7 @@ class TestCircuitBreaker:
         assert email["stealers"][0]["top_passwords"] == ["*****"]
 
     def test_hudsonrock_only_breach_persists(self):
-        from pipeline import breach_data_should_persist
+        from core.pipeline import breach_data_should_persist
         assert breach_data_should_persist({
             "total_findings": 0,
             "hudsonrock": {"employees": 2, "users": 0, "error": None},
@@ -2914,7 +2914,7 @@ class TestBacklogClose:
         assert r.get_json().get("circuit") == "open"
 
     def test_sarif_export(self):
-        from reporting_routes import findings_to_sarif
+        from routes.reporting import findings_to_sarif
         payload = findings_to_sarif({
             "name": "Acme",
             "findings": [{"title": "Open redirect", "severity": "high", "host": "www.acme.com", "module": "open_redirect"}],
@@ -2996,11 +2996,10 @@ class TestBacklogClose:
         })
         assert ok.status_code == 200, ok.get_json()
 
-    def test_legacy_route_shims_are_reexports(self):
-        for name in ("recon_routes.py", "core_routes.py", "ops_routes.py", "asset_routes.py", "scan_routes.py", "reporting_routes.py"):
-            text = ROOT.joinpath(name).read_text(encoding="utf-8")
-            assert "Compatibility shim" in text
-            assert "from routes." in text
+    def test_root_has_no_legacy_shims(self):
+        for name in ("recon_routes", "core_routes", "ops_routes", "asset_routes", "scan_routes",
+                     "reporting_routes", "pipeline", "database", "validators"):
+            assert not ROOT.joinpath(name + ".py").exists(), f"{name}.py voltou para a raiz; importe de core/ ou routes/"
 
 
 class TestJsScan:

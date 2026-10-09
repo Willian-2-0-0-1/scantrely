@@ -1057,14 +1057,14 @@ Isso remove todos os campos de scan do banco e limpa `pipeline_state`. Os checkp
 ```bash
 python3 - <<'EOF'
 import sys; sys.path.insert(0, "/home/kali/recon/asm")
-from database import ASMDatabase
+from core.database import ASMDatabase
 from pathlib import Path
 
 db = ASMDatabase(Path("/home/kali/recon/asm/asm.db"))
 db.initialize()
 
 # Carregar pipeline e forçar persist
-from pipeline import ReconRunner, PIPELINE_PHASES
+from core.pipeline import ReconRunner, PIPELINE_PHASES
 import recon as recon_mod
 
 runner = ReconRunner(

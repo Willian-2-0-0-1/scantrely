@@ -2423,7 +2423,7 @@ class ReconRunner:
                                 if h:
                                     subs.add(h.strip().lower().lstrip('*.'))
         try:
-            from validators import filter_subdomain
+            from core.validators import filter_subdomain
             subs = {filter_subdomain(s, d) for s in subs for d in check_domains}
             subs.discard(None)
         except ImportError:
@@ -2437,7 +2437,7 @@ class ReconRunner:
         normalized: list[str] = []
         seen: set[str] = set()
         try:
-            from validators import filter_subdomain
+            from core.validators import filter_subdomain
         except ImportError:
             filter_subdomain = None
         for raw in hosts or []:
@@ -3302,7 +3302,7 @@ class ReconRunner:
         all_findings: list[dict] = [f for f in _prior if f.get('type') not in ('cve', 'secret', 'attack_chain')]
         existing_keys = {f.get('key') or f.get('title') or f.get('name') or '' for f in all_findings}
         try:
-            from validators import filter_nuclei_info, dedup_findings
+            from core.validators import filter_nuclei_info, dedup_findings
         except ImportError:
             filter_nuclei_info = lambda x: x
             dedup_findings = lambda x, _k='general': x
@@ -4262,7 +4262,7 @@ class ReconRunner:
         Returns the number of new findings added.
         """
         try:
-            from validators import dedup_findings
+            from core.validators import dedup_findings
         except Exception:
             dedup_findings = lambda x, _k='general': x
         try:

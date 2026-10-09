@@ -146,7 +146,7 @@ def require_auth(fn):
         api_key = request.headers.get("x-api-key")
         if api_key:
             try:
-                from database import ASMDatabase as _DB
+                from core.database import ASMDatabase as _DB
                 db = _DB.__new__(_DB)
                 if hasattr(db, "validate_api_key"):
                     key_info = db.validate_api_key(api_key)
