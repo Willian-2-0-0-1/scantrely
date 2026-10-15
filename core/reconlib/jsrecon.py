@@ -6,7 +6,7 @@ from pathlib import Path
 import json
 import re
 import time
-from core.reconlib.base import _log, _subp, http_get
+from core.reconlib.base import _log, _subp, bind_cancel, current_cancel, http_get
 from core.reconlib.browser import _pw_import
 
 # ── JavaScript Recon ──
@@ -727,6 +727,10 @@ def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
 
 
 
+JS_RECON_BUDGET_S = 330.0     # abaixo dos 360s do módulo js no pipeline
+DISCOVERY_BUDGET_S = 120.0    # katana/subjs/getJS/gau em paralelo
+
+
 def run_js_recon(domains: list, hosts: list) -> dict:
     """
     Discover all JS files across live hosts (katana + subjs + getJS + gau),
@@ -765,74 +769,80 @@ def run_js_recon(domains: list, hosts: list) -> dict:
             targets.append(f"https://{d}")
 
     raw_js_urls: set = set()
+    # Prazo único do módulo (o pipeline corta em 360s). Antes as etapas somavam até
+    # ~12 min de limites em série (katana 300 + subjs 150 + getJS 90 + gau 3×60 + navegador + análise).
+    deadline = time.monotonic() + JS_RECON_BUDGET_S
 
-    # ── Discovery Phase ──
-    # 1) katana — deep crawl, JS-aware (parses inline + external scripts)
-    if katana_bin and targets:
+    def _left(reserve: float = 0.0) -> float:
+        return max(5.0, deadline - time.monotonic() - reserve)
+
+    # ── Discovery Phase ── (ferramentas independentes: em paralelo, o tempo é o da mais lenta)
+    disc_budget = min(DISCOVERY_BUDGET_S, _left(reserve=150))
+
+    def _katana():
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
+            tf.write("\n".join(targets)); tf_path = tf.name
         try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
-                tf.write("\n".join(targets)); tf_path = tf.name
             r = _subp(
                 [katana_bin, "-list", tf_path, "-d", "5", "-jc",
                  "-ef", "png,jpg,gif,css,svg,ico,woff,ttf,webp",
-                 "-silent", "-timeout", "15", "-c", "25", "-rl", "50"],
-                capture_output=True, text=True, timeout=300,
+                 "-silent", "-timeout", "15", "-c", "25", "-rl", "50",
+                 "-ct", f"{int(disc_budget * 0.6)}s"],
+                capture_output=True, text=True, timeout=disc_budget,
             )
+        finally:
             Path(tf_path).unlink(missing_ok=True)
-            for url in r.stdout.splitlines():
-                url = url.strip()
-                if url and (url.endswith(".js") or ".js?" in url or ".js#" in url):
-                    raw_js_urls.add(url)
-        except Exception:
-            _log.debug('recon.py:5630 erro ignorado', exc_info=True)
+        return [u.strip() for u in r.stdout.splitlines()
+                if u.strip() and (u.strip().endswith(".js") or ".js?" in u or ".js#" in u)]
 
-    # 2) subjs — extracts <script src> tags from each host
-    if subjs_bin and targets:
-        try:
-            r = _subp(
-                [subjs_bin, "-c", "30"],
-                input="\n".join(targets),
-                capture_output=True, text=True, timeout=150,
-            )
-            for url in r.stdout.splitlines():
-                url = url.strip()
-                if url:
-                    raw_js_urls.add(url)
-        except Exception:
-            _log.debug('recon.py:5645 erro ignorado', exc_info=True)
+    def _subjs():
+        r = _subp([subjs_bin, "-c", "30"], input="\n".join(targets),
+                  capture_output=True, text=True, timeout=min(150, disc_budget))
+        return [u.strip() for u in r.stdout.splitlines() if u.strip()]
 
-    # 3) getJS — another script tag extractor
-    if getjs_bin and targets:
+    def _getjs():
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
+            tf.write("\n".join(targets)); tf_path = tf.name
         try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
-                tf.write("\n".join(targets)); tf_path = tf.name
-            r = _subp(
-                [getjs_bin, "-input", tf_path, "-complete"],
-                capture_output=True, text=True, timeout=90,
-            )
+            r = _subp([getjs_bin, "-input", tf_path, "-complete"],
+                      capture_output=True, text=True, timeout=min(90, disc_budget))
+        finally:
             Path(tf_path).unlink(missing_ok=True)
-            for url in r.stdout.splitlines():
-                url = url.strip()
-                if url and ("http" in url):
-                    raw_js_urls.add(url)
-        except Exception:
-            _log.debug('recon.py:5662 erro ignorado', exc_info=True)
+        return [u.strip() for u in r.stdout.splitlines() if u.strip() and "http" in u]
 
-    # 4) gau — historical JS URLs from Wayback/OTX/CommonCrawl
-    if gau_bin and domains:
+    def _gau():
+        urls = []
+        for d in domains[:3]:
+            r = _subp(
+                [gau_bin, "--subs", "--providers", "wayback,otx,commoncrawl",
+                 "--ft", "ttf,woff,css,png,jpg,gif,svg,ico", d],
+                capture_output=True, text=True, timeout=min(60, disc_budget / 3),
+            )
+            urls += [u.strip() for u in r.stdout.splitlines()
+                     if u.strip() and (u.strip().endswith(".js") or ".js?" in u)]
+        return urls
+
+    jobs = [fn for fn, ok in ((_katana, katana_bin and targets), (_subjs, subjs_bin and targets),
+                              (_getjs, getjs_bin and targets), (_gau, gau_bin and domains)) if ok]
+    if jobs:
+        cancel = current_cancel()
+
+        def _run(fn):
+            bind_cancel(cancel)   # para junto com o módulo
+            return fn()
+
+        ex = ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="js-disc")
+        futs = {ex.submit(_run, fn): fn.__name__ for fn in jobs}
         try:
-            for d in domains[:3]:
-                r = _subp(
-                    [gau_bin, "--subs", "--providers", "wayback,otx,commoncrawl",
-                     "--ft", "ttf,woff,css,png,jpg,gif,svg,ico", d],
-                    capture_output=True, text=True, timeout=60,
-                )
-                for url in r.stdout.splitlines():
-                    url = url.strip()
-                    if url and (url.endswith(".js") or ".js?" in url):
-                        raw_js_urls.add(url)
-        except Exception:
-            _log.debug('recon.py:5678 erro ignorado', exc_info=True)
+            for fut in as_completed(futs, timeout=disc_budget + 2):
+                try:
+                    raw_js_urls.update(fut.result())
+                except Exception:
+                    _log.debug("js discovery %s falhou", futs[fut], exc_info=True)
+        except TimeoutError:
+            _log.info("js discovery: prazo de %.0fs — seguindo com o que veio", disc_budget)
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
 
     # ── Playwright Runtime Capture ──
     # Visit all live hosts that are likely frontend web apps.
@@ -879,11 +889,15 @@ def run_js_recon(domains: list, hosts: list) -> dict:
         [(h, _pw_score(h)) for h in hosts if h.get("host")],
         key=lambda x: -x[1],
     )
-    pw_targets = [_pw_url(h) for h, score in scored if score > 0][:30]
+    pw_targets = [_pw_url(h) for h, score in scored if score > 0][:15]   # antes 30: cabe no prazo do módulo
     if not pw_targets:
         pw_targets = targets[:15]
 
-    pw_result  = _playwright_js_capture(pw_targets, timeout=25)
+    if _left(reserve=60) > 30:
+        pw_result = _playwright_js_capture(pw_targets, timeout=25)
+    else:
+        _log.info("js: sem tempo para a captura no navegador — seguindo para a análise")
+        pw_result = {}
     runtime_network_map  = pw_result.get("network_map", {})
     playwright_js_bodies = pw_result.get("playwright_js_bodies", {})
     for u in pw_result.get("runtime_js_urls", []):
@@ -899,7 +913,6 @@ def run_js_recon(domains: list, hosts: list) -> dict:
     sev_counts      = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     stats           = {"noise": 0, "fail": 0}
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     def _accept_js_file(result: dict) -> None:
         nonlocal total_secrets, total_endpoints
@@ -948,16 +961,28 @@ def run_js_recon(domains: list, hosts: list) -> dict:
 
     capped_list = sorted(js_url_list, key=_js_priority)[:200]
 
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {ex.submit(_fetch_and_analyze, u): u for u in capped_list}
-        # Hard 4-minute overall cap so a hung fetch never blocks the pipeline
-        try:
-            for fut in as_completed(futures, timeout=240):
+    # Sem "with": a saída do with espera todas as threads, e o teto não cortava nada.
+    cancel = current_cancel()
+
+    def _fetch(u):
+        bind_cancel(cancel)
+        return _fetch_and_analyze(u)
+
+    ex = ThreadPoolExecutor(max_workers=8, thread_name_prefix="js-fetch")
+    futures = {ex.submit(_fetch, u): u for u in capped_list}
+    try:
+        for fut in as_completed(futures, timeout=_left(reserve=10)):
+            try:
                 result = fut.result()
-                if result:
-                    _accept_js_file(result)
-        except TimeoutError:
-            pass  # some fetches didn't finish — proceed with what we have
+            except Exception:
+                _log.debug("js fetch falhou", exc_info=True)
+                continue
+            if result:
+                _accept_js_file(result)
+    except TimeoutError:
+        _log.info("js: prazo da análise — %s de %s arquivos analisados", sum(f.done() for f in futures), len(futures))
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
 
     # Playwright-captured JS bodies (browser fetch bypasses WAF that blocks direct HTTP).
     _seen_pw_urls = {f["url"] for f in js_files}

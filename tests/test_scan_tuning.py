@@ -528,3 +528,41 @@ def test_polling_filter(msg, kept):
     from utils.log_filters import QuietPollingFilter
     rec = logging.LogRecord("werkzeug", logging.INFO, "", 0, msg, None, None)
     assert QuietPollingFilter().filter(rec) is kept
+
+
+# ── módulo js: descoberta em paralelo e prazo único ─────────────────────────
+def _js_env(monkeypatch, delay):
+    import shutil as _sh
+    import core.reconlib.jsrecon as jr
+    monkeypatch.setattr(_sh, "which", lambda name: f"/bin/{name}")
+    calls = []
+
+    def fake_subp(cmd, **kw):
+        tool = cmd[0].split("/")[-1]
+        calls.append(tool)
+        time.sleep(delay)
+        return types.SimpleNamespace(stdout=f"https://app.x.com/{tool}.js\n", stderr="", returncode=0)
+
+    monkeypatch.setattr(jr, "_subp", fake_subp)
+    monkeypatch.setattr(jr, "_playwright_js_capture", lambda targets, timeout=25: {})
+    monkeypatch.setattr(jr, "http_get", lambda url, **kw: (0, b"", {}))
+    return jr, calls
+
+
+def test_js_discovery_tools_run_in_parallel(monkeypatch):
+    jr, calls = _js_env(monkeypatch, delay=1.0)
+    t = time.time()
+    out = jr.run_js_recon(["x.com"], [{"host": "app.x.com", "ports": ["443"], "status_code": 200}])
+    assert time.time() - t < 2.5                      # em série seriam ≥ 6s (katana, subjs, getJS, gau×3)
+    assert sorted(set(calls)) == ["gau", "getJS", "katana", "subjs"]
+    assert out["js_files_found"] == 4
+
+
+def test_js_recon_respects_module_budget(monkeypatch):
+    jr, calls = _js_env(monkeypatch, delay=5.0)
+    monkeypatch.setattr(jr, "JS_RECON_BUDGET_S", 3.0)
+    monkeypatch.setattr(jr, "DISCOVERY_BUDGET_S", 1.0)
+    t = time.time()
+    out = jr.run_js_recon(["x.com"], [{"host": "app.x.com", "ports": ["443"], "status_code": 200}])
+    assert time.time() - t < 4.5
+    assert out["js_files_found"] == 0                 # nada chegou no prazo, mas o módulo devolveu

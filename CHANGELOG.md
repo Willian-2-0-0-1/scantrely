@@ -24,6 +24,7 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 - **api_discovery_extra**: hosts em paralelo com prazo; esquema descoberto uma vez por host; host sem resposta abandonado (antes até 2.100 requisições em série); kiterunner limitado a 120s.
 - **services**: caminho aleatório como referência — host sem resposta custa 1 requisição (antes ~130) e respostas iguais à referência (SPA/WAF que respondem igual a tudo) não viram achado; prazo e parcial.
 - **cors_scan**: hosts em paralelo com prazo; host abandonado após 2 falhas de rede.
+- **js**: prazo único de 330s (módulo: 360s). katana/subjs/getJS/gau rodam em paralelo com até 120s (antes em série: 300+150+90+3×60s); navegador com até 15 alvos (antes 30) e pulado se o prazo estiver no fim; o teto da análise dos arquivos passou a valer (o `with ThreadPoolExecutor` esperava todas as threads na saída).
 - **Takeover crítico só com evidência**: CNAME pendurado vira crítico apenas se o nome é registrável por terceiros (Elastic Beanstalk, Azure, Heroku…); ELB/CloudFront órfãos viram informativo (higiene de DNS).
 - Corrigidos: `infra_exposure` lia `(status, body)` invertido e nunca reportava Kubernetes/Docker/etcd expostos; `waf_bypass` tratava falha de rede (status 0) como bypass de severidade alta; `smtp_probe` reportava "STARTTLS ausente" quando o EHLO nem respondia.
 
