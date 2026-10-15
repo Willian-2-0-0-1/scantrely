@@ -552,21 +552,18 @@ def create_scan_blueprint(
     @bp.route("/api/alerts/<cid>", methods=["GET"])
     @require_auth
     def api_alerts(cid: str):
-        try:
-            alerts = db.get_alerts(cid, limit=100) if hasattr(db, "get_alerts") else []
-            return jsonify({"alerts": alerts})
-        except Exception:
-            return jsonify({"alerts": []})
+        if not _scoped_company(cid):
+            return jsonify({"error": "Company not found"}), 404
+        return jsonify({"alerts": db.get_alerts(cid, limit=100)})
 
-    @bp.route("/api/alerts/<cid>/<int:aid>/ack", methods=["POST"])
+    @bp.route("/api/alerts/<cid>/<aid>/ack", methods=["POST"])   # id é texto (hex); antes <int:aid> → 404
     @require_auth
-    def api_ack_alert(cid: str, aid: int):
-        try:
-            if hasattr(db, "acknowledge_alert"):
-                db.acknowledge_alert(aid)
-            return jsonify({"ok": True})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+    def api_ack_alert(cid: str, aid: str):
+        if not _scoped_company(cid):
+            return jsonify({"error": "Company not found"}), 404
+        if not db.acknowledge_alert(cid, aid):
+            return jsonify({"error": "Alert not found"}), 404
+        return jsonify({"ok": True})
 
     ALERT_RULE_TYPES = {
         "new_host", "new_port", "new_tech", "cert_expiring",

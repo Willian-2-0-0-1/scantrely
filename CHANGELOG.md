@@ -10,6 +10,7 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 - Sem alarme falso por curinga (hosts iguais ao curinga não contam como mortos; 3 canários por zona; página de erro idêntica em ≥ 5 hosts de zona com curinga é do curinga) nem por desafio anti-bot ("Just a moment…"). Medido: 3 vigilâncias seguidas sem mudança real → 0, 0 e 1 alerta.
 - "Monitorar agora" enfileira a vigilância e mostra o resumo (antes disparava o pipeline completo; a rota `/api/monitor` antiga olhava 15 hosts e não gravava nada). `GET /api/monitor/<id>` devolve a última.
 - Agenda: perfil `watch` (ou `watch_active`, que também roda o scan ativo só nos hosts que mudaram) sempre roda; o scan completo agendado continua dependendo de `ASM_ENABLE_SCHEDULED_SCANS=1`. O botão de agenda cria vigilância (sugestão: 6h).
+- **Aba Alertas sempre vazia**: a rota chamava `db.get_alerts`, que não existia (o `hasattr` devolvia lista vazia). Criados `get_alerts`/`acknowledge_alert`; a rota de "Acknowledge" aceita id em texto (era `<int:aid>`, os ids são hex) e o botão passa o id entre aspas (dava erro de JavaScript); rotas de alerta respeitam o escopo do admin.
 - Alertas por diff de scan nunca saíam: o import era `from alerting` (atalho da raiz removido) e o diff ia sem `"diff": "ok"` e com hosts como texto. Corrigido (`snapshot_diff`).
 
 ### Scan

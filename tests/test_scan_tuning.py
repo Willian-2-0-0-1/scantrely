@@ -729,3 +729,17 @@ def test_watch_severity_depends_on_response():
     assert W._severity({"kind": "came_alive", "status_code": 200}) == "medium"
     assert W._severity({"kind": "came_alive", "status_code": 404}) == "low"
     assert W._severity({"kind": "went_dead"}) == "info"
+
+
+# ── aba Alertas: get_alerts/acknowledge_alert não existiam (aba sempre vazia) ──
+def test_alerts_listing_and_ack(tmp_path):
+    from core.database import ASMDatabase
+    db = ASMDatabase(tmp_path / "t.db")
+    db.initialize()
+    a1 = db.create_alert("co", "surface_new_host_live", "Novo host", "HTTP 200", "medium", {"host": "a.x.com"})
+    db.create_alert("other", "surface_new_host", "Outro", "", "low", {})
+    out = db.get_alerts("co")
+    assert [a["id"] for a in out] == [a1] and out[0]["data"] == {"host": "a.x.com"} and out[0]["acknowledged"] is False
+    assert db.acknowledge_alert("co", a1) is True
+    assert db.get_alerts("co")[0]["acknowledged"] is True
+    assert db.acknowledge_alert("other", a1) is False          # não marca alerta de outra empresa

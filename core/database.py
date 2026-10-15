@@ -1964,6 +1964,24 @@ class ASMDatabase:
             conn.commit()
         return cur.rowcount > 0
 
+    def get_alerts(self, company_id: str, limit: int = 100) -> list[dict]:
+        """Alertas mais recentes primeiro (a rota /api/alerts chamava isto, que não existia: a aba vinha vazia)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, rule_type, title, description, severity, data_json, created_at, read"
+                " FROM alerts WHERE company_id = ? ORDER BY created_at DESC LIMIT ?",
+                (company_id, int(limit)),
+            ).fetchall()
+        return [{"id": r["id"], "rule_type": r["rule_type"], "title": r["title"], "description": r["description"],
+                 "severity": r["severity"], "data": self._json_loads(r["data_json"], {}),
+                 "created_at": r["created_at"], "acknowledged": bool(r["read"])} for r in rows]
+
+    def acknowledge_alert(self, company_id: str, alert_id: str) -> bool:
+        with self._lock, self._connect() as conn:
+            cur = conn.execute("UPDATE alerts SET read = 1 WHERE id = ? AND company_id = ?", (str(alert_id), company_id))
+            conn.commit()
+        return cur.rowcount > 0
+
     def create_alert(self, company_id: str, rule_type: str, title: str,
                      description: str, severity: str, data: dict) -> str:
         alert_id = uuid.uuid4().hex[:12]

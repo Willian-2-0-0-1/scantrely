@@ -231,7 +231,7 @@ async function renderAlertsTab(co) {
           <div class="alert-desc">${esc(a.description||'')}</div>
           <div class="alert-ts">${esc(a.created_at||a.ts||'')}</div>
         </div>
-        ${!a.acknowledged ? `<button class="alert-ack" onclick="ackAlert('${esc(co.id)}',${a.id})">Acknowledge</button>` : `<span style="font-size:.68rem;color:var(--text3)">${icoHtml("check",14)} Acked</span>`}
+        ${!a.acknowledged ? `<button class="alert-ack" onclick="ackAlert('${esc(co.id)}','${esc(a.id)}')">Acknowledge</button>` : `<span style="font-size:.68rem;color:var(--text3)">${icoHtml("check",14)} Acked</span>`}
       </div>`;
     }
     if (!(alerts.alerts || alerts || []).length) html += `<div class="diff-empty">No alerts yet — they appear after scan diffs</div>`;
