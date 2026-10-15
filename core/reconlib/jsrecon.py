@@ -130,11 +130,18 @@ _FP_LABEL_RE = re.compile(r'^[A-Z][A-Z0-9_\-]{3,}$|^[a-z][a-z0-9_]{4,}[a-z0-9]$'
 
 
 
+# nome de classe gerado por CSS Modules/bundler: "_forgetPassword_ejzvx_198" (variável forgetPassword
+# = estilo do link "esqueci a senha"), não é senha — 3 "altos" falsos em 15/10/2026
+_CSS_MODULE_CLASS_RE = re.compile(r"^_?[A-Za-z][\w-]*_[a-z0-9]{5}_\d+$")
+
+
 def _is_fp_secret(ptype: str, value: str) -> bool:
     """Return True when a regex match is almost certainly a false positive."""
     if ptype == "password":
         # Strip surrounding quotes and key name to get the raw value
         inner = re.sub(r'(?i)^(?:password|passwd|pwd)\s*[=:]\s*["\']', '', value).rstrip('"\'')
+        if _CSS_MODULE_CLASS_RE.match(inner.strip()):
+            return True
         if _FP_PASSWORD_RE.search(inner):
             return True
         # Pure i18n keys: ALL_CAPS_WITH_UNDERSCORES or pure snake_case (no digits/specials)
@@ -895,8 +902,13 @@ def run_js_recon(domains: list, hosts: list) -> dict:
 
     if _left(reserve=60) > 30:
         from utils.tool_gate import gate_for
-        with gate_for("playwright").slot():   # um módulo de navegador por vez na máquina
-            pw_result = _playwright_js_capture(pw_targets, timeout=25)
+        # um módulo de navegador por vez na máquina; se a vaga não vier a tempo, segue sem navegador
+        with gate_for("playwright").try_slot(timeout=_left(reserve=120)) as got:
+            if got:
+                pw_result = _playwright_js_capture(pw_targets, timeout=25)
+            else:
+                _log.info("js: vaga do navegador ocupada até o prazo — seguindo sem captura de navegador")
+                pw_result = {}
     else:
         _log.info("js: sem tempo para a captura no navegador — seguindo para a análise")
         pw_result = {}

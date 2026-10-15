@@ -91,10 +91,17 @@ _JS_NOISE_SFX = (".securiti.ai", ".clarity.ms", ".hotjar.com", ".googleapis.com"
                  ".googletagmanager.com", ".google-analytics.com", ".recaptcha.net")
 
 
+# nome de classe gerado por CSS Modules/bundler: "_forgetPassword_ejzvx_198" (variável forgetPassword
+# = estilo do link "esqueci a senha"), não é senha — 3 "altos" falsos em 15/10/2026
+_CSS_MODULE_CLASS_RE = re.compile(r"^_?[A-Za-z][\w-]*_[a-z0-9]{5}_\d+$")
+
+
 def fp_js_secret(stype, value) -> bool:
     v = value or ""
     if stype == "password":
         inner = re.sub(r"""['"]$""", "", re.sub(r"""^(?:password|passwd|pwd)\s*[=:]\s*['"]""", "", v, flags=re.I))
+        if _CSS_MODULE_CLASS_RE.match(inner.strip()):
+            return True
         if _FP_PWD_RE.search(inner):
             return True
         if re.match(r"^[A-Z][A-Z0-9_\-.]+$", inner) or re.match(r"^[a-z][a-z\-.]+$", inner):

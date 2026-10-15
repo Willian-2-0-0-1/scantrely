@@ -2264,7 +2264,7 @@ class ReconRunner:
             urls_file = tf.name
         try:
             _ct.trace([gowitness_bin, 'scan', 'file', '-f', urls_file, '--screenshot-path', str(output_dir), '--threads', '3', '-q'])
-            subprocess.run([gowitness_bin, 'scan', 'file', '-f', urls_file, '--screenshot-path', str(output_dir), '--threads', '3', '-q'], capture_output=True, text=True, timeout=300)
+            subprocess.run([gowitness_bin, 'scan', 'file', '-f', urls_file, '--screenshot-path', str(output_dir), '--threads', '3', '-q'], capture_output=True, text=True, timeout=180)   # + espera pela vaga cabe nos 420s do módulo
         except Exception as _e:
             _ignore(_e, 'pipeline.py:2510')
         finally:

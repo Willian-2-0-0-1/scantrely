@@ -6,6 +6,25 @@ from core.reconlib.base import _log, _random_ua, _subp, http_get, run_bounded, s
 
 # ── Kubernetes / Docker / etcd Infrastructure Exposure ──
 
+# Evidência por serviço: porta aberta respondendo qualquer coisa NÃO basta. CDN (Cloudflare) aceita
+# conexão em 8080/8443 e devolve página própria — sem isto viraram 9 "Kubernetes API exposta"
+# críticos falsos (15/10/2026). Achado só com o corpo batendo na assinatura do serviço.
+INFRA_SIGNATURES = {
+    "Kubernetes": re.compile(rb'"gitVersion"|"kind"\s*:\s*"(NamespaceList|PodList|Status|APIVersions)"'),
+    "Docker": re.compile(rb'^OK$|"ServerVersion"|"ApiVersion"'),
+    "Docker Registry": re.compile(rb'^\{\}$|"repositories"\s*:'),
+    "etcd": re.compile(rb'"etcdserver"|"etcdcluster"|"health"\s*:\s*"(true|false)"|"node"\s*:\s*\{'),
+    "Elasticsearch": re.compile(rb'You Know, for Search|"cluster_name"|health status index'),
+}
+
+
+def infra_evidence_ok(category: str, body) -> bool:
+    sig = INFRA_SIGNATURES.get(category)
+    if isinstance(body, str):
+        body = body.encode("utf-8", "ignore")
+    return bool(sig is not None and sig.search((body or b"")[:4096].strip()))
+
+
 def run_infra_exposure(hosts: list) -> dict:
     """Detect exposed container orchestration and registry infrastructure."""
     import socket as _sock
@@ -48,7 +67,7 @@ def run_infra_exposure(hosts: list) -> dict:
             for path in paths[:2]:
                 try:
                     code, body, _ = http_get(f"http://{ip}:{port}{path}", timeout=5, retries=1)
-                    if code and code < 500:
+                    if code and code < 500 and infra_evidence_ok(category, body):
                         preview = (body or b"")[:150].decode("utf-8", "ignore")
                         accessible_paths.append({"path": path, "status": code, "preview": preview})
                 except Exception:

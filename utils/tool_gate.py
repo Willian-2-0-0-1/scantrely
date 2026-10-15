@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from contextlib import contextmanager
 
 
@@ -83,15 +84,38 @@ class ToolGate:
             _global_sema.release()
             self.release()
 
-    def acquire(self) -> None:
+    def acquire(self, timeout: float | None = None) -> bool:
+        """Espera a vaga; com timeout, devolve False se não conseguir a tempo."""
+        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
         with self._cond:
             self.queued += 1
             try:
                 while self.active >= self.limit:
-                    self._cond.wait()
+                    if deadline is None:
+                        self._cond.wait()
+                    else:
+                        left = deadline - time.monotonic()
+                        if left <= 0:
+                            return False
+                        self._cond.wait(left)
                 self.active += 1
+                return True
             finally:
                 self.queued = max(0, self.queued - 1)
+
+    @contextmanager
+    def try_slot(self, timeout: float):
+        """Como slot(), mas desiste depois de `timeout`: rende True/False. A espera pela vaga conta no
+        prazo do módulo — com dois domínios em paralelo, o segundo estourava esperando o primeiro."""
+        if not self.acquire(timeout):
+            yield False
+            return
+        _global_sema.acquire()
+        try:
+            yield True
+        finally:
+            _global_sema.release()
+            self.release()
 
     def release(self) -> None:
         with self._cond:

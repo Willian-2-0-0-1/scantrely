@@ -410,6 +410,14 @@ class JobScheduler:
                     run_company["domains"] = scoped_domains
                 state = self.pipeline_state.setdefault(company_id, {})
                 state["job_id"] = job_id
+                # fila por domínio: o total vem dos jobs do mesmo disparo (trace_id), não de quem enfileirou
+                if options.get("queue_domain") and options.get("trace_id") and hasattr(self.db, "count_jobs_with_trace"):
+                    try:
+                        total = self.db.count_jobs_with_trace(company_id, options["trace_id"])
+                        if total:
+                            state["queue_mode"], state["queue_total"] = "per_domain", total
+                    except Exception:
+                        _log.debug('jobs.py: queue_total', exc_info=True)
                 state.setdefault("log", []).append({
                     "ts": datetime.now().isoformat(timespec="seconds"),
                     "msg": f"Queued job {job_id} started" + (f" for {scoped_domains[0]}" if scoped_domains else ""),

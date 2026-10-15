@@ -1414,6 +1414,13 @@ class ASMDatabase:
             conn.commit()
         return int(cur.rowcount or 0)
 
+    def count_jobs_with_trace(self, company_id: str, trace_id: str) -> int:
+        """Jobs de pipeline do mesmo disparo (fila por domínio), exceto os cancelados."""
+        with self._connect() as conn:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE company_id = ? AND job_type = 'pipeline' AND status != 'cancelled'"
+                " AND json_extract(options_json, '$.trace_id') = ?", (company_id, trace_id)).fetchone()[0])
+
     def count_paused_jobs(self) -> int:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM jobs WHERE status = 'paused'").fetchone()[0])

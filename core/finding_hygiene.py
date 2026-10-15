@@ -202,6 +202,30 @@ def cap_unversioned_cves(co_data: dict) -> set[str]:
 _PUBLIC_KEY_TYPES = ("google_api_key", "google_maps", "firebase_api_key", "recaptcha_site_key", "mapbox_public", "stripe_publishable")
 
 
+def _false_positive_infra(f: dict) -> bool:
+    """"Kubernetes/Docker/etcd exposto" sem o corpo de resposta do serviço (ex.: página do Cloudflare
+    na 8080). Achados gravados antes de 15/10/2026 não exigiam a assinatura."""
+    if f.get("type") != "infra_exposure":
+        return False
+    from core.reconlib.infra import infra_evidence_ok
+    paths = f.get("open_paths") or []
+    return not any(infra_evidence_ok(f.get("category", ""), p.get("preview", "")) for p in paths if isinstance(p, dict))
+
+
+def _false_positive_js_secret(f: dict) -> bool:
+    """Segredo de JS gravado que os filtros atuais de falso positivo descartariam (ex.: classe CSS)."""
+    if f.get("type") != "secret" or f.get("module") != "js_secrets":
+        return False
+    meta = f.get("metadata") if isinstance(f.get("metadata"), dict) else {}
+    from core.asset_matrix import fp_js_secret
+    return fp_js_secret(meta.get("secret_type") or "", f.get("value") or "")
+
+
+def _for_sale(f: dict) -> bool:
+    meta = f.get("metadata") if isinstance(f.get("metadata"), dict) else {}
+    return meta.get("status") == "broker_listed" or "à venda em broker" in str(f.get("desc") or "")
+
+
 def _is_public_client_key(f: dict) -> bool:
     """Chaves feitas para ir no JavaScript do navegador (Maps, Firebase, reCAPTCHA site key…): não são segredo por si só."""
     stype = str((f.get("metadata") or {}).get("secret_type") or "").lower()
@@ -218,6 +242,18 @@ def dismiss_false_positives(findings: list[dict], co_data: dict) -> list[dict]:
             if f.get("key") not in known:
                 dismissed.append({"key": f.get("key"), "title": f.get("title"), "host": f.get("host"), "type": f.get("type"),
                                   "reason": "Resposta HTML (SPA/soft-200), não é um repositório .git",
+                                  "evidence": str(f.get("desc") or "")[:120], "dismissed_at": datetime.now().isoformat(timespec="seconds")})
+            continue
+        if _false_positive_js_secret(f):
+            if f.get("key") not in known:
+                dismissed.append({"key": f.get("key"), "title": f.get("title"), "host": f.get("host"), "type": f.get("type"),
+                                  "reason": "Não é segredo (nome de classe CSS, rótulo ou texto de interface)",
+                                  "evidence": str(f.get("value") or "")[:120], "dismissed_at": datetime.now().isoformat(timespec="seconds")})
+            continue
+        if _false_positive_infra(f):
+            if f.get("key") not in known:
+                dismissed.append({"key": f.get("key"), "title": f.get("title"), "host": f.get("host"), "type": f.get("type"),
+                                  "reason": "Porta responde, mas o corpo não é do serviço (página de CDN/erro)",
                                   "evidence": str(f.get("desc") or "")[:120], "dismissed_at": datetime.now().isoformat(timespec="seconds")})
             continue
         keep.append(f)
@@ -241,6 +277,8 @@ def tidy_findings(findings: list[dict], co_data: dict) -> list[dict]:
             if k in f:
                 f[k] = repair_mojibake(f[k])
         f["severity"] = cap_severity(f.get("type"), f.get("severity"))
+        if f.get("type") == "brand_domain_exposure" and _for_sale(f):
+            f["severity"] = "info"   # estacionado à venda em corretora: monitorar, não é ameaça confirmada
         if f.get("type") == "secret" and _is_public_client_key(f):
             f["severity"] = cap_severity("header", f.get("severity"))   # chave pública de front-end: no máximo médio
         out.append(f)

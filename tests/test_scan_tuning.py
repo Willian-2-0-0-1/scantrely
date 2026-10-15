@@ -944,3 +944,82 @@ def test_ct_names_respects_budget(monkeypatch):
     t = time.time()
     assert real(["x.com"], budget=0.5) == set()
     assert time.time() - t < 2
+
+
+def test_queue_total_comes_from_jobs_of_same_trigger(tmp_path):
+    from core.database import ASMDatabase
+    db = ASMDatabase(tmp_path / "t.db")
+    db.initialize()
+    for d in ("a.example", "b.example", "c.example"):
+        db.create_job(job_type="pipeline", company_id="co", target=d, options={"trace_id": "T1", "queue_domain": d})
+    db.create_job(job_type="pipeline", company_id="co", target="x.example", options={"trace_id": "OUTRO"})
+    assert db.count_jobs_with_trace("co", "T1") == 3
+
+
+def test_gate_try_slot_gives_up_in_time():
+    import threading
+    from utils.tool_gate import ToolGate
+    g = ToolGate("t", 1)
+    held, release = threading.Event(), threading.Event()
+
+    def holder():
+        with g.slot():
+            held.set()
+            release.wait(2)
+    threading.Thread(target=holder).start()
+    held.wait(1)
+    t = time.time()
+    with g.try_slot(0.2) as got:
+        assert got is False
+    assert time.time() - t < 1
+    release.set()
+    time.sleep(0.1)
+    with g.try_slot(1) as got:
+        assert got is True
+    assert g.active == 0
+
+
+def test_infra_exposure_ignores_cdn_pages_on_open_ports(monkeypatch):
+    """15/10: Cloudflare aceita conexão na 8080 e devolve página própria → 9 "Kubernetes API" falsos."""
+    class _Sock:
+        def __init__(self, *a): pass
+        def settimeout(self, t): pass
+        def connect_ex(self, addr): return 0 if addr[1] == 8080 else 1
+        def close(self): pass
+
+    import socket
+    monkeypatch.setattr(socket, "socket", _Sock)
+    monkeypatch.setattr(infra, "http_get", lambda url, **k: (403, b"<!DOCTYPE html><title>Attention Required! | Cloudflare</title>", {}))
+    assert infra.run_infra_exposure([{"host": "a.x.com", "ip": "104.26.9.157"}])["findings"] == []
+    monkeypatch.setattr(infra, "http_get", lambda url, **k: (200, b'{"major":"1","gitVersion":"v1.29.3"}', {}))
+    out = infra.run_infra_exposure([{"host": "k8s.x.com", "ip": "10.0.0.9"}])
+    assert len(out["findings"]) == 1 and out["findings"][0]["category"] == "Kubernetes"
+
+
+def test_hygiene_dismisses_stored_infra_findings_without_signature():
+    from core.finding_hygiene import dismiss_false_positives
+    fake = {"type": "infra_exposure", "key": "k1", "category": "Kubernetes", "host": "a.x.com",
+            "open_paths": [{"path": "/version", "status": 403, "preview": "<!DOCTYPE html><title>Attention Required! | Cloudflare"}]}
+    real = {"type": "infra_exposure", "key": "k2", "category": "Kubernetes", "host": "k8s.x.com",
+            "open_paths": [{"path": "/version", "status": 200, "preview": '{"major":"1","gitVersion":"v1.29.3"}'}]}
+    co = {}
+    assert [f["key"] for f in dismiss_false_positives([fake, real], co)] == ["k2"]
+    assert co["auto_dismissed"][0]["key"] == "k1"
+
+
+def test_css_module_class_is_not_a_password():
+    from core.asset_matrix import fp_js_secret
+    from core.finding_hygiene import dismiss_false_positives
+    assert fp_js_secret("password", 'Password="_forgetPassword_ejzvx_198"')
+    assert not fp_js_secret("password", 'password="Sup3r$ecret!"')
+    stored = {"type": "secret", "module": "js_secrets", "key": "s1", "value": 'Password="_forgetPassword_ejzvx_198"',
+              "metadata": {"secret_type": "password"}}
+    assert dismiss_false_positives([stored], {}) == []
+
+
+def test_brand_domain_for_sale_is_info_but_active_stays():
+    from core.finding_hygiene import tidy_findings
+    sale = {"type": "brand_domain_exposure", "key": "b1", "severity": "medium", "desc": "`x.tech` está à venda em broker. IP: 1.2.3.4"}
+    live = {"type": "brand_domain_exposure", "key": "b2", "severity": "medium", "desc": "`x-login.com` ativo. IP: 5.6.7.8", "metadata": {"status": "active"}}
+    out = {f["key"]: f["severity"] for f in tidy_findings([sale, live], {})}
+    assert out == {"b1": "info", "b2": "medium"}

@@ -229,6 +229,7 @@ from core.reconlib.headers import (  # noqa: F401
     run_vendor_fingerprint,
 )
 from core.reconlib.infra import (  # noqa: F401
+    infra_evidence_ok,
     run_default_creds,
     run_host_header_injection,
     run_infra_exposure,
