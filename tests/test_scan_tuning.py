@@ -572,6 +572,12 @@ def test_js_recon_respects_module_budget(monkeypatch):
 from core import watch as W
 
 
+@pytest.fixture(autouse=True)
+def _no_real_ct(monkeypatch):
+    """A vigilância consulta CT (crt.sh/certspotter): nos testes, nada de rede."""
+    monkeypatch.setattr(W, "_ct_names", lambda domains, budget=0: set())
+
+
 def test_diff_surface_kinds():
     before = {"a.x.com": {"host": "a.x.com", "status_code": 200, "title": "A", "technologies": ["nginx"]},
               "b.x.com": {"host": "b.x.com", "status_code": None},
@@ -916,3 +922,25 @@ def test_git_leaks_finds_exposed_git_and_skips_dead_hosts(monkeypatch):
     assert out["exposed_git"] == ["https://git.x.com/.git/"]
     assert [u for u in calls if "spa" in u] == ["https://spa.x.com/.git/HEAD"]   # respondeu em https: não tenta http
     assert len([u for u in calls if "dead" in u]) == 2
+
+
+def test_watch_includes_ct_names_in_scope(tmp_path, monkeypatch):
+    db = _WatchDB([{"host": "a.x.com", "status_code": 200, "title": "A"}])
+    r = _watch_runner(tmp_path, db, [], [{"host": "a.x.com", "status_code": 200, "title": "A"}])
+    monkeypatch.setattr(W, "_ct_names", lambda domains, budget=0: {"new-cert.x.com", "x.evil.com", "status.x.com"})
+    s = W.run_watch(r, "co", {"domains": ["x.com"], "name": "Co", "out_of_scope": ["status.x.com"]})
+    assert s["counts"] == {"new_host": 1} and s["changes"][0]["host"] == "new-cert.x.com"
+
+
+def test_ct_names_respects_budget(monkeypatch):
+    import core.recon as R
+
+    def slow(domain, limit=500):
+        time.sleep(3)
+        return [{"names": ["late.x.com"]}]
+    monkeypatch.setattr(R, "get_ct_certs", slow)
+    import importlib
+    real = importlib.reload(W)._ct_names          # a versão real (o fixture troca a do módulo)
+    t = time.time()
+    assert real(["x.com"], budget=0.5) == set()
+    assert time.time() - t < 2

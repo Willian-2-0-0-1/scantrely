@@ -36,6 +36,36 @@ def _challenge(title) -> bool:
     return any(t.startswith(c) for c in _CHALLENGE_TITLES)
 
 
+CT_BUDGET_S = 45          # Certificate Transparency: crt.sh oscila (medido 15/10: 60s+), a vigilância não fica refém
+
+
+def _ct_names(domains: list[str], budget: float = CT_BUDGET_S) -> set[str]:
+    """Nomes vistos em certificados (crt.sh/certspotter/Shodan CT): subdomínio novo costuma aparecer
+    ali minutos após a emissão do certificado, antes de qualquer outra fonte passiva."""
+    from concurrent.futures import TimeoutError as _Timeout, as_completed
+    from core.recon import get_ct_certs
+    names: set[str] = set()
+    if not domains:
+        return names
+    ex = ThreadPoolExecutor(max_workers=min(6, len(domains)), thread_name_prefix="watch-ct")
+    futs = [ex.submit(get_ct_certs, d) for d in domains]
+    try:
+        for fut in as_completed(futs, timeout=budget):
+            try:
+                for cert in fut.result() or []:
+                    for n in cert.get("names", []) or []:
+                        n = str(n).strip().lower().lstrip("*.")
+                        if n:
+                            names.add(n)
+            except Exception:
+                log.debug("watch: CT falhou num domínio", exc_info=True)
+    except _Timeout:
+        log.info("watch: CT passou de %.0fs — seguindo com o que veio", budget)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+    return names
+
+
 def _live(h: dict | None) -> bool:
     return bool(h) and h.get("status_code") is not None
 
@@ -151,9 +181,18 @@ def run_watch(runner, cid: str, co: dict, options: dict | None = None) -> dict:
         out = runner._run_tool("subfinder", d, cid=cid, module="watch")
         return {str(f.get("value") or f.get("host") or "").lower() for f in out.get("findings", []) if f.get("type") == "subdomain"}
 
+    ct = ThreadPoolExecutor(max_workers=1, thread_name_prefix="watch-ctr")
+    ct_future = ct.submit(_ct_names, domains[:20])          # em paralelo com o subfinder
     with ThreadPoolExecutor(max_workers=max(1, min(8, len(domains)))) as ex:
         for names in ex.map(_sub, domains[:20]):
             passive |= names
+    try:
+        ct_names = ct_future.result(timeout=CT_BUDGET_S + 10)
+    except Exception:
+        ct_names = set()
+    finally:
+        ct.shutdown(wait=False, cancel_futures=True)
+    passive |= ct_names
     from core.scope import is_excluded
     excluded = list(co.get("out_of_scope") or [])
     passive = {n for n in passive if n and runner._host_in_scope(n, domains) and not is_excluded(n, excluded)}
@@ -218,7 +257,7 @@ def run_watch(runner, cid: str, co: dict, options: dict | None = None) -> dict:
     summary = {
         "company_id": cid, "started_at": now, "finished_at": datetime.now().isoformat(timespec="seconds"),
         "duration_s": round((datetime.now() - started).total_seconds(), 1),
-        "passive_names": len(passive), "probed": len(targets), "live": len(probed),
+        "passive_names": len(passive), "ct_names": len(ct_names), "probed": len(targets), "live": len(probed),
         "counts": {k: len(v) for k, v in by_kind.items()}, "changes": changes[:200], "baseline_domains": baseline,
         "active_targets": active_targets,
     }
