@@ -4,6 +4,13 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 
 ## [Não lançado] - 2026-10-15
 
+### Do recon para o teste manual
+
+- **Fora do escopo por empresa** (`core/scope.py`, coluna `companies.out_of_scope_json`): `host.exemplo.com`, `*.x.exemplo.com` ou URL colada. Host excluído não entra em sondagem HTTP, módulos ativos, takeover, vigilância, listas nem Burp. Campo novo em "Editar escopo"; a API valida os itens.
+- **Importar escopo do programa**: colar os blocos In scope / Out of scope (HackerOne, Bugcrowd, Intigriti…) e "Ler escopo" (`POST /api/scope/parse`, só lê): `*.x.com` vira domínio, URL vira host; IP, id de app e texto ficam como ignorados.
+- **Listas para ferramentas** (`core/tool_lists.py`, `GET /api/data/company/<id>/lists/<hosts|urls|endpoints|params>`, menu Exportar): só o que está no escopo.
+- **Enviar ao Burp** (`core/burp_feed.py`, `POST /api/data/company/<id>/burp`): GET de cada URL pelo proxy do Burp (`burp_proxy`, padrão `http://127.0.0.1:8080`), até 500 por envio; confere que o proxy é mesmo o Burp (`http://burp/`) antes de enviar.
+
 ### Estabilidade e desempenho
 
 - **Servidor travava com o uso**: `with sqlite3.connect(...)` só faz commit/rollback, não fecha a conexão. `_connect` (banco e cache HTTP) agora fecha sempre. Com ~500 conexões abertas (`asm.db` + `asm.db-wal`) o processo batia no limite de 1024 descritores, o `accept` falhava em laço (100% de CPU) e nada mais era atendido. Depois: 4 descritores estáveis sob carga.

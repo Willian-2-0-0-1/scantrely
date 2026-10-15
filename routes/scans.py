@@ -216,6 +216,62 @@ def create_scan_blueprint(
         w.writerows(rows)
         return buf.getvalue(), 200, {"Content-Type": "text/csv; charset=utf-8"}
 
+    @bp.route("/api/data/company/<cid>/lists/<kind>", methods=["GET"])
+    @require_auth
+    def api_company_tool_list(cid: str, kind: str):
+        """Lista para ferramentas (core/tool_lists.py): hosts | urls | endpoints | params, texto puro."""
+        from core import asset_matrix, tool_lists
+        if kind not in tool_lists.KINDS:
+            return jsonify({"error": "kind must be one of " + ", ".join(tool_lists.KINDS)}), 400
+        co = _visible_company(cid)
+        company = _scoped_company(cid)
+        if not co or not company:
+            return jsonify({"error": "Company not found"}), 404
+        endpoints, _ = asset_matrix.unified_endpoints_and_secrets(co) if kind in ("endpoints", "params") else ([], [])
+        items = tool_lists.build_list(kind, _asset_rows(cid, co), endpoints,
+                                      company.get("domains") or co.get("domains") or [], company.get("out_of_scope") or [])
+        body = "\n".join(items) + ("\n" if items else "")
+        return body, 200, {"Content-Type": "text/plain; charset=utf-8",
+                           "Content-Disposition": f'attachment; filename="{cid}-{kind}.txt"'}
+
+    @bp.route("/api/data/company/<cid>/burp", methods=["POST"])
+    @require_auth
+    def api_company_send_to_burp(cid: str):
+        """Passa as URLs (urls | endpoints | params) pelo proxy do Burp, em segundo plano."""
+        import threading
+        from core import asset_matrix, burp_feed, tool_lists
+        body = request.get_json(silent=True) or {}
+        kind = body.get("kind", "urls")
+        if kind not in ("urls", "endpoints", "params"):
+            return jsonify({"error": "kind must be urls, endpoints or params"}), 400
+        co = _visible_company(cid)
+        company = _scoped_company(cid)
+        if not co or not company:
+            return jsonify({"error": "Company not found"}), 404
+        proxy = (db.get_settings({"burp_proxy"}).get("burp_proxy") or burp_feed.DEFAULT_PROXY).strip()
+        if not burp_feed.proxy_reachable(proxy) or not burp_feed.is_burp(proxy):
+            return jsonify({"error": f"O Burp não está escutando em {proxy}. No Burp: Proxy → Proxy settings → "
+                                     "listener ativo nessa porta (ou ajuste burp_proxy em Configurações). "
+                                     "Desligue o Intercept, senão cada URL fica presa esperando Forward."}), 503
+        endpoints, _ = asset_matrix.unified_endpoints_and_secrets(co) if kind != "urls" else ([], [])
+        urls = tool_lists.build_list(kind, _asset_rows(cid, co), endpoints,
+                                     company.get("domains") or co.get("domains") or [], company.get("out_of_scope") or [])
+        if not urls:
+            return jsonify({"error": "Nenhuma URL nessa lista"}), 400
+        out = base_dir / "scans" / cid / "burp_last.json"
+        threading.Thread(target=burp_feed.feed_and_record, args=(urls, proxy, out, kind),
+                         daemon=True, name=f"burp-{cid}").start()
+        return jsonify({"ok": True, "queued": min(len(urls), burp_feed.MAX_URLS), "total": len(urls),
+                        "proxy": proxy}), 202
+
+    @bp.route("/api/data/company/<cid>/burp", methods=["GET"])
+    @require_auth
+    def api_company_burp_last(cid: str):
+        if not _scoped_company(cid):
+            return jsonify({"error": "Company not found"}), 404
+        path = base_dir / "scans" / cid / "burp_last.json"
+        return jsonify(json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"never": True})
+
     @bp.route("/api/data/company/<cid>/findings", methods=["GET"])
     @require_auth
     def api_company_findings(cid: str):

@@ -13,6 +13,7 @@ import threading
 import uuid
 from datetime import datetime
 
+from core.scope import normalize_exclusions, parse_scope_text
 from flask import Blueprint, jsonify, request
 
 try:
@@ -56,6 +57,9 @@ def create_asset_blueprint(
             return jsonify({"error": "name required"}), 400
         if domain_errors:
             return jsonify({"error": "Invalid domain format", "details": domain_errors}), 400
+        out_of_scope, oos_errors = normalize_exclusions(body.get("out_of_scope") or [])
+        if oos_errors:
+            return jsonify({"error": "Invalid out-of-scope entry", "details": oos_errors}), 400
 
         companies = load_companies()
         cid = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
@@ -68,10 +72,20 @@ def create_asset_blueprint(
             "domains": domains,
             "color": body.get("color", "#00c9a7"),
             "tags": body.get("tags", []),
+            "out_of_scope": out_of_scope,
         }
         companies.append(company)
         save_companies(companies)
         return jsonify(company), 201
+
+    @bp.route("/api/scope/parse", methods=["POST"])
+    @require_auth
+    def api_parse_scope():
+        """Escopo colado da página do programa → domínios / exclusões (só lê; não grava nada)."""
+        body = request.get_json(force=True) or {}
+        domains, ign_in = parse_scope_text(body.get("in_scope") or "")
+        excluded, ign_out = parse_scope_text(body.get("out_of_scope") or "", out_of_scope=True)
+        return jsonify({"domains": domains, "out_of_scope": excluded, "ignored": ign_in + ign_out})
 
     @bp.route("/api/companies/<cid>", methods=["PUT"])
     @require_auth
@@ -88,6 +102,11 @@ def create_asset_blueprint(
             if domain_errors:
                 return jsonify({"error": "Invalid domain format", "details": domain_errors}), 400
             company["domains"] = new_domains
+        if "out_of_scope" in body:
+            out_of_scope, oos_errors = normalize_exclusions(body["out_of_scope"] or [])
+            if oos_errors:
+                return jsonify({"error": "Invalid out-of-scope entry", "details": oos_errors}), 400
+            company["out_of_scope"] = out_of_scope
         if "color" in body:
             company["color"] = body["color"]
         if "tags" in body:

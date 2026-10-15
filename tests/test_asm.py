@@ -3698,3 +3698,20 @@ class TestGhostRunningState:
         flask_app._test_scheduler.db.create_job(job_type="pipeline", company_id="co", target="co", options={})
         self._set(flask_app, "running", (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds"))
         assert auth_client.get("/api/recon/co/pipeline").get_json()["status"] == "running"
+
+
+class TestScopeRoutes:
+    def test_out_of_scope_saved_and_validated(self, flask_app, auth_client):
+        flask_app._test_companies.append({"id": "co", "name": "Co", "domains": ["example.com"]})
+        r = auth_client.put("/api/companies/co", json={"out_of_scope": ["status.example.com", "*.old.example.com"]})
+        assert r.status_code == 200 and r.get_json()["out_of_scope"] == ["status.example.com", "*.old.example.com"]
+        bad = auth_client.put("/api/companies/co", json={"out_of_scope": ["não é host"]})
+        assert bad.status_code == 400
+
+    def test_scope_parse_only_reads(self, auth_client):
+        r = auth_client.post("/api/scope/parse", json={"in_scope": "*.example.com\ncom.example.app", "out_of_scope": "*.old.example.com"})
+        d = r.get_json()
+        assert d["domains"] == ["example.com"] and d["out_of_scope"] == ["*.old.example.com"] and d["ignored"] == ["com.example.app"]
+
+    def test_tool_list_rejects_unknown_kind(self, auth_client):
+        assert auth_client.get("/api/data/company/co/lists/tudo").status_code == 400

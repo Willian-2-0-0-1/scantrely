@@ -154,11 +154,13 @@ def run_watch(runner, cid: str, co: dict, options: dict | None = None) -> dict:
     with ThreadPoolExecutor(max_workers=max(1, min(8, len(domains)))) as ex:
         for names in ex.map(_sub, domains[:20]):
             passive |= names
-    passive = {n for n in passive if n and runner._host_in_scope(n, domains)}
+    from core.scope import is_excluded
+    excluded = list(co.get("out_of_scope") or [])
+    passive = {n for n in passive if n and runner._host_in_scope(n, domains) and not is_excluded(n, excluded)}
 
     # 2) sondagem leve: nomes passivos + inventário, só 80/443, com o filtro de curinga
     before = {h["host"]: h for h in runner._load_hosts(cid) if isinstance(h, dict) and h.get("host")}
-    targets = set(passive) | set(before)
+    targets = {h for h in set(passive) | set(before) if not is_excluded(h, excluded)}
     wildcard: set[str] = set()
     live = runner._probe_hosts_with_httpx(sorted(targets), cid, _expand_redirects=False, extra_ports=False,
                                           wildcard_out=wildcard)

@@ -772,3 +772,66 @@ def test_db_connection_still_commits_and_rolls_back(tmp_path):
     except RuntimeError:
         pass
     assert [a["id"] for a in db.get_alerts("co")] == ["a"]
+
+
+# ── item 4: fora do escopo, listas para ferramentas e leitura de escopo colado ──
+from core import scope as S
+
+
+def test_exclusion_patterns():
+    pats, bad = S.normalize_exclusions(["Status.X.com", "https://blog.x.com/a?b=1", "*.legacy.x.com", "não é host", "#comentário"])
+    assert pats == ["status.x.com", "blog.x.com", "*.legacy.x.com"] and bad == ["não é host"]
+    assert S.is_excluded("status.x.com", pats) and S.is_excluded("a.b.legacy.x.com", pats)
+    assert not S.is_excluded("legacy.x.com", pats)            # *.legacy.x.com não inclui o próprio
+    assert not S.is_excluded("www.x.com", pats)
+
+
+def test_parse_scope_text_from_program_page():
+    ins = "Domain *.example.com Critical\nhttps://app.example.org/login\nAndroid: com.example.mobile\n10.0.0.0/8"
+    assert S.parse_scope_text(ins) == (["example.com", "app.example.org"], ["com.example.mobile", "10.0.0.0/8"])
+    assert S.parse_scope_text("*.legacy.example.com\nstatus.example.com", out_of_scope=True)[0] == \
+        ["*.legacy.example.com", "status.example.com"]
+
+
+def test_excluded_hosts_never_reach_active_modules(tmp_path):
+    hosts = [{"host": h, "status_code": 200} for h in ("a.x.com", "status.x.com", "v1.legacy.x.com")]
+    r = _runner(tmp_path)
+    co = {"domains": ["x.com"], "out_of_scope": ["status.x.com", "*.legacy.x.com"]}
+    out = r._filter_hosts_for_options(hosts, co, {"profile": "bug_bounty", "active": True, "domains": ["x.com"]})
+    assert [h["host"] for h in out] == ["a.x.com"]
+
+
+def test_excluded_hosts_are_not_probed(tmp_path, monkeypatch):
+    seen = _fake_httpx(tmp_path, monkeypatch, {"80,443": []})
+    r = _runner(tmp_path)
+    monkeypatch.setattr(r, "_company_exclusions", lambda cid: ["status.x.com"])
+    monkeypatch.setattr(r, "_wildcard_canaries", lambda names, cid: {})
+    monkeypatch.setattr(r, "_company_domains", lambda cid: [])
+    r._probe_hosts_with_httpx(["a.x.com", "status.x.com"], "co")
+    assert seen["80,443"] == ["a.x.com"]
+
+
+def test_tool_lists():
+    from core import tool_lists as T
+    rows = [{"host": "a.x.com", "ports": ["443", "8080"]}, {"host": "out.x.com", "ports": ["443"]},
+            {"host": "evil.com", "ports": ["80"]}]
+    eps = [{"url": "https://a.x.com/api?id=1"}, {"url": "/login", "host": "a.x.com"}, {"url": "https://out.x.com/?q=1"}]
+    args = (rows, eps, ["x.com"], ["out.x.com"])
+    assert T.build_list("hosts", *args) == ["a.x.com"]
+    assert T.build_list("urls", *args) == ["http://a.x.com:8080", "https://a.x.com"]
+    assert T.build_list("endpoints", *args) == ["https://a.x.com/api?id=1", "https://a.x.com/login"]
+    assert T.build_list("params", *args) == ["https://a.x.com/api?id=1"]
+
+
+def test_burp_feed_counts_http_errors_as_delivered():
+    import urllib.error
+    from core import burp_feed
+
+    class Op:
+        def open(self, req, timeout=0):
+            if "boom" in req.full_url:
+                raise OSError("conexão recusada")
+            raise urllib.error.HTTPError(req.full_url, 404, "nf", {}, None)
+
+    out = burp_feed.feed(["https://a.x.com/", "https://boom.x.com/"], opener=Op())
+    assert out["ok"] == 1 and out["failed"] == 1

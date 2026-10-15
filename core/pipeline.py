@@ -35,6 +35,7 @@ PIPELINE_PROFILES = {'bug_bounty': {'active': True, 'active_max_hosts': 40, 'cra
 from utils import cmd_trace as _ct
 from utils import rate_limiter as _rl
 from utils.tool_gate import gate_for as _gate_for
+from core.scope import drop_excluded as _drop_excluded
 from core.reconlib.base import bind_cancel as _bind_cancel, cancelled as _module_cancelled, run_bounded as _run_bounded
 from flask import jsonify
 _SUBPROCESS_CONTEXT = threading.local()
@@ -1244,6 +1245,8 @@ class ReconRunner:
         if not filtered and active_profile:
             now = datetime.now().isoformat(timespec='seconds')
             filtered = [{'host': d, 'status_code': None, 'content_length': None, 'title': '', 'server': '', 'ip': '', 'technologies': [], 'ports': [], 'waf': '', 'cdn': False, 'scope_distance': 0, 'source': 'profile_scope', 'discovered_at': now} for d in sorted(domains)]
+        # fora do escopo do programa: não entra em nenhum módulo ativo (core/scope.py)
+        filtered = _drop_excluded(filtered, co.get('out_of_scope') or [])
         max_hosts = int(options.get('active_max_hosts') or 0)
         if max_hosts > 0 and len(filtered) > max_hosts:
             responsive = [h for h in filtered if _is_responsive(h)]
@@ -2722,6 +2725,12 @@ class ReconRunner:
     def _probe_hosts_with_httpx(self, subdomains: list[str], cid: str, extra_headers: list[str] | None=None, _expand_redirects: bool=True, extra_ports: bool=True, wildcard_out: set | None=None) -> list[dict]:
         log.debug('_probe_hosts_with_httpx called with %s subdomains for %s', len(subdomains), cid)
         httpx_bin = str(BIN_DIR / 'httpx') if (BIN_DIR / 'httpx').is_file() else None
+        excluded = self._company_exclusions(cid)
+        if excluded:
+            before = len(subdomains)
+            subdomains = _drop_excluded(subdomains, excluded)
+            if len(subdomains) < before:
+                log.info('[escopo] %s: %s host(s) fora do escopo não sondados', cid, before - len(subdomains))
         if not subdomains:
             return []
         if not httpx_bin:
@@ -2828,6 +2837,14 @@ class ReconRunner:
         if not final_url:
             return ''
         return str(final_url).split('://')[-1].split('/')[0].split(':')[0].strip().lower()
+
+    def _company_exclusions(self, cid: str) -> list[str]:
+        """Padrões "fora do escopo" da empresa (core/scope.py)."""
+        try:
+            co = next((c for c in self.db.load_companies() if c.get('id') == cid), None)
+        except Exception:
+            co = None
+        return list((co or {}).get('out_of_scope') or [])
 
     def _host_in_scope(self, host: str, domains) -> bool:
         """True if host equals or is a subdomain of any company scope domain.

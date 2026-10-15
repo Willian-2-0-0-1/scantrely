@@ -4250,3 +4250,8 @@ button.am-sev:hover, button.am-count:hover { filter:brightness(1.25); }
 /* ── Painel de domínios: infra e typosquat embutidos ─────────────────── */
 .tab-content.embed { display: block; }
 .dom-sec-title { margin: 28px 0 10px; font-size: .95rem; color: var(--text1); padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+
+/* ── Menu Exportar: separadores (listas para ferramentas, Burp) e importação de escopo ── */
+.co-menu-sep { font-size: .62rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text3); padding: 8px 10px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
+.scope-import summary { cursor: pointer; }
+.scope-import[open] summary { margin-bottom: 6px; }

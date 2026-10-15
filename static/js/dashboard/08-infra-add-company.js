@@ -279,14 +279,63 @@ function openEditCompanyModal(cid) {
   document.getElementById("edit-co-title").textContent  = co.name;
   document.getElementById("edit-co-name").value         = co.name;
   document.getElementById("edit-co-domains").value      = (co.domains||[]).join("\n");
+  document.getElementById("edit-co-oos").value          = (co.out_of_scope||[]).join("\n");
+  ["scope-in", "scope-out"].forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
   document.getElementById("edit-co-error").style.display = "none";
   document.getElementById("modal-edit-co").classList.add("show");
+  // a lista do painel pode não trazer out_of_scope: busca o cadastro atual
+  if (SERVER_MODE) fetch("/api/companies", {headers: _authHeaders()}).then(r => r.ok ? r.json() : [])
+    .then(list => { const c = (list.companies || list || []).find(x => x.id === cid);
+                    if (c && _editCoId === cid) document.getElementById("edit-co-oos").value = (c.out_of_scope || []).join("\n"); })
+    .catch(() => {});
+}
+
+function _lines(id) {
+  return document.getElementById(id).value.split("\n").map(d => d.trim().toLowerCase()).filter(Boolean);
+}
+
+// Escopo colado da página do programa → preenche Domínios e Fora do escopo (não grava; revisar e salvar).
+async function parseScopeIntoForm() {
+  const msg = document.getElementById("scope-import-msg");
+  try {
+    const r = await fetch("/api/scope/parse", {method: "POST", headers: _authHeaders(),
+      body: JSON.stringify({in_scope: document.getElementById("scope-in").value, out_of_scope: document.getElementById("scope-out").value})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "HTTP " + r.status);
+    const merge = (id, extra) => { const cur = _lines(id); extra.forEach(x => { if (!cur.includes(x)) cur.push(x); }); document.getElementById(id).value = cur.join("\n"); };
+    merge("edit-co-domains", d.domains || []);
+    merge("edit-co-oos", d.out_of_scope || []);
+    msg.textContent = `${(d.domains||[]).length} no escopo, ${(d.out_of_scope||[]).length} fora` +
+      ((d.ignored||[]).length ? ` · ignorados (IP, app, texto): ${d.ignored.slice(0, 6).join(", ")}${d.ignored.length > 6 ? "…" : ""}` : "") +
+      " — revise e clique em Save Changes.";
+  } catch (e) { msg.textContent = "Falha ao ler o escopo: " + (e.message || e); }
+}
+
+async function exportToolList(kind) {
+  const cid = state.currentId;
+  try {
+    const r = await fetch(`/api/data/company/${encodeURIComponent(cid)}/lists/${kind}`, {headers: _authHeaders()});
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    const txt = await r.text();
+    if (!txt.trim()) { showToast("Lista vazia"); return; }
+    _downloadBlob(txt, `${cid}-${kind}.txt`, "text/plain");
+  } catch (e) { showToast("Falha ao exportar: " + (e.message || e)); }
+}
+
+async function sendToBurp(kind) {
+  const cid = state.currentId;
+  try {
+    const r = await fetch(`/api/data/company/${encodeURIComponent(cid)}/burp`, {method: "POST", headers: _authHeaders(), body: JSON.stringify({kind})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    showToast(`Enviando ${d.queued} URL(s) ao Burp (${d.proxy})` + (d.total > d.queued ? ` — limite de ${d.queued} de ${d.total}` : ""));
+  } catch (e) { showToast(String(e.message || e)); }
 }
 
 async function saveEditCompany() {
   const name    = document.getElementById("edit-co-name").value.trim();
-  const domains = document.getElementById("edit-co-domains").value.trim()
-                    .split("\n").map(d=>d.trim().toLowerCase()).filter(Boolean);
+  const domains = _lines("edit-co-domains");
+  const out_of_scope = _lines("edit-co-oos");
   const errEl   = document.getElementById("edit-co-error");
   if(!name || !domains.length){
     errEl.textContent = "Name and at least one domain are required.";
@@ -297,12 +346,12 @@ async function saveEditCompany() {
     const r = await fetch(`/api/companies/${_editCoId}`, {
       method: "PUT",
       headers: _authHeaders(),
-      body: JSON.stringify({name, domains})
+      body: JSON.stringify({name, domains, out_of_scope})
     });
     if(!r.ok){ const d=await r.json(); throw new Error(d.error||"Server error"); }
     document.getElementById("modal-edit-co").classList.remove("show");
     const co = allCompanies().find(c=>c.id===_editCoId);
-    if(co) { co.name = name; co.domains = domains; }
+    if(co) { co.name = name; co.domains = domains; co.out_of_scope = out_of_scope; }
     const updated = allCompanies().find(c=>c.id===_editCoId);
     if(updated) renderCompanyView(updated);
     renderSidebar();

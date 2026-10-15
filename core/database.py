@@ -314,6 +314,11 @@ class ASMDatabase:
                 conn.execute("ALTER TABLE alert_rules ADD COLUMN min_severity TEXT NOT NULL DEFAULT 'info'")
             except Exception:
                 _log.debug('database.py:312 erro ignorado', exc_info=True)
+            # exclusões de escopo por empresa ("fora do escopo" do programa) — core/scope.py
+            try:
+                conn.execute("ALTER TABLE companies ADD COLUMN out_of_scope_json TEXT NOT NULL DEFAULT '[]'")
+            except Exception:
+                _log.debug('database.py: out_of_scope_json já existe', exc_info=True)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS invites (
@@ -702,13 +707,14 @@ class ASMDatabase:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, name, domains_json, color, tags_json
+                SELECT *
                 FROM companies
                 ORDER BY name COLLATE NOCASE
                 """
             ).fetchall()
         result = []
         for row in rows:
+            keys = row.keys()
             result.append(
                 {
                     "id": row["id"],
@@ -716,6 +722,7 @@ class ASMDatabase:
                     "domains": self._json_loads(row["domains_json"], []),
                     "color": row["color"],
                     "tags": self._json_loads(row["tags_json"], []),
+                    "out_of_scope": self._json_loads(row["out_of_scope_json"], []) if "out_of_scope_json" in keys else [],
                 }
             )
         return result
@@ -726,8 +733,8 @@ class ASMDatabase:
             conn.execute("DELETE FROM companies")
             conn.executemany(
                 """
-                INSERT INTO companies (id, name, domains_json, color, tags_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO companies (id, name, domains_json, color, tags_json, created_at, updated_at, out_of_scope_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -738,6 +745,7 @@ class ASMDatabase:
                         self._json_dumps(company.get("tags", [])),
                         company.get("created_at", now),
                         company.get("updated_at", now),
+                        self._json_dumps(company.get("out_of_scope", [])),
                     )
                     for company in companies
                 ],
