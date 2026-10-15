@@ -97,6 +97,7 @@ class JobScheduler:
         pipeline_state: dict,
         save_pipeline_state: Callable[[str], None] | None = None,
         run_playwright_recon: Callable[[str, dict, dict], dict | None] | None = None,
+        run_watch: Callable[[str, dict, dict], dict] | None = None,
         get_settings: Callable[[], dict] | None = None,
         max_workers: int = 1,
         poll_interval: float = 1.0,
@@ -105,6 +106,7 @@ class JobScheduler:
         self.load_companies = load_companies
         self.run_pipeline = run_pipeline
         self.run_playwright_recon = run_playwright_recon
+        self.run_watch = run_watch
         self.pipeline_state = pipeline_state
         self.save_pipeline_state = save_pipeline_state
         self.max_workers = max(1, int(max_workers or 1))
@@ -142,6 +144,17 @@ class JobScheduler:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def enqueue_watch(self, company_id: str, *, options: dict | None = None, created_by: str = "",
+                      priority: int = 50) -> dict:
+        """Vigilância passiva (core/watch.py). Prioridade acima do pipeline: é curta."""
+        existing = self.db.find_active_job(company_id=company_id, job_type="watch", target=company_id)
+        if existing:
+            return {**existing, "deduped": True}
+        job = self.db.create_job(job_type="watch", company_id=company_id, target=company_id,
+                                 options=dict(options or {}), priority=priority, created_by=created_by)
+        job["deduped"] = False
+        return job
 
     def enqueue_pipeline(
         self,
@@ -406,6 +419,19 @@ class JobScheduler:
                     self.db.finish_job(job_id, status="done")
                     # The bug-bounty pipeline includes browser_crawl/browser_recon
                     # in-band. Do not enqueue separate follow-up jobs.
+                return
+            if job_type == "watch":
+                if not self.run_watch:
+                    self.db.finish_job(job_id, status="error", error="Watch runner not configured")
+                    return
+                summary = self.run_watch(company_id, company, options) or {}
+                self.db.finish_job(job_id, status="done")
+                # opcional (agenda com active_on_change): scan ativo só nos hosts que mudaram
+                targets = summary.get("active_targets") or []
+                if options.get("active_on_change") and targets:
+                    self.enqueue_pipeline(company_id, options={"active_hosts": targets[:40],
+                                                               "domains": list(company.get("domains") or [])},
+                                          created_by="watch", dedupe=True)
                 return
             if job_type == "playwright_recon":
                 if not self.run_playwright_recon:

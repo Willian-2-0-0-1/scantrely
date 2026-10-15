@@ -88,25 +88,40 @@ function selectRateMode(val, el) {
   el.classList.add("selected");
 }
 
+async function _watchLast(cid) {
+  var r = await fetch('/api/monitor/' + cid, {headers:_authHeaders()});
+  return r.ok ? r.json() : null;
+}
+
+function _watchSummary(w) {
+  var c = (w && w.counts) || {};
+  var parts = ["new_host_live", "new_host", "came_alive", "changed", "went_dead"]
+    .filter(function (k) { return c[k]; })
+    .map(function (k) { return c[k] + " " + t("watch_k_" + k); });
+  return parts.length ? t("watch_changes") + ": " + parts.join(", ") : t("watch_no_changes");
+}
+
 async function monitorNow(cid) {
-  // Run a quick pipeline scan now (stealth mode)
+  // Vigilância (core/watch.py): passivo + 80/443 + diff contra o inventário, na fila de jobs.
+  // Antes este botão disparava o pipeline completo em modo stealth.
   var btn = document.getElementById('monitor-now-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Starting...'; }
+  if (btn) btn.disabled = true;
   try {
-    var r = await fetch('/api/recon/' + cid + '/pipeline', {
-      method:'POST',
-      headers: {'Content-Type':'application/json', ..._authHeaders()},
-      body: JSON.stringify({mode:'stealth'})
-    });
+    var before = await _watchLast(cid);
+    var r = await fetch('/api/monitor/' + cid, {method:'POST', headers:_authHeaders()});
     var data = await r.json();
-    if (r.ok) {
-      showToast('Pipeline started in stealth mode — check Pipeline HUD tab');
-      showPage('company'); selectCompany(cid); switchTab('pipeline');
-    } else {
-      showToast('Error: ' + (data.error || 'Unknown'));
+    if (!r.ok) { showToast('Error: ' + (data.error || 'Unknown')); return; }
+    showToast(t("watch_queued"));
+    for (var i = 0; i < 60; i++) {   // até 5 min
+      await new Promise(function (ok) { setTimeout(ok, 5000); });
+      var last = await _watchLast(cid);
+      if (last && last.finished_at && last.finished_at !== (before && before.finished_at)) {
+        showToast(_watchSummary(last));
+        break;
+      }
     }
   } catch(e) { showToast('Failed: ' + e.message); }
- if (btn) { btn.disabled = false; btn.textContent = ' Monitor Now'; }
+  finally { if (btn) btn.disabled = false; }
 }
 
 async function loadScheduleStatus(cid) {
@@ -127,19 +142,24 @@ async function loadScheduleStatus(cid) {
 }
 
 async function toggleSchedule(cid) {
+  // Agenda = vigilância passiva periódica (perfil "watch"); o scan completo agendado só roda com
+  // ASM_ENABLE_SCHEDULED_SCANS=1 no servidor.
   var btn = document.getElementById("enable-schedule-btn");
   if (!btn) return;
   try {
     var r = await fetch('/api/schedule/' + cid, {headers:_authHeaders()});
     var s = r.ok ? await r.json() : {};
+    var post = function (body) {
+      return fetch('/api/schedule/' + cid, {method:'POST', headers:{'Content-Type':'application/json', ..._authHeaders()}, body:JSON.stringify(body)});
+    };
     if (s && s.enabled) {
-      if (!confirm('Schedule is active (every ' + (s.interval_hours||'?') + 'h). Disable it?')) return;
-      await fetch('/api/schedule/' + cid, {method:'POST', headers:{'Content-Type':'application/json', ..._authHeaders()}, body:JSON.stringify({enabled:false, interval_hours:s.interval_hours||24, profile:'bug_bounty'})});
+      if (!confirm(t("schedule_disable_confirm") + ' (' + (s.interval_hours||'?') + 'h)')) return;
+      await post({enabled:false, interval_hours:s.interval_hours||6, profile:s.profile||'watch'});
       _setIconLabel(btn, "clock", t("btn_schedule_off")); btn.style.color = '';
     } else {
-      var interval = prompt('Scan interval (hours):', '24');
+      var interval = prompt(t("schedule_prompt"), '6');
       if (!interval) return;
-      await fetch('/api/schedule/' + cid, {method:'POST', headers:{'Content-Type':'application/json', ..._authHeaders()}, body:JSON.stringify({enabled:true, interval_hours:parseInt(interval), profile:'bug_bounty'})});
+      await post({enabled:true, interval_hours:parseInt(interval), profile:'watch'});
       _setIconLabel(btn, "clock", interval + 'h on'); btn.style.color = '#4ade80';
     }
   } catch(e) { console.error(e); }

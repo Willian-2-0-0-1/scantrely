@@ -61,6 +61,7 @@ def create_scan_blueprint(
     get_asm_data_timestamp,
     load_schedules=None,
     save_schedules=None,
+    get_job_scheduler=None,
     db,
 ):
     bp = Blueprint("scan_routes", __name__)
@@ -672,111 +673,39 @@ def create_scan_blueprint(
 
     # ── 24/7 Monitoring ──────────────────────────────────────────────────────
 
+    def _scoped_company(cid: str) -> dict | None:
+        company_ids, is_super = _scope_from_session()
+        if not (is_super or company_ids is None) and cid not in company_ids:
+            return None
+        return next((c for c in load_companies() if c.get("id") == cid), None)
+
     @bp.route("/api/monitor/<cid>", methods=["POST"])
     @require_auth
     def api_monitor_now(cid: str):
-        """Run a lightweight monitoring check: DNS probe + typosquat detection."""
-        import subprocess, shutil
-        companies = load_companies()
-        co = next((c for c in companies if c["id"] == cid), None)
-        if not co:
+        """Enfileira uma vigilância (core/watch.py): passivo + 80/443 + diff contra o inventário.
+        Antes: síncrona, só os 15 primeiros hosts, sem enumeração passiva e sem gravar nada."""
+        if not _scoped_company(cid):
             return jsonify({"error": "Company not found"}), 404
-        
-        data = load_asm_data()
-        co_data = next((c for c in data.get("companies", []) if c.get("id") == cid), None)
-        if not co_data:
-            return jsonify({"error": "No scan data — run a scan first"}), 400
+        sched = get_job_scheduler() if callable(get_job_scheduler) else None
+        if not sched:
+            return jsonify({"error": "Job scheduler unavailable"}), 503
+        sess = getattr(g, "session", {}) or {}
+        job = sched.enqueue_watch(cid, created_by=sess.get("username", ""))
+        return jsonify({"ok": True, "job_id": job.get("id"), "deduped": job.get("deduped", False)}), 202
 
-        domains = co.get("domains", [])
-        hosts = co_data.get("hosts", [])
-        results = {"monitored": len(hosts), "changed": 0, "down": 0, "new": 0, "ok": 0, "changes": [], "typosquat": []}
-        
-        # ── Typosquatting check (T1583.001) ──
-        for domain in domains[:2]:  # max 2 domains
-            try:
-                from core.recon import run_typosquatting
-                typo_result = run_typosquatting(domain, max_variants=100)
-                registered = typo_result.get("registered", [])
-                for r in registered:
-                    results["typosquat"].append({
-                        "domain": r.get("domain", ""),
-                        "ips": r.get("ips", []),
-                        "risk": r.get("risk", "low"),
-                        "status": r.get("status", "unknown"),
-                    })
-            except Exception as e:
-                results["typosquat"].append({"error": str(e)})
-        
-        # ── Quick HTTP probe on existing hosts (first 15) ──
-        httpx_bin = str(Path(__file__).parent / "bin" / "httpx")
-        if not Path(httpx_bin).exists():
-            httpx_bin = shutil.which("httpx") or ""
-        sample = hosts[:15]
-        
-        if httpx_bin and sample:
-            try:
-                import tempfile
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
-                    tf.write("\n".join(h["host"] for h in sample if h.get("host")))
-                    tf_path = tf.name
-                
-                proc = subprocess.run(
-                    [httpx_bin, "-l", tf_path, "-silent", "-json",
-                     "-status-code", "-title", "-ports", "80,443", "-timeout", "5",
-                     "-threads", "15"],
-                    capture_output=True, text=True, timeout=45,
-                )
-                Path(tf_path).unlink(missing_ok=True)
-                
-                current = {}
-                for line in proc.stdout.strip().splitlines():
-                    try:
-                        item = json.loads(line)
-                        host = item.get("input", "").split(":")[0].replace("https://", "").replace("http://", "")
-                        if host:
-                            current[host] = {
-                                "status_code": item.get("status_code"),
-                                "title": (item.get("title") or "")[:80],
-                                "ip": (item.get("a") or [""])[0] if item.get("a") else "",
-                            }
-                    except:
-                        _log.debug('scans.py:675 erro ignorado', exc_info=True)
-                
-                for h in sample:
-                    hostname = h.get("host", "")
-                    if hostname in current:
-                        cur = current[hostname]
-                        old_code = h.get("status_code")
-                        old_title = h.get("title", "")
-                        if cur["status_code"] != old_code or cur["title"] != old_title:
-                            results["changed"] += 1
-                            results["changes"].append({
-                                "host": hostname, "status": f"{old_code} → {cur['status_code']}",
-                                "title": cur["title"],
-                            })
-                        else:
-                            results["ok"] += 1
-                    else:
-                        results["down"] += 1
-                        results["changes"].append({"host": hostname, "status": "DOWN"})
-            except Exception as e:
-                results["error"] = str(e)
-
-        # Save typosquat findings to company data
-        if results["typosquat"]:
-            try:
-                for tc in data.get("companies", []):
-                    if tc.get("id") == cid:
-                        tc["typosquat_data"] = {
-                            "findings": results["typosquat"],
-                            "checked_at": datetime.now().isoformat(timespec="seconds"),
-                        }
-                        break
-                save_asm_data(data)
-            except:
-                _log.debug('scans.py:708 erro ignorado', exc_info=True)
-
-        return jsonify(results)
+    @bp.route("/api/monitor/<cid>", methods=["GET"])
+    @require_auth
+    def api_monitor_last(cid: str):
+        """Resultado da última vigilância (scans/<cid>/watch_last.json)."""
+        if not _scoped_company(cid):
+            return jsonify({"error": "Company not found"}), 404
+        path = base_dir / "scans" / cid / "watch_last.json"
+        if not path.exists():
+            return jsonify({"company_id": cid, "never": True})
+        try:
+            return jsonify(json.loads(path.read_text(encoding="utf-8")))
+        except Exception:
+            return jsonify({"company_id": cid, "error": "unreadable"}), 500
 
     @bp.route("/api/vulns/<cid>", methods=["GET"])
     @require_auth

@@ -3574,7 +3574,7 @@ class TestOriginLink:
         assert "hostPanel = \"subdomains\"" in js
         assert "js/dashboard/17-terminal-alerts-init.js" in html
         assert "dashboard.css?v=" in html
-        assert "i18n.js?v=22" in html
+        assert "i18n.js?v=23" in html
         assert "exposure.js?v=3" in html
         assert "Prévia do screenshot" in html
         assert "← Prev" not in html
@@ -3634,7 +3634,7 @@ class TestOriginLink:
         assert "vuln_loading" in i18n
         assert "vuln_cnt" in i18n
         assert "js/dashboard/17-terminal-alerts-init.js" in html
-        assert "i18n.js?v=22" in html
+        assert "i18n.js?v=23" in html
 
 
 class TestFindingLifecyclePersist:

@@ -723,6 +723,12 @@ def _scheduler_loop():
                 except Exception:
                     continue
                 if now >= nr:
+                    profile = cfg.get("profile", "deep")
+                    # vigilância passiva (core/watch.py) sempre roda; scan completo agendado só com
+                    # ASM_ENABLE_SCHEDULED_SCANS=1 (é o pipeline ativo inteiro, 30–50 min)
+                    watch = profile in ("watch", "watch_active")   # watch_active: scan ativo só no que mudou
+                    if not watch and not _FULL_SCHEDULED_SCANS:
+                        continue
                     companies = load_companies()
                     co = next((c for c in companies if c["id"] == cid), None)
                     if not co:
@@ -730,23 +736,24 @@ def _scheduler_loop():
                     targets = co.get("domains", [])
                     if not targets:
                         continue
+                    if watch and JOB_SCHEDULER:
+                        JOB_SCHEDULER.enqueue_watch(cid, created_by="scheduler",
+                                                    options={"active_on_change": profile == "watch_active"})
                     # Skip if pipeline already running for this company
-                    state = _runner.pipeline_state.get(cid, {})
-                    if state.get("status") == "running":
+                    elif _runner.pipeline_state.get(cid, {}).get("status") == "running":
                         continue
-                    profile = cfg.get("profile", "deep")
-                    options = {"rate_mode": "stealth"}  # Default or pull from cfg
-                    if JOB_SCHEDULER:
+                    elif JOB_SCHEDULER:
+                        options = {"rate_mode": "stealth"}
                         JOB_SCHEDULER.enqueue_pipeline(
                             cid,
                             options=options,
                             created_by="scheduler",
                             dedupe=True,
                         )
-                    else:
+                    elif not watch:
                         threading.Thread(
                             target=lambda cid, co, opts: _runner.run_pipeline(cid, co, opts),
-                            args=(cid, co, options),
+                            args=(cid, co, {"rate_mode": "stealth"}),
                             daemon=True
                         ).start()
                     
@@ -761,8 +768,9 @@ def _scheduler_loop():
             _log.debug('server.py:781 erro ignorado', exc_info=True)
 
 
-if os.environ.get("ASM_ENABLE_SCHEDULED_SCANS", "0") == "1":
-    threading.Thread(target=_scheduler_loop, daemon=True, name="asm-scheduled-scan-loop").start()
+_FULL_SCHEDULED_SCANS = os.environ.get("ASM_ENABLE_SCHEDULED_SCANS", "0") == "1"
+# sempre ligado: sem agenda cadastrada não faz nada; agenda "watch" é leve (passivo + 80/443)
+threading.Thread(target=_scheduler_loop, daemon=True, name="asm-scheduled-scan-loop").start()
 
 # ── Recon modules ─────────────────────────────────────────────────────────────
 
@@ -958,6 +966,7 @@ app.register_blueprint(create_scan_blueprint(
     get_asm_data_timestamp=DB.get_asm_data_timestamp,
     load_schedules=_load_schedules,
     save_schedules=_save_schedules,
+    get_job_scheduler=lambda: JOB_SCHEDULER,
     db=DB,
 ))
 
@@ -1004,11 +1013,14 @@ def _safe_run_playwright_recon(cid: str, co: dict, options: dict):
         raise
 
 
+from core.watch import run_watch as _run_watch
+
 JOB_SCHEDULER = JobScheduler(
     db=DB,
     load_companies=load_companies,
     run_pipeline=_safe_run_pipeline,
     run_playwright_recon=_safe_run_playwright_recon,
+    run_watch=lambda cid, co, opts: _run_watch(_runner, cid, co, opts),
     pipeline_state=_runner.pipeline_state,
     save_pipeline_state=_runner._save_pipeline_state,
     get_settings=_get_settings,

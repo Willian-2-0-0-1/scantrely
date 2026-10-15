@@ -149,6 +149,53 @@ def _param_mine_target(hosts: list, domain: str) -> str:
             return _gowitness_target(h)
     return domain
 
+def snapshot_diff(prev_hosts: list, curr_hosts: list) -> dict:
+    """Diff entre dois snapshots no formato que utils.alerting.AlertEngine.process_scan_diff espera."""
+    def _map(hosts):
+        out = {}
+        for h in hosts or []:
+            h = h if isinstance(h, dict) else {'host': str(h)}
+            if h.get('host'):
+                out[h['host']] = h
+        return out
+    prev, curr = _map(prev_hosts), _map(curr_hosts)
+    changed = []
+    for host in sorted(set(prev) & set(curr)):
+        a, b = prev[host], curr[host]
+        changes = {}
+        if a.get('status_code') != b.get('status_code'):
+            changes['status_code'] = {'old': a.get('status_code'), 'new': b.get('status_code')}
+        added_ports = sorted(set(map(str, b.get('ports') or [])) - set(map(str, a.get('ports') or [])))
+        if added_ports:
+            changes['ports'] = {'added': added_ports}
+        added_tech = sorted(set(b.get('technologies') or []) - set(a.get('technologies') or []))
+        if added_tech:
+            changes['technologies'] = {'added': added_tech}
+        if (a.get('waf') or '') != (b.get('waf') or '') and a.get('waf') and b.get('waf'):
+            changes['waf'] = {'old': a.get('waf'), 'new': b.get('waf')}
+        if changes:
+            changed.append({'host': host, 'changes': changes})
+    return {'diff': 'ok', 'new': [curr[h] for h in sorted(set(curr) - set(prev))],
+            'removed': [{'host': h} for h in sorted(set(prev) - set(curr))], 'changed': changed}
+
+def _clustered_error_pages(host_data: dict, host_fp: dict, canary_fp: dict, protected: set, already: set,
+                           min_cluster: int = 5) -> list[str]:
+    """Numa zona com curinga, a mesma página de erro em >= min_cluster hosts é página do curinga que
+    nenhum canário pegou (o balanceador alterna variantes). Página própria não entra no grupo."""
+    groups: dict = {}
+    for host in host_data:
+        if host in protected or host in already:
+            continue
+        zone = host.split('.', 1)[1] if '.' in host else ''
+        while zone and zone not in canary_fp:
+            zone = zone.split('.', 1)[1] if '.' in zone else ''
+        fps = list((host_fp.get(host) or {}).values())
+        if not zone or not fps or not all((f.get('status') or 0) >= 400 for f in fps):
+            continue
+        key = (zone,) + tuple(sorted((f.get('status'), f.get('title'), f.get('words'), f.get('lines')) for f in fps))
+        groups.setdefault(key, []).append(host)
+    return [h for hosts in groups.values() if len(hosts) >= min_cluster for h in hosts]
+
 def _gowitness_target(h: dict) -> str:
     """Uma URL por host com esquema e porta explícitos. Só com o nome, o gowitness tenta
     http/https × 80/443 (4 capturas por host, incluindo http://host:443)."""
@@ -2669,10 +2716,10 @@ class ReconRunner:
             return {}
         with ThreadPoolExecutor(max_workers=min(20, len(probe))) as ex:
             wild = [z for z, ips in zip(probe, ex.map(_wildcard_ips, probe)) if ips]
-        # 2 por zona: o curinga pode alternar entre páginas padrão
-        return {f'sctw-{secrets.token_hex(5)}.{z}': z for z in wild for _ in range(2)}
+        # 3 por zona: o curinga pode alternar entre páginas padrão (balanceador) e 2 às vezes caíam na mesma
+        return {f'sctw-{secrets.token_hex(5)}.{z}': z for z in wild for _ in range(3)}
 
-    def _probe_hosts_with_httpx(self, subdomains: list[str], cid: str, extra_headers: list[str] | None=None, _expand_redirects: bool=True) -> list[dict]:
+    def _probe_hosts_with_httpx(self, subdomains: list[str], cid: str, extra_headers: list[str] | None=None, _expand_redirects: bool=True, extra_ports: bool=True, wildcard_out: set | None=None) -> list[dict]:
         log.debug('_probe_hosts_with_httpx called with %s subdomains for %s', len(subdomains), cid)
         httpx_bin = str(BIN_DIR / 'httpx') if (BIN_DIR / 'httpx').is_file() else None
         if not subdomains:
@@ -2691,7 +2738,7 @@ class ReconRunner:
         for it in items:
             first.setdefault(_httpx_item_host(it), it)
         # etapa 2: portas extras só fora de CDN (num IP de CDN só 80/443 levam à origem)
-        stage2 = [s for s in subdomains if s not in canaries and not (first.get(s) or {}).get('cdn')]
+        stage2 = [s for s in subdomains if s not in canaries and not (first.get(s) or {}).get('cdn')] if extra_ports else []
         if stage2:
             items += self._run_httpx(httpx_bin, stage2, _HTTPX_EXTRA_PORTS, extra_headers, cid)
         log.debug('httpx completed, %s lines (%s em 80/443, %s na etapa 2)', len(items), len(first), len(stage2))
@@ -2732,8 +2779,11 @@ class ReconRunner:
                 if d:
                     protected |= {d, 'www.' + d}
             wildcard_hits = [h for h in host_data if h not in protected and _matches_wildcard(h, host_fp.get(h, {}), canary_fp)]
+            wildcard_hits += _clustered_error_pages(host_data, host_fp, canary_fp, protected, set(wildcard_hits))
             for h in wildcard_hits:
                 del host_data[h]
+            if wildcard_out is not None:
+                wildcard_out.update(wildcard_hits)   # quem chama distingue "igual ao curinga" de "não respondeu"
             if wildcard_hits:
                 log.info('[wildcard] %s: %s host(s) respondem igual a um nome aleatório da zona (%s) — fora da lista de vivos', cid, len(wildcard_hits), ', '.join(sorted(canary_fp)[:5]))
         log.debug('_probe_hosts_with_httpx returning %s hosts', len(host_data))
@@ -2983,16 +3033,13 @@ class ReconRunner:
             curr_snap = self.db.load_snapshot(cid, slot='current')
             prev_snap = self.db.load_snapshot(cid, slot='previous')
             if prev_snap and curr_snap:
-                prev_hosts = set((h['host'] if isinstance(h, dict) else h for h in prev_snap.get('hosts', [])))
-                curr_hosts = set((h['host'] if isinstance(h, dict) else h for h in curr_snap.get('hosts', [])))
-                new_hosts = curr_hosts - prev_hosts
-                removed_hosts = prev_hosts - curr_hosts
-                changed = len(curr_hosts & prev_hosts)
-                if new_hosts or removed_hosts:
-                    log(f'  🔍 Diff: +{len(new_hosts)} new / -{len(removed_hosts)} removed / {changed} unchanged')
-                    diff = {'new': list(new_hosts), 'removed': list(removed_hosts), 'changed': []}
+                diff = snapshot_diff(prev_snap.get('hosts', []), curr_snap.get('hosts', []))
+                if diff['new'] or diff['removed'] or diff['changed']:
+                    log(f"  🔍 Diff: +{len(diff['new'])} new / -{len(diff['removed'])} removed / {len(diff['changed'])} changed")
                     try:
-                        from alerting import AlertEngine
+                        # antes: "from alerting import" (o atalho da raiz não existe mais → ImportError engolido)
+                        # e diff sem "diff": "ok" e com hosts como texto — nenhum alerta saía
+                        from utils.alerting import AlertEngine
                         engine = AlertEngine(self.db, self.base, self.get_settings)
                         alerts = engine.process_scan_diff(cid, diff)
                         if alerts:

@@ -101,6 +101,7 @@
 ### Gestão e relatórios
 - **Triagem de findings** — status persistido (aberto/em progresso/corrigido/risco aceito) por finding
 - **Alertas configuráveis** — CRUD completo de regras (tipo, canais, ativar/desativar) por empresa
+- **Vigilância contínua** (`core/watch.py`) — enumeração passiva (subfinder) + checagem 80/443 com filtro de curinga + diff contra o inventário. Cada mudança (host novo, voltou a responder, parou de responder após 2 vigilâncias, título/status/tecnologia nova) vira alerta e os webhooks recebem o evento `surface_change`. Botão "Monitorar agora" ou agenda com perfil `watch` (`watch_active` também roda o scan ativo só nos hosts que mudaram)
 - **Busca global (Ctrl+K)** — pesquisa empresas, domínios, hosts, pessoas e findings
 - **Exportação de relatórios** — HTML e PDF (via impressão do navegador)
 - **Pivot de e-mails/funcionários** — contatos com links para LinkedIn, HaveIBeenPwned e Google
@@ -223,7 +224,9 @@ psycopg2-binary>=2.9 (opcional), celery>=5.3 (opcional), redis>=5.0 (opcional)
 | `ASM_WATCHDOG_MAX_LOAD` | 4 | Pausa fila se load > N |
 | `ASM_WATCHDOG_MIN_MEM_MB` | 1536 | Pausa fila se RAM livre < N MB |
 | `ASM_WATCHDOG_MAX_RECON_PROCS` | 10 | Pausa fila se subprocessos > N |
-| `ASM_ENABLE_SCHEDULED_SCANS` | 0 | Liga scans agendados automáticos |
+| `ASM_ENABLE_SCHEDULED_SCANS` | 0 | Liga o scan **completo** agendado (a agenda de vigilância `watch` roda sempre) |
+| `ASM_LOG_POLLING` | 0 | 1 = volta a registrar no log o polling da tela |
+| `ASM_LOG_ROTATE_MB` | 20 | `restart_server.sh` gira o `server.log` acima disso (guarda 3 `.gz`) |
 | `ASM_AUTO_PROFILE` | 1 | Auto-detecção de recursos da VPS |
 
 ---
@@ -295,6 +298,15 @@ curl http://localhost:5000/api/screenshots/example-inc \
 # Exportar relatório
 curl "http://localhost:5000/api/export/example-inc?format=html" \
   -H "X-Auth-Token: $TOKEN"
+
+# Vigilância: enfileira (202) / última execução
+curl -X POST http://localhost:5000/api/monitor/example-inc -H "X-Auth-Token: $TOKEN"
+curl http://localhost:5000/api/monitor/example-inc -H "X-Auth-Token: $TOKEN"
+
+# Agenda de vigilância a cada 6h
+curl -X POST http://localhost:5000/api/schedule/example-inc \
+  -H "X-Auth-Token: $TOKEN" -H "Content-Type: application/json" \
+  -d '{"enabled":true,"interval_hours":6,"profile":"watch"}'
 
 # Limpar dados de scan
 curl -X DELETE http://localhost:5000/api/recon/example-inc/data \

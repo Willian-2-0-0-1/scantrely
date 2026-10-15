@@ -4,6 +4,14 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 
 ## [Não lançado] - 2026-10-15
 
+### Vigilância contínua
+
+- **`core/watch.py`**: job `watch` (passivo com subfinder + checagem 80/443 com filtro de curinga + diff contra o inventário), ~40s para 350 hosts. Cada mudança vira alerta (host novo, voltou a responder, parou de responder após 2 vigilâncias seguidas, status/título/tecnologia nova; IP não conta) e os webhooks recebem `surface_change`. Primeira vigilância de um domínio recém-adicionado é linha de base: grava tudo e gera um alerta só.
+- Sem alarme falso por curinga (hosts iguais ao curinga não contam como mortos; 3 canários por zona; página de erro idêntica em ≥ 5 hosts de zona com curinga é do curinga) nem por desafio anti-bot ("Just a moment…"). Medido: 3 vigilâncias seguidas sem mudança real → 0, 0 e 1 alerta.
+- "Monitorar agora" enfileira a vigilância e mostra o resumo (antes disparava o pipeline completo; a rota `/api/monitor` antiga olhava 15 hosts e não gravava nada). `GET /api/monitor/<id>` devolve a última.
+- Agenda: perfil `watch` (ou `watch_active`, que também roda o scan ativo só nos hosts que mudaram) sempre roda; o scan completo agendado continua dependendo de `ASM_ENABLE_SCHEDULED_SCANS=1`. O botão de agenda cria vigilância (sugestão: 6h).
+- Alertas por diff de scan nunca saíam: o import era `from alerting` (atalho da raiz removido) e o diff ia sem `"diff": "ok"` e com hosts como texto. Corrigido (`snapshot_diff`).
+
 ### Scan
 
 - **DNS curinga**: o `dns_brute` resolve rótulos aleatórios em cada zona e descarta nomes que só apontam para o IP do curinga (`drop_wildcard_hits`). Num scan real, 473 de 525 hosts eram o curinga.

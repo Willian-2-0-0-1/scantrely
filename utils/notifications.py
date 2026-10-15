@@ -40,6 +40,7 @@ EVENT_TITLES = {
     "scan_error":      "❌ Scan error",
     "critical_finding": "🚨 Critical finding",
     "new_host":        "🆕 New host discovered",
+    "surface_change":  "👀 Attack surface changed",
     "new_port":        "🔌 New port",
     "new_tech":        "🔧 Tech stack change",
     "status_change":   "📡 Status change",

@@ -566,3 +566,166 @@ def test_js_recon_respects_module_budget(monkeypatch):
     out = jr.run_js_recon(["x.com"], [{"host": "app.x.com", "ports": ["443"], "status_code": 200}])
     assert time.time() - t < 4.5
     assert out["js_files_found"] == 0                 # nada chegou no prazo, mas o módulo devolveu
+
+
+# ── item 3: vigilância contínua ─────────────────────────────────────────────
+from core import watch as W
+
+
+def test_diff_surface_kinds():
+    before = {"a.x.com": {"host": "a.x.com", "status_code": 200, "title": "A", "technologies": ["nginx"]},
+              "b.x.com": {"host": "b.x.com", "status_code": None},
+              "c.x.com": {"host": "c.x.com", "status_code": 200, "title": "C"},
+              "d.x.com": {"host": "d.x.com", "status_code": 200, "title": "D"}}
+    probed = {"a.x.com": {"status_code": 200, "title": "A2", "technologies": ["nginx", "PHP"]},
+              "b.x.com": {"status_code": 200, "title": "B"},
+              "d.x.com": {"status_code": 200, "title": "D", "ip": "9.9.9.9"},     # IP não conta
+              "new.x.com": {"status_code": 200, "title": "N"}}
+    out = {(c["kind"], c["host"]) for c in W.diff_surface(before, probed, {"quiet.x.com"}, set(before) | {"new.x.com"})}
+    assert out == {("changed", "a.x.com"), ("came_alive", "b.x.com"), ("not_responding", "c.x.com"),
+                   ("new_host_live", "new.x.com"), ("new_host", "quiet.x.com")}
+
+
+class _WatchDB:
+    def __init__(self, hosts):
+        self.data = {"companies": [{"id": "co", "domains": ["x.com"], "hosts": hosts}]}
+        self.alerts, self.history = [], []
+
+    def load_asm_data(self):
+        return __import__("copy").deepcopy(self.data)
+
+    def save_asm_data(self, data):
+        self.data = data
+
+    def create_alert(self, cid, rule_type, title, desc, sev, data):
+        self.alerts.append((rule_type, title, sev))
+
+    def insert_subdomain_history(self, cid, host, event, *a, **k):
+        self.history.append((host, event))
+
+    def load_webhooks(self):
+        return []
+
+
+def _watch_runner(tmp_path, db, passive, live):
+    r = types.SimpleNamespace(db=db, base=tmp_path, get_settings=lambda: {})
+    r._active_scan_domains = lambda d: list(d)
+    r._run_tool = lambda tool, d, **k: {"findings": [{"type": "subdomain", "value": n} for n in passive]}
+    r._host_in_scope = lambda h, d: h.endswith(".x.com")
+    r._load_hosts = lambda cid: db.load_asm_data()["companies"][0]["hosts"]
+    r.probe_calls = []
+
+    def probe(targets, cid, _expand_redirects=True, extra_ports=True, wildcard_out=None):
+        r.probe_calls.append((sorted(targets), extra_ports))
+        return [dict(h) for h in live]
+    r._probe_hosts_with_httpx = probe
+    return r
+
+
+def test_run_watch_end_to_end(tmp_path):
+    db = _WatchDB([{"host": "a.x.com", "status_code": 200, "title": "A"},
+                   {"host": "gone.x.com", "status_code": 200, "title": "G"}])
+    live = [{"host": "a.x.com", "status_code": 200, "title": "A"},
+            {"host": "new.x.com", "status_code": 200, "title": "Novo"}]
+    r = _watch_runner(tmp_path, db, ["new.x.com", "evil.com"], live)
+    s1 = W.run_watch(r, "co", {"domains": ["x.com"], "name": "Co"})
+    assert r.probe_calls[0] == (["a.x.com", "gone.x.com", "new.x.com"], False)   # só 80/443; fora do escopo saiu
+    assert s1["counts"] == {"new_host_live": 1}                                    # gone: 1ª falha ainda não conta
+    assert [a[0] for a in db.alerts] == ["surface_new_host_live"]
+    assert db.history == [("new.x.com", "new")]
+    assert (tmp_path / "scans" / "co" / "watch_last.json").exists()
+    s2 = W.run_watch(r, "co", {"domains": ["x.com"], "name": "Co"})
+    assert s2["counts"] == {"went_dead": 1}                                        # 2ª falha seguida
+    hosts = {h["host"]: h for h in db.data["companies"][0]["hosts"]}
+    assert hosts["gone.x.com"]["status_code"] is None and hosts["new.x.com"]["status_code"] == 200
+
+
+def test_watch_job_and_optional_active_followup(tmp_path):
+    from core.jobs import JobScheduler
+    created = []
+
+    class DB:
+        def find_active_job(self, **k): return None
+        def create_job(self, **k): created.append(k); return {"id": str(len(created)), **k}
+        def finish_job(self, *a, **k): pass
+
+    js = JobScheduler(db=DB(), load_companies=lambda: [{"id": "co", "domains": ["x.com"]}],
+                      run_pipeline=lambda *a: None, pipeline_state={},
+                      run_watch=lambda cid, co, opts: {"active_targets": ["new.x.com"]})
+    js._execute({"id": "w1", "job_type": "watch", "company_id": "co", "options": {}})
+    assert created == []                                       # padrão: só vigia
+    js._execute({"id": "w2", "job_type": "watch", "company_id": "co", "options": {"active_on_change": True}})
+    assert created[0]["job_type"] == "pipeline" and created[0]["options"]["active_hosts"] == ["new.x.com"]
+
+
+def test_snapshot_diff_matches_alert_engine_format():
+    from utils.alerting import AlertEngine
+    d = P.snapshot_diff([{"host": "a.x.com", "status_code": 200}, "old.x.com"],
+                        [{"host": "a.x.com", "status_code": 403, "technologies": ["PHP"]}, {"host": "new.x.com"}])
+    assert d["diff"] == "ok"
+    assert [h["host"] for h in d["new"]] == ["new.x.com"] and d["removed"] == [{"host": "old.x.com"}]
+    assert d["changed"][0]["changes"]["status_code"] == {"old": 200, "new": 403}
+    fired = []
+
+    class Eng(AlertEngine):
+        def _get_active_rules(self, cid):
+            return [{"rule_type": t, "enabled": True} for t in ("new_host", "status_change", "new_tech")]
+
+        def _fire(self, rule_type, cid, rules, data):
+            fired.append(rule_type)
+            return []
+
+    Eng(None, Path("."), lambda: {}).process_scan_diff("co", d)
+    assert sorted(fired) == ["new_host", "new_host", "new_tech", "status_change"]
+
+
+def test_first_watch_of_new_domain_is_a_baseline(tmp_path):
+    db = _WatchDB([{"host": "a.x.com", "status_code": 200, "title": "A"}])
+    live = [{"host": "a.x.com", "status_code": 200, "title": "A"},
+            {"host": "app.y.com", "status_code": 200, "title": "Y"},
+            {"host": "new.x.com", "status_code": 200, "title": "Novo"}]
+    r = _watch_runner(tmp_path, db, ["app.y.com", "old.y.com", "new.x.com"], live)
+    r._host_in_scope = lambda h, d: h.endswith((".x.com", ".y.com"))
+    s = W.run_watch(r, "co", {"domains": ["x.com", "y.com"], "name": "Co"})
+    assert s["baseline_domains"] == ["y.com"]
+    assert sorted(a[0] for a in db.alerts) == ["surface_baseline", "surface_new_host_live"]   # y.com: 1 alerta só
+    assert s["active_targets"] == ["new.x.com"]                                            # linha de base não vira scan ativo
+    hosts = {h["host"] for h in db.data["companies"][0]["hosts"]}
+    assert {"app.y.com", "old.y.com"} <= hosts                                              # mas fica gravado
+
+
+def test_wildcard_match_is_not_reported_as_dead():
+    before = {"admin.x.com": {"host": "admin.x.com", "status_code": 200, "title": "Wild"}}
+    out = W.diff_surface(before, {}, set(), {"admin.x.com"}, wildcard={"admin.x.com"})
+    assert out == []
+    assert [c["kind"] for c in W.diff_surface(before, {}, set(), {"admin.x.com"})] == ["not_responding"]
+
+
+def test_antibot_challenge_flap_is_not_a_change():
+    before = {"a.x.com": {"host": "a.x.com", "status_code": 403, "title": "Just a moment..."}}
+    probed = {"a.x.com": {"status_code": 301, "title": ""}}
+    assert W.diff_surface(before, probed, set(), {"a.x.com"}) == []
+    real = {"a.x.com": {"status_code": 200, "title": "Admin"}}
+    before2 = {"a.x.com": {"host": "a.x.com", "status_code": 404, "title": "Not found"}}
+    assert [c["kind"] for c in W.diff_surface(before2, real, set(), {"a.x.com"})] == ["changed"]
+
+
+def test_identical_error_pages_in_wildcard_zone_are_clustered():
+    fp404 = {"443": {"status": 404, "title": "404 Not Found", "words": 76, "lines": 14}}
+    host_data = {f"h{i}.x.com": {} for i in range(6)}
+    host_data["real.x.com"] = {}
+    host_fp = {h: fp404 for h in host_data}
+    host_fp["real.x.com"] = {"443": {"status": 404, "title": "API", "words": 12, "lines": 3}}
+    canary = {"x.com": [{"status": 404, "title": "404 Not Found", "words": 10, "lines": 8}]}
+    hits = P._clustered_error_pages(host_data, host_fp, canary, protected={"x.com"}, already=set())
+    assert sorted(hits) == [f"h{i}.x.com" for i in range(6)]
+    # grupo pequeno não basta; e zona sem curinga não entra
+    few = {h: host_data[h] for h in list(host_data)[:3]}
+    assert P._clustered_error_pages(few, host_fp, canary, set(), set()) == []
+    assert P._clustered_error_pages(host_data, host_fp, {}, set(), set()) == []
+
+
+def test_watch_severity_depends_on_response():
+    assert W._severity({"kind": "came_alive", "status_code": 200}) == "medium"
+    assert W._severity({"kind": "came_alive", "status_code": 404}) == "low"
+    assert W._severity({"kind": "went_dead"}) == "info"
