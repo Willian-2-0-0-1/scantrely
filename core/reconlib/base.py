@@ -109,7 +109,39 @@ class _GatedSubprocess:
 subprocess = _GatedSubprocess()
 
 
+# ── cancelamento cooperativo ──
+# Thread não se mata em Python: quando o pipeline desiste de um módulo (timeout), ele liga o
+# evento da thread do módulo e http_get/_subp param na próxima chamada em vez de seguir
+# disputando rede e vagas de processo com os módulos seguintes.
+_CANCEL = threading.local()
+
+
+def bind_cancel(event) -> None:
+    _CANCEL.event = event
+
+
+def current_cancel():
+    return getattr(_CANCEL, "event", None)
+
+
+class _AnyEvent:
+    """is_set() verdadeiro se qualquer um dos eventos estiver ligado."""
+
+    def __init__(self, *events):
+        self._events = [e for e in events if e is not None]
+
+    def is_set(self) -> bool:
+        return any(e.is_set() for e in self._events)
+
+
+def cancelled() -> bool:
+    ev = current_cancel()
+    return bool(ev is not None and ev.is_set())
+
+
 def _subp(cmd, **kw):
+    if cancelled():
+        raise RuntimeError("módulo cancelado (tempo esgotado)")
     _ct.trace(cmd)
     _rl.wait()
     return subprocess.run(cmd, **kw)
@@ -135,8 +167,16 @@ def run_bounded(fn, items, *, workers: int = 8, budget: float = MODULE_BUDGET_S,
     items = list(items)
     if not items:
         return True
+    parent_cancel = current_cancel()
+    expired = threading.Event()
+    combined = _AnyEvent(parent_cancel, expired)
+
+    def _bound(it):
+        bind_cancel(combined)   # para no cancelamento do módulo ou no fim do prazo daqui
+        return fn(it)
+
     ex = ThreadPoolExecutor(max_workers=max(1, min(workers, len(items))), thread_name_prefix=f"rb-{label[:10]}")
-    futures = [ex.submit(fn, it) for it in items]
+    futures = [ex.submit(_bound, it) for it in items]
     try:
         for fut in as_completed(futures, timeout=budget):
             try:
@@ -145,6 +185,7 @@ def run_bounded(fn, items, *, workers: int = 8, budget: float = MODULE_BUDGET_S,
                 _log.debug("run_bounded %s: item falhou", label, exc_info=True)
         return True
     except _FutTimeout:
+        expired.set()
         done = sum(1 for f in futures if f.done())
         _log.info("run_bounded %s: prazo de %.0fs esgotado — %s de %s itens concluídos", label, budget, done, len(items))
         return False
@@ -330,6 +371,8 @@ def http_get(url: str, timeout: int = 10, retries: int = 3,
     attempts = max(1, int(retries or 1))
 
     for attempt in range(attempts):
+        if cancelled():
+            return 0, b"", {"X-Cancelled": "1"}
         if not br.allow():
             return 0, b"", {"X-Circuit-Breaker": "open"}
         _rate_wait(domain)

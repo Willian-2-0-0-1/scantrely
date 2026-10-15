@@ -501,27 +501,18 @@ class SubfinderTool(CommandTool):
             }
             providers = {k: v for k, v in providers.items() if v}
 
+        # -all: medido em 15/10/2026, todas as fontes levam ~10s por domínio e
+        # incluem fontes sem chave que a lista fixa deixava de fora (thc, shodanct, hudsonrock…).
+        # crtsh fica de fora: oscila de 1s a 2min e o módulo certs já consulta crt.sh/certspotter/Shodan CT
+        cmd.extend(["-all", "-es", "crtsh"])
         if providers:
-            # Use specific sources only — avoid -all which queries too many slow APIs
-            fast_sources = [
-                "alienvault", "anubis", "bevigil", "censys",
-                "certspotter", "chaos", "commoncrawl", "crtsh", "dnsdb",
-                "fullhunt", "github", "hackertarget",
-                "intelx", "leakix", "netlas", "rapiddns", "securitytrails",
-                "shodan", "urlscan", "virustotal", "waybackarchive"
-            ]
-            cmd.extend(["-sources", ",".join(fast_sources)])
             cfg_path = f"/tmp/subfinder_cfg_{target.replace('.','_')}.yaml"
-            with open(cfg_path, "w") as f:
+            fd = os.open(cfg_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # tem chaves de API
+            with os.fdopen(fd, "w") as f:
                 import yaml
                 yaml.dump(providers, f)
             self._tmp_cfg = cfg_path
             cmd.extend(["-pc", cfg_path])
-        else:
-            # No API keys — fast free public sources only. Dropped commoncrawl
-            # and waybackarchive (notoriously slow for subdomain enumeration).
-            cmd.extend(["-sources",
-                "alienvault,anubis,crtsh,hackertarget,rapiddns,urlscan"])
         return cmd
 
     def run(self, target: str, opts: dict | None = None) -> ToolResult:
@@ -1763,7 +1754,8 @@ class AlienvaultOtxTool(ApiTool):
         url = f"https://otx.alienvault.com/api/v1/indicators/domain/{target}/passive_dns"
         with self._http_open(
             url,
-            headers={"User-Agent": "ASM-Platform/1.0", "X-OTX-API-KEY": opts.get("otx_key", "")},
+            headers={"User-Agent": "ASM-Platform/1.0",
+                     "X-OTX-API-KEY": opts.get("otx_key") or (opts.get("settings") or {}).get("otx_key", "")},
             timeout=20,
         ) as r:
             data = json.loads(r.read())

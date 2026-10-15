@@ -187,3 +187,130 @@ def test_domain_still_queued_keeps_pipeline_running(tmp_path):
 def test_single_job_run_is_unaffected(tmp_path):
     r = _runner(tmp_path, _JobsDB({"other.com"}))
     assert r._other_queue_domains_pending("co", "") == set()
+
+
+# ── curinga por resposta HTTP (canário) ──────────────────────────────────────
+def _fp(status=404, title="404 Not Found", words=10, lines=8, md5=""):
+    return {"status": status, "title": title, "words": words, "lines": lines, "md5": md5}
+
+
+def test_same_response_tolerates_small_dynamic_changes():
+    assert P._same_response(_fp(words=1000, lines=100), _fp(words=1010, lines=101))
+    assert not P._same_response(_fp(words=1000), _fp(words=1200))
+    assert not P._same_response(_fp(title="A"), _fp(title="B"))
+    assert P._same_response(_fp(words=1, md5="h"), _fp(words=999, md5="h"))
+
+
+def test_wildcard_match_uses_pool_from_all_ports_and_parent_zones():
+    canary = {"x.com": [_fp(words=10)], "stg.x.com": [_fp(words=76, lines=14)]}
+    # 443 bate com o curinga de x.com e 80 com o de stg.x.com: o balanceador alterna páginas
+    assert P._matches_wildcard("mail.stg.x.com", {"443": _fp(words=10), "80": _fp(words=76, lines=14)}, canary)
+    # uma resposta própria em qualquer porta mantém o host
+    assert not P._matches_wildcard("app.stg.x.com", {"443": _fp(words=10), "8443": _fp(200, "App", 500, 40)}, canary)
+    assert not P._matches_wildcard("a.other.com", {"443": _fp()}, canary)
+
+
+def _fake_httpx(tmp_path, monkeypatch, by_stage):
+    """by_stage: {'80,443': [linhas], 'extra': [linhas]}; registra os alvos de cada etapa."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(exist_ok=True)
+    (fake_bin / "httpx").write_text("")
+    monkeypatch.setattr(P, "BIN_DIR", fake_bin)
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        ports = cmd[cmd.index("-ports") + 1]
+        stage = "80,443" if ports == "80,443" else "extra"
+        seen[stage] = Path(cmd[cmd.index("-l") + 1]).read_text().split()
+        rows = [r for r in by_stage.get(stage, []) if r["input"] in seen[stage]]
+        Path(cmd[cmd.index("-o") + 1]).write_text("".join(__import__("json").dumps(r) + "\n" for r in rows))
+
+    monkeypatch.setattr(P.subprocess, "run", fake_run)
+    return seen
+
+
+def test_extra_ports_only_off_cdn_and_real_port_recorded(tmp_path, monkeypatch):
+    seen = _fake_httpx(tmp_path, monkeypatch, {
+        "80,443": [{"input": "cdn.x.com", "port": "443", "status_code": 200, "cdn": True, "cdn_name": "cloudflare"},
+                   {"input": "own.x.com", "port": "443", "status_code": 200}],
+        "extra": [{"input": "own.x.com", "port": "8080", "status_code": 200}],
+    })
+    r = _runner(tmp_path)
+    monkeypatch.setattr(r, "_wildcard_canaries", lambda names, cid: {})
+    monkeypatch.setattr(r, "_company_domains", lambda cid: [])
+    live = {h["host"]: h for h in r._probe_hosts_with_httpx(["cdn.x.com", "own.x.com", "dead.x.com"], "co")}
+    assert seen["extra"] == ["own.x.com", "dead.x.com"]
+    assert live["own.x.com"]["ports"] == ["443", "8080"]
+    assert live["cdn.x.com"]["ports"] == ["443"]
+
+
+def test_canary_drops_wildcard_pages_but_keeps_scope_and_real(tmp_path, monkeypatch):
+    page = {"status_code": 404, "title": "404 Not Found", "words": 10, "lines": 8, "port": "443"}
+    _fake_httpx(tmp_path, monkeypatch, {"80,443": [
+        {"input": "sctw-1.x.com", **page},
+        {"input": "junk.x.com", **page},
+        {"input": "x.com", **page},
+        {"input": "app.x.com", "status_code": 200, "title": "App", "words": 900, "lines": 50, "port": "443"},
+    ]})
+    r = _runner(tmp_path)
+    monkeypatch.setattr(r, "_wildcard_canaries", lambda names, cid: {"sctw-1.x.com": "x.com"})
+    monkeypatch.setattr(r, "_company_domains", lambda cid: ["x.com"])
+    live = {h["host"] for h in r._probe_hosts_with_httpx(["junk.x.com", "x.com", "app.x.com"], "co")}
+    assert live == {"x.com", "app.x.com"}
+
+
+# ── cancelamento cooperativo ────────────────────────────────────────────────
+def test_module_timeout_signals_cancel_to_the_abandoned_thread(tmp_path, monkeypatch):
+    monkeypatch.setitem(P._MODULE_TIMEOUTS, "slow_mod", 1)
+    seen = []
+
+    def slow():
+        time.sleep(1.5)
+        seen.append(base.cancelled())
+        seen.append(base.http_get("http://127.0.0.1:9/")[2].get("X-Cancelled"))
+
+    out = _runner(tmp_path)._invoke_module("slow_mod", slow)
+    assert out["status"] == "timeout"
+    time.sleep(1)
+    assert seen == [True, "1"]
+
+
+def test_run_bounded_expiry_stops_in_flight_items():
+    seen = []
+
+    def work(i):
+        time.sleep(0.6)
+        seen.append(base.cancelled())
+
+    assert base.run_bounded(work, [1], workers=1, budget=0.2) is False
+    time.sleep(0.8)
+    assert seen == [True]
+
+
+# ── fontes passivas ─────────────────────────────────────────────────────────
+def test_subfinder_uses_all_sources_without_crtsh_and_private_key_file():
+    import os
+    from utils.tools import registry
+    t = registry.get("subfinder")
+    cmd = t.command("x.com", {"settings": {"virustotal_key": "k"}})
+    try:
+        assert "-all" in cmd and cmd[cmd.index("-es") + 1] == "crtsh"
+        assert oct(os.stat(t._tmp_cfg).st_mode & 0o777) == "0o600"
+    finally:
+        os.unlink(t._tmp_cfg)
+
+
+def test_otx_key_comes_from_settings(monkeypatch):
+    import contextlib, io
+    from utils.tools import registry
+    t = registry.get("alienvault_otx")
+    sent = {}
+
+    @contextlib.contextmanager
+    def fake_open(url, headers=None, **kw):
+        sent.update(headers or {})
+        yield io.BytesIO(b'{"passive_dns": []}')
+
+    monkeypatch.setattr(t, "_http_open", fake_open)
+    t.run_api("x.com", {"settings": {"otx_key": "abc"}})
+    assert sent["X-OTX-API-KEY"] == "abc"

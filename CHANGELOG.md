@@ -11,6 +11,11 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 - **gowitness**: uma URL por host com esquema e porta explícitos (`https://host:443` ou `http://host:80`); antes eram 4 capturas por host.
 - `host_header_injection`, `open_redirect`, `waf_bypass`, `smtp_probe` e `infra_exposure` rodam em paralelo com prazo interno de 150s (`run_bounded`) e devolvem o parcial em vez de estourar os 180s do módulo; `vendor_fp` passou a respeitar o mesmo prazo.
 - **Fila por domínio**: o primeiro domínio a terminar marcava o pipeline da empresa como concluído com outro ainda rodando; agora só o último fecha o status.
+- **Curinga por resposta HTTP**: a sondagem pede 2 nomes aleatórios por zona com curinga; host cujas respostas são todas páginas do curinga não conta como vivo (escopo e `www.` do escopo nunca saem).
+- **httpx em duas etapas**: 80/443 em todos; as outras 8 portas só fora de CDN. A porta registrada é a real (antes 8080 virava 80).
+- **Cancelamento cooperativo**: módulo que estoura o prazo tem `http_get`/subprocessos cancelados na próxima chamada, em vez de seguir disputando rede com os módulos seguintes.
+- **subfinder** com `-all -es crtsh` (~9s estáveis por domínio; crt.sh oscilava até 2 min e já é consultado pelo módulo `certs`); arquivo temporário de chaves com permissão 600.
+- AlienVault OTX passou a usar a chave das Configurações (antes ia vazia e tomava 429).
 - Corrigidos: `infra_exposure` lia `(status, body)` invertido e nunca reportava Kubernetes/Docker/etcd expostos; `waf_bypass` tratava falha de rede (status 0) como bypass de severidade alta; `smtp_probe` reportava "STARTTLS ausente" quando o EHLO nem respondia.
 
 ## [1.4.0] - 2026-10-09

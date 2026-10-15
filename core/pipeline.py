@@ -18,6 +18,7 @@ import time
 from urllib.parse import urlparse
 from collections import defaultdict
 import concurrent.futures
+import secrets
 from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed_pool
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,7 @@ PIPELINE_PROFILES = {'bug_bounty': {'active': True, 'active_max_hosts': 40, 'cra
 from utils import cmd_trace as _ct
 from utils import rate_limiter as _rl
 from utils.tool_gate import gate_for as _gate_for
+from core.reconlib.base import bind_cancel as _bind_cancel, cancelled as _module_cancelled
 from flask import jsonify
 _SUBPROCESS_CONTEXT = threading.local()
 
@@ -49,6 +51,8 @@ class _GatedSubprocess:
         return getattr(_subprocess_real, name)
 
     def run(self, cmd, **kw):
+        if _module_cancelled():
+            raise RuntimeError('módulo cancelado (tempo esgotado)')
         tool = 'tool'
         try:
             first = cmd[0] if isinstance(cmd, (list, tuple)) and cmd else str(cmd).split()[0]
@@ -107,6 +111,35 @@ def _is_responsive(h: dict) -> bool:
     """Standard host liveness check. Uses fields that are actually set during scans:
     status_code (httpx probes), ports (naabu/masscan), title (httpx)."""
     return bool(h.get('status_code') is not None or h.get('ports') or h.get('title'))
+
+_HTTPX_EXTRA_PORTS = '3000,5601,8080,8443,8888,9000,9090,9200'
+
+def _httpx_item_host(item: dict) -> str:
+    return str(item.get('input', '')).split(':')[0].replace('https://', '').replace('http://', '').lower()
+
+def _response_fp(item: dict) -> dict:
+    return {'status': item.get('status_code'), 'title': (item.get('title') or '').strip(), 'words': int(item.get('words') or 0), 'lines': int(item.get('lines') or 0), 'md5': ((item.get('hash') or {}).get('body_md5') or '')}
+
+def _same_response(a: dict, b: dict) -> bool:
+    """Mesma página: status e título iguais e corpo igual (hash) ou quase igual (palavras/linhas ±2%)."""
+    if a.get('status') != b.get('status') or a.get('title') != b.get('title'):
+        return False
+    if a.get('md5') and a.get('md5') == b.get('md5'):
+        return True
+    def close(x, y, floor):
+        return abs(x - y) <= max(floor, 0.02 * max(x, y))
+    return close(a.get('words', 0), b.get('words', 0), 3) and close(a.get('lines', 0), b.get('lines', 0), 2)
+
+def _matches_wildcard(host: str, fps_by_port: dict, canary_fp: dict) -> bool:
+    """Todas as respostas do host são páginas do curinga (vistas em nomes aleatórios da zona ou
+    das zonas acima). O curinga pode alternar entre páginas por porta/backend, então vale qualquer
+    página do conjunto; uma resposta própria em qualquer porta mantém o host."""
+    pool = []
+    zone = host.split('.', 1)[1] if '.' in host else ''
+    while zone:
+        pool += canary_fp.get(zone, [])
+        zone = zone.split('.', 1)[1] if '.' in zone else ''
+    return bool(pool) and bool(fps_by_port) and all(any(_same_response(f, c) for c in pool) for f in fps_by_port.values())
 
 def _gowitness_target(h: dict) -> str:
     """Uma URL por host com esquema e porta explícitos. Só com o nome, o gowitness tenta
@@ -1428,9 +1461,15 @@ class ReconRunner:
         """Run a module callable with a hard timeout so hung tools cannot stall a phase."""
         timeout_s = int(_MODULE_TIMEOUTS.get(module, _DEFAULT_MODULE_TIMEOUT))
         ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f'sc-{module[:12]}')
+        cancel = threading.Event()
+
+        def _run():
+            _bind_cancel(cancel)
+            return fn()
         try:
-            return ex.submit(fn).result(timeout=timeout_s)
+            return ex.submit(_run).result(timeout=timeout_s)
         except concurrent.futures.TimeoutError:
+            cancel.set()   # a thread não morre, mas http_get/_subp/subprocess param na próxima chamada
             return {'status': 'timeout', 'reason': f'Timeout ({timeout_s}s)', 'timeout': True}
         finally:
             ex.shutdown(wait=False, cancel_futures=True)
@@ -2563,6 +2602,65 @@ class ReconRunner:
         log.debug('_probe_hosts_python_fallback returning %s live hosts', len(results))
         return results
 
+    def _run_httpx(self, httpx_bin: str, targets: list[str], ports: str, extra_headers: list[str] | None, cid: str) -> list[dict]:
+        """Uma rodada do httpx; devolve as linhas JSON (parciais se o prazo estourar)."""
+        if not targets:
+            return []
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tf:
+            tf.write('\n'.join(targets))
+            tf_path = tf.name
+        probe_timeout = max(300, min(3600, len(targets) * 2))
+        out_path = tf_path + '.jsonl'
+        try:
+            httpx_threads = str(int(os.environ.get('ASM_HTTPX_THREADS', '25') or 25))
+            httpx_rate = str(int(os.environ.get('ASM_HTTPX_RATE_LIMIT', '50') or 50))
+            # -stream + -o: sem -stream o httpx só escreve a saída no fim, e um timeout perdia a sondagem inteira
+            cmd = [httpx_bin, '-l', tf_path, '-silent', '-json', '-stream', '-o', out_path, '-status-code', '-title', '-server', '-tech-detect', '-content-length', '-hash', 'md5', '-ports', ports, '-follow-redirects', '-max-redirects', '3', '-location', '-timeout', '8', '-threads', httpx_threads, '-rate-limit', httpx_rate]
+            if extra_headers:
+                for h in extra_headers:
+                    cmd.insert(1, '-H')
+                    cmd.insert(2, h)
+            try:
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=probe_timeout)
+            except subprocess.TimeoutExpired:
+                log.warning('httpx: tempo esgotado (%ss) com %s alvos para %s — usando o resultado parcial', probe_timeout, len(targets), cid)
+            output = Path(out_path).read_text(encoding='utf-8', errors='replace') if Path(out_path).exists() else ''
+        except Exception as e:
+            log.exception('ERROR in _probe_hosts_with_httpx: %s', e)
+            return []
+        finally:
+            Path(tf_path).unlink(missing_ok=True)
+            Path(out_path).unlink(missing_ok=True)
+        items = []
+        for line in output.strip().splitlines():
+            try:
+                items.append(json.loads(line))
+            except Exception:
+                continue
+        return items
+
+    def _wildcard_canaries(self, names: list[str], cid: str, max_zones: int = 30) -> dict[str, str]:
+        """{nome aleatório: zona} para cada zona-mãe dos nomes que tem DNS curinga."""
+        from collections import Counter
+        from core.reconlib.dnsutil import _wildcard_ips
+        scope = [self._normalize_scope_name(d) for d in self._company_domains(cid) or []]
+        scope = [d for d in scope if d and not self._is_wildcard_scope(d)]
+        zones: Counter = Counter()
+        for n in names:
+            n = str(n).lower().strip('.')
+            parent = n.split('.', 1)[1] if '.' in n else ''
+            if parent and any(parent == d or parent.endswith('.' + d) for d in scope):
+                zones[parent] += 1
+        for d in scope:
+            zones[d] += 0
+        probe = [z for z, _ in zones.most_common(max_zones)]
+        if not probe:
+            return {}
+        with ThreadPoolExecutor(max_workers=min(20, len(probe))) as ex:
+            wild = [z for z, ips in zip(probe, ex.map(_wildcard_ips, probe)) if ips]
+        # 2 por zona: o curinga pode alternar entre páginas padrão
+        return {f'sctw-{secrets.token_hex(5)}.{z}': z for z in wild for _ in range(2)}
+
     def _probe_hosts_with_httpx(self, subdomains: list[str], cid: str, extra_headers: list[str] | None=None, _expand_redirects: bool=True) -> list[dict]:
         log.debug('_probe_hosts_with_httpx called with %s subdomains for %s', len(subdomains), cid)
         httpx_bin = str(BIN_DIR / 'httpx') if (BIN_DIR / 'httpx').is_file() else None
@@ -2571,40 +2669,34 @@ class ReconRunner:
         if not httpx_bin:
             log.info('ProjectDiscovery httpx binary not found in bin/ — using Python fallback')
             return self._probe_hosts_python_fallback(subdomains)
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tf:
-            tf.write('\n'.join(subdomains))
-            tf_path = tf.name
-        probe_timeout = max(300, min(3600, len(subdomains) * 2))
-        out_path = tf_path + '.jsonl'
         try:
-            httpx_threads = str(int(os.environ.get('ASM_HTTPX_THREADS', '25') or 25))
-            httpx_rate = str(int(os.environ.get('ASM_HTTPX_RATE_LIMIT', '50') or 50))
-            # -stream + -o: sem -stream o httpx só escreve a saída no fim, e um timeout perdia a sondagem inteira
-            cmd = [httpx_bin, '-l', tf_path, '-silent', '-json', '-stream', '-o', out_path, '-status-code', '-title', '-server', '-tech-detect', '-content-length', '-ports', '80,443,3000,5601,8080,8443,8888,9000,9090,9200', '-follow-redirects', '-max-redirects', '3', '-location', '-timeout', '8', '-threads', httpx_threads, '-rate-limit', httpx_rate]
-            if extra_headers:
-                for h in extra_headers:
-                    cmd.insert(1, '-H')
-                    cmd.insert(2, h)
-            try:
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=probe_timeout)
-            except subprocess.TimeoutExpired:
-                log.warning('httpx: tempo esgotado (%ss) com %s alvos para %s — usando o resultado parcial', probe_timeout, len(subdomains), cid)
-            output = Path(out_path).read_text(encoding='utf-8', errors='replace') if Path(out_path).exists() else ''
-        except Exception as e:
-            log.exception('ERROR in _probe_hosts_with_httpx: %s', e)
-            return []
-        finally:
-            Path(tf_path).unlink(missing_ok=True)
-            Path(out_path).unlink(missing_ok=True)
-        log.debug('httpx completed, output has %s lines', len(output.strip().splitlines()))
+            canaries = self._wildcard_canaries(subdomains, cid)
+        except Exception as _e:
+            _ignore(_e, 'pipeline.py:wildcard_canaries')
+            canaries = {}
+        # etapa 1: 80/443 em todos (+ um nome aleatório por zona com curinga)
+        items = self._run_httpx(httpx_bin, list(subdomains) + list(canaries), '80,443', extra_headers, cid)
+        first: dict[str, dict] = {}
+        for it in items:
+            first.setdefault(_httpx_item_host(it), it)
+        # etapa 2: portas extras só fora de CDN (num IP de CDN só 80/443 levam à origem)
+        stage2 = [s for s in subdomains if s not in canaries and not (first.get(s) or {}).get('cdn')]
+        if stage2:
+            items += self._run_httpx(httpx_bin, stage2, _HTTPX_EXTRA_PORTS, extra_headers, cid)
+        log.debug('httpx completed, %s lines (%s em 80/443, %s na etapa 2)', len(items), len(first), len(stage2))
+        canary_fp: dict[str, list[dict]] = {}
         host_data: dict[str, dict] = {}
-        for line in output.strip().splitlines():
+        host_fp: dict[str, dict[str, dict]] = {}
+        for item in items:
             try:
-                item = json.loads(line)
-                host = item.get('input', '').split(':')[0].replace('https://', '').replace('http://', '')
+                host = _httpx_item_host(item)
                 if not host:
                     continue
-                port = '443' if item.get('scheme') == 'https' else '80'
+                port = str(item.get('port') or ('443' if item.get('scheme') == 'https' else '80'))
+                if host in canaries:
+                    canary_fp.setdefault(canaries[host], []).append(_response_fp(item))
+                    continue
+                host_fp.setdefault(host, {})[port] = _response_fp(item)
                 a_records = item.get('a') or []
                 ip = a_records[0] if a_records else ''
                 if host not in host_data:
@@ -2622,6 +2714,17 @@ class ReconRunner:
                     host_data[host]['ip'] = ip
             except Exception:
                 continue
+        if canary_fp:
+            protected = set()
+            for d in self._company_domains(cid) or []:
+                d = self._normalize_scope_name(d)
+                if d:
+                    protected |= {d, 'www.' + d}
+            wildcard_hits = [h for h in host_data if h not in protected and _matches_wildcard(h, host_fp.get(h, {}), canary_fp)]
+            for h in wildcard_hits:
+                del host_data[h]
+            if wildcard_hits:
+                log.info('[wildcard] %s: %s host(s) respondem igual a um nome aleatório da zona (%s) — fora da lista de vivos', cid, len(wildcard_hits), ', '.join(sorted(canary_fp)[:5]))
         log.debug('_probe_hosts_with_httpx returning %s hosts', len(host_data))
         results_list = list(host_data.values())
         if len(results_list) >= 5:
