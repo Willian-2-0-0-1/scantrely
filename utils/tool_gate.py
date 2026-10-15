@@ -48,6 +48,9 @@ DEFAULT_LIMITS = {
     # whatweb/wpscan rodam como "ruby …": o gate pega o nome do executável. Ruby pesado em paralelo
     # (vários domínios ao mesmo tempo) somava com o Chrome do gowitness e o watchdog pausava o scan.
     "ruby": _lim("ruby", 1),
+    # módulos Playwright rodam dentro do processo (não passam pelo gate de subprocesso) e abrem
+    # 3 navegadores cada; dois domínios na fase 8 juntos passaram de load 13 em 10s (15/10/2026)
+    "playwright": _lim("playwright", 1),
     "wpscan": _lim("wpscan", 1),
     "masscan": _lim("masscan", 1),
     "ffuf": _lim("ffuf", 2),

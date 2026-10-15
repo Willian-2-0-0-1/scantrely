@@ -894,7 +894,9 @@ def run_js_recon(domains: list, hosts: list) -> dict:
         pw_targets = targets[:15]
 
     if _left(reserve=60) > 30:
-        pw_result = _playwright_js_capture(pw_targets, timeout=25)
+        from utils.tool_gate import gate_for
+        with gate_for("playwright").slot():   # um módulo de navegador por vez na máquina
+            pw_result = _playwright_js_capture(pw_targets, timeout=25)
     else:
         _log.info("js: sem tempo para a captura no navegador — seguindo para a análise")
         pw_result = {}

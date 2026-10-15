@@ -835,3 +835,17 @@ def test_burp_feed_counts_http_errors_as_delivered():
 
     out = burp_feed.feed(["https://a.x.com/", "https://boom.x.com/"], opener=Op())
     assert out["ok"] == 1 and out["failed"] == 1
+
+
+def test_browser_modules_run_one_at_a_time():
+    import threading
+    order = []
+
+    def mod(n):
+        def f():
+            order.append(("in", n)); time.sleep(0.2); order.append(("out", n))
+        return f
+    ts = [threading.Thread(target=P._one_browser, args=(mod(i),)) for i in range(3)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert all(order[i][0] != order[i + 1][0] for i in range(0, len(order) - 1, 2))   # in, out, in, out…
+    assert [k for k, _ in order] == ["in", "out"] * 3
