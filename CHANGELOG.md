@@ -15,7 +15,7 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 - **httpx em duas etapas**: 80/443 em todos; as outras 8 portas só fora de CDN. A porta registrada é a real (antes 8080 virava 80).
 - **Cancelamento cooperativo**: módulo que estoura o prazo tem `http_get`/subprocessos cancelados na próxima chamada, em vez de seguir disputando rede com os módulos seguintes.
 - **subfinder** com `-all -es crtsh` (~9s estáveis por domínio; crt.sh oscilava até 2 min e já é consultado pelo módulo `certs`); arquivo temporário de chaves com permissão 600.
-- AlienVault OTX passou a usar a chave das Configurações (antes ia vazia e tomava 429).
+- AlienVault OTX passou a usar a chave das Configurações (antes ia vazia e tomava 429); sem chave é pulado na hora em vez de gastar 180s em retentativas.
 - **Resolvedores do sistema** (`utils/resolvers.py`) para `dnsx`, `subjack` e `amass`: com VPN de firewall estrito (Mullvad) os resolvedores públicos que eles usavam são recusados e as três ferramentas não resolviam nada, em silêncio (o subjack terminava em 1–3s sem saída; o `dns_brute` caía no resolvedor Python).
 - **Takeover sem teto de hosts**: `takeover` e `subjack` verificam todos os hosts do escopo, não só os 40 ativos (vivos primeiro) — CNAME pendurado está justamente nos que não respondem. Prazo interno com parcial.
 - **Takeover crítico só com evidência**: CNAME pendurado vira crítico apenas se o nome é registrável por terceiros (Elastic Beanstalk, Azure, Heroku…); ELB/CloudFront órfãos viram informativo (higiene de DNS).

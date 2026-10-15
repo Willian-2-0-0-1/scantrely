@@ -1727,6 +1727,7 @@ class AlienvaultOtxTool(ApiTool):
     category    = ToolCategory.SUBDOMAIN
     description = "AlienVault OTX passive DNS subdomain enumeration"
     install_cmd = "API only — free key at otx.alienvault.com"
+    requires_key = "otx_key"   # sem chave o OTX responde 429 e o módulo gastava os 180s em retentativas
 
     def run_api(self, target: str, opts: dict) -> list[Finding]:
         findings = []
@@ -1734,7 +1735,7 @@ class AlienvaultOtxTool(ApiTool):
         with self._http_open(
             url,
             headers={"User-Agent": "ASM-Platform/1.0",
-                     "X-OTX-API-KEY": opts.get("otx_key") or (opts.get("settings") or {}).get("otx_key", "")},
+                     "X-OTX-API-KEY": self._get_key("otx_key", opts)},
             timeout=20,
         ) as r:
             data = json.loads(r.read())
