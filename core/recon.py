@@ -327,6 +327,7 @@ from core.reconlib.screenshots import (  # noqa: F401
 from core.reconlib.services import (  # noqa: F401
     EXPOSED_PATHS,
     _probe_url,
+    _same_as_baseline,
     run_services_recon,
 )
 from core.reconlib.shodan import (  # noqa: F401

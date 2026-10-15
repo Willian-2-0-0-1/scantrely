@@ -1,6 +1,6 @@
 """CORS Misconfiguration Scanner — extraído de core/recon.py (ver core/recon.py para o índice completo)."""
 from datetime import datetime
-from core.reconlib.base import _log, http_get
+from core.reconlib.base import _log, http_get, run_bounded
 from core.reconlib.waf import _is_waf_challenge_body
 
 # ── CORS Misconfiguration Scanner ──
@@ -10,14 +10,14 @@ def run_cors_scan(hosts: list) -> dict:
 
     SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings: list[dict] = []
-    tested = 0
+    tested: list[str] = []
 
     live = [h for h in hosts if isinstance(h, dict) and (h.get("status_code") or h.get("ports"))][:60]
 
-    for h in live:
+    def _test_host(h):   # antes: 60 hosts × 5 origens em série (timeout 8s) — estourava
         host = h.get("host", "")
         if not host:
-            continue
+            return
         ports = h.get("ports", [])
         port_nums = []
         for p in ports:
@@ -39,8 +39,9 @@ def run_cors_scan(hosts: list) -> dict:
         ]
 
         worst: dict | None = None
+        misses = 0
         for test_name, origin, base_sev in test_cases:
-            tested += 1
+            tested.append(test_name)
             try:
                 status, body, hdrs = http_get(
                     base_url,
@@ -49,6 +50,9 @@ def run_cors_scan(hosts: list) -> dict:
                     extra_headers={"Origin": origin, "Accept": "*/*"},
                 )
                 if status == 0:
+                    misses += 1
+                    if misses >= 2:
+                        break   # host não responde: as outras origens também cairiam no timeout
                     continue
                 hdrs = hdrs or {}
                 body_snip = (body or b"")[:2048].decode("utf-8", "ignore")
@@ -104,8 +108,11 @@ def run_cors_scan(hosts: list) -> dict:
         if worst:
             findings.append(worst)
 
+    complete = run_bounded(_test_host, live, workers=10, label="cors")
+    findings = list(findings)
     return {
-        "total_tested": tested,
+        "total_tested": len(tested),
+        "complete": complete,
         "vulnerable": len(findings),
         "findings": findings,
         "scanned_at": datetime.now().isoformat(timespec="seconds"),

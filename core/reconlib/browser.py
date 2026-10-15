@@ -6,7 +6,7 @@ import os
 import re
 import socket
 import time
-from core.reconlib.base import UA, _log, _subp, http_get, subprocess
+from core.reconlib.base import UA, _log, _subp, http_get, run_bounded, subprocess
 
 # ── Browser Deep Recon via Playwright ──
 # Uses the playwright venv at /home/kali/.asm-playwright (upstream pip, not Kali pkg).
@@ -1246,8 +1246,9 @@ _API_PATHS = [
 
 
 
-def _probe_swagger_endpoint(host: str, path: str, timeout: int = 5) -> dict | None:
-    for scheme in ("https://", "http://"):
+def _probe_swagger_endpoint(host: str, path: str, timeout: int = 5,
+                            schemes: tuple = ("https://", "http://")) -> dict | None:
+    for scheme in schemes:
         url = f"{scheme}{host}{path}"
         try:
             sc, raw, _ = http_get(url, timeout=timeout, retries=0)
@@ -1295,7 +1296,7 @@ def _run_kiterunner_on_hosts(hosts: list, workers: int = 5) -> list:
                     proc = _subp(
                         ["kiterunner", "scan", "-f", target_file,
                          "-x", "10", "-j", "--fail-status-codes", "400-499"],
-                        capture_output=True, text=True, timeout=300,
+                        capture_output=True, text=True, timeout=120,   # abaixo dos 180s do módulo
                     )
                     for line in proc.stdout.strip().splitlines():
                         try:
@@ -1318,14 +1319,21 @@ def _run_kiterunner_on_hosts(hosts: list, workers: int = 5) -> list:
                 _log.debug('recon.py:10229 erro ignorado', exc_info=True)
 
     # Always also run swagger/openapi probes (lightweight)
-    seen_hosts = set()
-    for h in hosts[:50]:
-        host = h.get("host", h.get("ip", ""))
-        if not host or host in seen_hosts:
-            continue
-        seen_hosts.add(host)
+    # Antes: até 50 hosts × 21 caminhos × 2 esquemas em série (2.100 requisições) — estourava.
+    # Agora: hosts em paralelo com prazo; o esquema que responde no 1º caminho vale para os outros.
+    targets = list(dict.fromkeys(h.get("host", h.get("ip", "")) for h in hosts[:50] if h.get("host") or h.get("ip")))
+
+    def _probe_host(host):
+        scheme = ""
+        for sch in ("https://", "http://"):
+            sc, _, _ = http_get(f"{sch}{host}{_API_PATHS[0]}", timeout=4, retries=0)
+            if sc:
+                scheme = sch
+                break
+        if not scheme:
+            return   # não responde em nenhum esquema: os outros 20 caminhos também cairiam no timeout
         for path in _API_PATHS:
-            result = _probe_swagger_endpoint(host, path, timeout=4)
+            result = _probe_swagger_endpoint(host, path, timeout=4, schemes=(scheme,))
             if result:
                 findings.append({
                     "type": "swagger_endpoint",
@@ -1337,9 +1345,10 @@ def _run_kiterunner_on_hosts(hosts: list, workers: int = 5) -> list:
                     "severity": result.get("severity", "low"),
                     "source": "swagger_probe",
                 })
-                break  # found one spec per host is enough
+                return  # found one spec per host is enough
 
-    return findings
+    run_bounded(_probe_host, targets, workers=10, label="api_disc")
+    return list(findings)
 
 
 

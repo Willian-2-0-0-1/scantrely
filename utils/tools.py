@@ -1204,23 +1204,40 @@ class ArjunTool(CommandTool):
     category    = ToolCategory.HTTP
     description = "HTTP parameter discovery suite"
     install_cmd = "pip install arjun"
-    timeout     = 300  # arjun needs time; silently returns empty on timeout
+    # Abaixo dos 180s do módulo param_mine: o arjun só grava a saída no fim, então
+    # ser cortado pelo módulo perdia tudo. Antes: 300s + --stable (1 thread, 6–12s entre
+    # requisições) sobre a wordlist grande — estourava sempre.
+    timeout     = 150
+
+    @staticmethod
+    def _wordlist(size: str = "medium") -> str:
+        try:
+            import arjun
+            path = Path(arjun.__file__).parent / "db" / f"{size}.txt"
+            return str(path) if path.is_file() else ""
+        except Exception:
+            return ""
 
     def command(self, target: str, opts: dict) -> list[str]:
         url = target if target.startswith("http") else f"https://{target}"
-        return [
-            "arjun", "-u", url, "-oJ", "/tmp/arjun_output.json",
-            "-t", "3", "-T", "8", "--stable", "-q",
-        ]
+        out = opts.get("_out") or "/tmp/arjun_output.json"
+        cmd = ["arjun", "-u", url, "-oJ", out, "-t", "8", "-T", "8", "-c", "500", "-q"]
+        if wl := self._wordlist("medium"):   # 11 mil nomes em lotes de 500 ≈ 22 requisições por método
+            cmd += ["-w", wl]
+        return cmd
 
-    def parse(self, stdout: str, stderr: str, target: str) -> list[Finding]:
+    def parse(self, stdout: str, stderr: str, target: str, out: str = "/tmp/arjun_output.json") -> list[Finding]:
         findings = []
         try:
-            with open("/tmp/arjun_output.json") as f:
+            with open(out) as f:
                 data = json.load(f)
         except Exception:
             return findings
-        params = data.get("results", []) if isinstance(data, dict) else []
+        # formato atual do arjun: {url: {"params": [...], "method": ...}}; antigo: {"results": [...]}
+        if isinstance(data, dict) and "results" not in data:
+            params = [{"param": p, "url": u} for u, v in data.items() if isinstance(v, dict) for p in v.get("params") or []]
+        else:
+            params = data.get("results", []) if isinstance(data, dict) else []
         for p in params:
             if isinstance(p, dict):
                 name = p.get("param", "") or p.get("parameter", "") or p.get("name", "")
@@ -1237,26 +1254,32 @@ class ArjunTool(CommandTool):
         # Explicit override ensures CommandTool base class is NOT invoked
         from utils import rate_limiter as _rl
         _rl.wait()
-        opts = opts or {}
+        opts = dict(opts or {})
         result = ToolResult(tool=self.name, target=target)
         t0 = time.time()
+        # saída própria por execução: dois domínios em paralelo gravavam no mesmo arquivo
+        fd, out = tempfile.mkstemp(prefix="arjun_", suffix=".json")
+        os.close(fd)
+        os.unlink(out)   # o arjun cria o arquivo; se existir vazio ele falha ao ler
+        opts["_out"] = out
         try:
             cmd = self.command(target, opts)
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
             result.raw_stdout = proc.stdout
             result.raw_stderr = proc.stderr
-            result.findings = self.parse(proc.stdout, proc.stderr, target)
+            result.findings = self.parse(proc.stdout, proc.stderr, target, out=out)
         except subprocess.TimeoutExpired:
             result.findings = []  # timeout is normal for WAF-protected targets
         except FileNotFoundError:
             result.error = f"Binary not found: {self.name}"
         except Exception as e:
             result.error = str(e)[:300]
+        finally:
+            try:
+                os.unlink(out)
+            except OSError:
+                pass
         result.duration = time.time() - t0
-        if os.path.exists("/tmp/arjun_output.json"):
-            try: os.unlink("/tmp/arjun_output.json")
-            except:
-                _log.debug('tools.py:1269 erro ignorado', exc_info=True)
         return result
 
 

@@ -356,3 +356,124 @@ def test_takeover_scope_is_not_capped_by_active_hosts(tmp_path):
     opts = {"profile": "bug_bounty", "active": True, "active_max_hosts": 40, "domains": ["x.com"]}
     assert len(r._filter_hosts_for_options(hosts, {"domains": ["x.com"]}, opts)) == 40
     assert len(r._filter_hosts_for_options(hosts, {"domains": ["x.com"]}, {**opts, "active_max_hosts": 0})) == 100
+
+
+# ── param_mine (arjun) ───────────────────────────────────────────────────────
+def test_param_mine_targets_first_live_200_host():
+    hosts = [{"host": "edge.x.com", "status_code": 403, "ports": ["443"]},
+             {"host": "app.x.com", "status_code": 200, "ports": ["443"]}]
+    assert P._param_mine_target(hosts, "x.com") == "https://app.x.com:443"
+    assert P._param_mine_target([{"host": "edge.x.com", "status_code": 403}], "x.com") == "x.com"
+
+
+@pytest.mark.parametrize("payload", [
+    {"http://a.x.com/": {"params": ["debug", "id"], "method": "GET", "headers": {}}},   # arjun 2.2.x
+    {"results": [{"param": "debug"}, {"param": "id"}]},                                 # formato antigo
+])
+def test_arjun_parse_reads_current_and_old_format(tmp_path, payload):
+    import json as _json
+    from utils.tools import registry
+    out = tmp_path / "a.json"
+    out.write_text(_json.dumps(payload))
+    names = [f.value for f in registry.get("arjun").parse("", "", "a.x.com", out=str(out))]
+    assert names == ["debug", "id"]
+
+
+def test_arjun_run_uses_private_output_and_bounded_command(monkeypatch):
+    import json as _json
+    import utils.tools as T
+    seen = []
+
+    def fake_run(cmd, **kw):
+        out = cmd[cmd.index("-oJ") + 1]
+        seen.append((cmd, out, kw.get("timeout")))
+        Path(out).write_text(_json.dumps({"https://a.x.com/": {"params": ["debug"]}}))
+        return types.SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(T.subprocess, "run", fake_run)
+    tool = T.registry.get("arjun")
+    r1, r2 = tool.run("a.x.com", {}), tool.run("b.x.com", {})
+    (cmd, out1, timeout), (_, out2, _) = seen
+    assert out1 != out2 and out1 != "/tmp/arjun_output.json"
+    assert not Path(out1).exists()                       # limpo depois
+    assert "--stable" not in cmd and cmd[cmd.index("-c") + 1] == "500"
+    assert timeout < 180                                  # abaixo do módulo param_mine
+    assert [f.value for f in r1.findings] == ["debug"] and [f.value for f in r2.findings] == ["debug"]
+
+
+# ── api_discovery_extra ─────────────────────────────────────────────────────
+def test_swagger_probe_reuses_scheme_and_skips_dead_hosts(monkeypatch):
+    import core.reconlib.browser as br
+    calls = []
+
+    def fake_get(url, **kw):
+        calls.append(url)
+        if "dead.x.com" in url:
+            return 0, b"", {}
+        if url == "https://api.x.com/openapi.json":
+            return 200, b'{"openapi": "3.0.0", "info": {"title": "API"}, "paths": {"/a": {}}}', {}
+        return 404, b"", {}
+
+    monkeypatch.setattr(br, "http_get", fake_get)
+    found = br._run_kiterunner_on_hosts([{"host": "api.x.com"}, {"host": "dead.x.com"}])
+    assert [(f["host"], f["url"], f["endpoints_count"]) for f in found] == [("api.x.com", "https://api.x.com/openapi.json", 1)]
+    assert not any(u.startswith("http://api.x.com") for u in calls)        # esquema descoberto uma vez
+    assert [u for u in calls if "dead.x.com" in u] == ["https://dead.x.com/swagger.json", "http://dead.x.com/swagger.json"]
+
+
+# ── services ────────────────────────────────────────────────────────────────
+def _services_get(routes):
+    def fake_get(url, **kw):
+        host, path = url.split("://", 1)[1].split("/", 1)
+        return routes(host, "/" + path)
+    return fake_get
+
+
+def test_services_skips_dead_host_after_one_request(monkeypatch):
+    import core.reconlib.services as sv
+    calls = []
+    monkeypatch.setattr(sv, "http_get", lambda url, **kw: calls.append(url) or (0, b"", {}))
+    assert sv.run_services_recon("dead.x.com") == [] and len(calls) == 1
+
+
+def test_services_ignores_catch_all_responses_but_keeps_real_ones(monkeypatch):
+    import core.reconlib.services as sv
+    spa = b"<html><div id=root></div></html>"
+
+    def routes(host, path):
+        if path == "/.env":
+            return 200, b"DB_PASSWORD=x\nAPP_KEY=y\n", {"Content-Length": "24"}
+        return 200, spa, {"Content-Length": str(len(spa))}   # SPA: 200 igual para tudo
+
+    monkeypatch.setattr(sv, "http_get", _services_get(routes))
+    out = sv.run_services_recon("app.x.com")
+    assert [r["path"] for r in out] == ["/.env"]
+
+
+# ── cors_scan ───────────────────────────────────────────────────────────────
+def test_cors_gives_up_on_dead_host(monkeypatch):
+    import core.reconlib.cors as cs
+    calls = []
+    monkeypatch.setattr(cs, "http_get", lambda url, **kw: calls.append(url) or (0, b"", {}))
+    out = cs.run_cors_scan([{"host": "dead.x.com", "status_code": 200, "ports": ["443"]}])
+    assert out["findings"] == [] and len(calls) == 2
+
+
+def test_cors_reflection_still_reported(monkeypatch):
+    import core.reconlib.cors as cs
+
+    def fake_get(url, extra_headers=None, **kw):
+        return 200, b"{}", {"Access-Control-Allow-Origin": extra_headers["Origin"], "Access-Control-Allow-Credentials": "true"}
+
+    monkeypatch.setattr(cs, "http_get", fake_get)
+    out = cs.run_cors_scan([{"host": "api.x.com", "status_code": 200, "ports": ["443"]}])
+    assert len(out["findings"]) == 1 and out["findings"][0]["severity"] == "medium"
+
+
+def test_services_baseline_tolerates_dynamic_bytes_only_on_large_pages():
+    import core.reconlib.services as sv
+    big = {"status": 200, "length": 20000, "snippet": "<html>a"}
+    assert sv._same_as_baseline({"status": 200, "length": 20300, "snippet": "<html>b"}, big)
+    assert not sv._same_as_baseline({"status": 200, "length": 24, "snippet": "DB_PASSWORD=x"},
+                                    {"status": 200, "length": 32, "snippet": "<html><div id=root>"})
+    assert not sv._same_as_baseline({"status": 403, "length": 20000, "snippet": "<html>a"}, big)

@@ -18,6 +18,10 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 - AlienVault OTX passou a usar a chave das Configurações (antes ia vazia e tomava 429); sem chave é pulado na hora em vez de gastar 180s em retentativas.
 - **Resolvedores do sistema** (`utils/resolvers.py`) para `dnsx`, `subjack` e `amass`: com VPN de firewall estrito (Mullvad) os resolvedores públicos que eles usavam são recusados e as três ferramentas não resolviam nada, em silêncio (o subjack terminava em 1–3s sem saída; o `dns_brute` caía no resolvedor Python).
 - **Takeover sem teto de hosts**: `takeover` e `subjack` verificam todos os hosts do escopo, não só os 40 ativos (vivos primeiro) — CNAME pendurado está justamente nos que não respondem. Prazo interno com parcial.
+- **param_mine (arjun)**: sem `--stable` (1 thread, 6–12s entre requisições), wordlist média em lotes de 500, 150s (antes 300s, acima do módulo), saída própria por execução (domínios em paralelo gravavam no mesmo arquivo) e alvo = primeiro host com 200 (antes o domínio raiz, em geral 403 de CDN). O parser só lia o formato antigo do arjun e nunca devolvia parâmetro.
+- **api_discovery_extra**: hosts em paralelo com prazo; esquema descoberto uma vez por host; host sem resposta abandonado (antes até 2.100 requisições em série); kiterunner limitado a 120s.
+- **services**: caminho aleatório como referência — host sem resposta custa 1 requisição (antes ~130) e respostas iguais à referência (SPA/WAF que respondem igual a tudo) não viram achado; prazo e parcial.
+- **cors_scan**: hosts em paralelo com prazo; host abandonado após 2 falhas de rede.
 - **Takeover crítico só com evidência**: CNAME pendurado vira crítico apenas se o nome é registrável por terceiros (Elastic Beanstalk, Azure, Heroku…); ELB/CloudFront órfãos viram informativo (higiene de DNS).
 - Corrigidos: `infra_exposure` lia `(status, body)` invertido e nunca reportava Kubernetes/Docker/etcd expostos; `waf_bypass` tratava falha de rede (status 0) como bypass de severidade alta; `smtp_probe` reportava "STARTTLS ausente" quando o EHLO nem respondia.
 
