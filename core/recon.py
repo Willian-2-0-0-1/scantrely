@@ -78,7 +78,9 @@ from core.reconlib.base import (  # noqa: F401
     _record_block,
     _record_success,
     _subp,
+    MODULE_BUDGET_S,
     http_get,
+    run_bounded,
     set_subprocess_context,
     subprocess,
 )
@@ -181,7 +183,10 @@ from core.reconlib.cve import (  # noqa: F401
 from core.reconlib.dnsutil import (  # noqa: F401
     _dns_batch,
     _dns_batch_short,
+    _resolve_ips,
+    _wildcard_ips,
     dns_records,
+    drop_wildcard_hits,
     run_dns_bruteforce,
     run_dnssec_check,
     run_zone_transfer,

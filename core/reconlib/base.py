@@ -119,7 +119,37 @@ from urllib.request import urlopen, Request
 from urllib.error   import URLError, HTTPError
 from datetime       import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as _FutTimeout
 from pathlib import Path
+
+# Abaixo dos 180s do módulo no pipeline: estourar lá descarta o resultado inteiro.
+MODULE_BUDGET_S = 150.0
+
+
+def run_bounded(fn, items, *, workers: int = 8, budget: float = MODULE_BUDGET_S, label: str = "") -> bool:
+    """Roda fn(item) em paralelo até o prazo. fn grava nos acumuladores do chamador.
+
+    Devolve False se o prazo acabou antes (o chamador fica com o parcial). Itens ainda na fila
+    são cancelados; os que já estão em andamento terminam sozinhos, então o chamador deve
+    devolver cópias dos acumuladores."""
+    items = list(items)
+    if not items:
+        return True
+    ex = ThreadPoolExecutor(max_workers=max(1, min(workers, len(items))), thread_name_prefix=f"rb-{label[:10]}")
+    futures = [ex.submit(fn, it) for it in items]
+    try:
+        for fut in as_completed(futures, timeout=budget):
+            try:
+                fut.result()
+            except Exception:
+                _log.debug("run_bounded %s: item falhou", label, exc_info=True)
+        return True
+    except _FutTimeout:
+        done = sum(1 for f in futures if f.done())
+        _log.info("run_bounded %s: prazo de %.0fs esgotado — %s de %s itens concluídos", label, budget, done, len(items))
+        return False
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
 
 # ── HTTP infrastructure — rate limiting, UA rotation, retry/backoff ──
 

@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
 from datetime import datetime
 import re
-from core.reconlib.base import _log, http_get
+from core.reconlib.base import MODULE_BUDGET_S, _log, http_get
 
 # ── Security Headers ──
 
@@ -216,7 +216,7 @@ def run_vendor_fingerprint(hosts: list) -> dict:
     try:
         futures = {pool.submit(_probe_host, h): h for h in targets}
         try:
-            for fut in concurrent.futures.as_completed(futures, timeout=240):
+            for fut in concurrent.futures.as_completed(futures, timeout=MODULE_BUDGET_S):
                 try:
                     results.extend(fut.result())
                 except Exception:

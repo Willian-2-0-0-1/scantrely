@@ -2,6 +2,17 @@
 
 Todas as mudanças relevantes do projeto são documentadas aqui.
 
+## [Não lançado] - 2026-10-15
+
+### Scan
+
+- **DNS curinga**: o `dns_brute` resolve rótulos aleatórios em cada zona e descarta nomes que só apontam para o IP do curinga (`drop_wildcard_hits`). Num scan real, 473 de 525 hosts eram o curinga.
+- **httpx**: sondagem com `-stream -o`; ao estourar o prazo, o resultado parcial é usado (antes, 16 min de sondagem viravam lista vazia).
+- **gowitness**: uma URL por host com esquema e porta explícitos (`https://host:443` ou `http://host:80`); antes eram 4 capturas por host.
+- `host_header_injection`, `open_redirect`, `waf_bypass`, `smtp_probe` e `infra_exposure` rodam em paralelo com prazo interno de 150s (`run_bounded`) e devolvem o parcial em vez de estourar os 180s do módulo; `vendor_fp` passou a respeitar o mesmo prazo.
+- **Fila por domínio**: o primeiro domínio a terminar marcava o pipeline da empresa como concluído com outro ainda rodando; agora só o último fecha o status.
+- Corrigidos: `infra_exposure` lia `(status, body)` invertido e nunca reportava Kubernetes/Docker/etcd expostos; `waf_bypass` tratava falha de rede (status 0) como bypass de severidade alta; `smtp_probe` reportava "STARTTLS ausente" quando o EHLO nem respondia.
+
 ## [1.4.0] - 2026-10-09
 
 ### Dados e organização

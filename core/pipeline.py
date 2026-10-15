@@ -108,6 +108,16 @@ def _is_responsive(h: dict) -> bool:
     status_code (httpx probes), ports (naabu/masscan), title (httpx)."""
     return bool(h.get('status_code') is not None or h.get('ports') or h.get('title'))
 
+def _gowitness_target(h: dict) -> str:
+    """Uma URL por host com esquema e porta explícitos. Só com o nome, o gowitness tenta
+    http/https × 80/443 (4 capturas por host, incluindo http://host:443)."""
+    host = h['host']
+    ports = {str(p.get('port') if isinstance(p, dict) else p) for p in h.get('ports') or []}
+    redirect = str(h.get('redirect_url') or '')
+    if ports and '443' not in ports and not redirect.startswith('https://'):
+        return f'http://{host}:80'
+    return f'https://{host}:443'
+
 def _was_probed(h: dict) -> bool:
     """Whether the host has ever been probed by httpx (has status_code)."""
     return h.get('status_code') is not None
@@ -833,6 +843,8 @@ class ReconRunner:
         self._tool_registry = tool_registry
         self.results: dict = {}
         self.pipeline_state: dict = {}
+        self._queue_finish_lock = threading.Lock()
+        self._queue_finished: dict[str, set[str]] = {}
         self.tool_logs: dict = defaultdict(list)
         self._run_context = threading.local()
         self._warn_unassigned_modules()
@@ -2121,7 +2133,7 @@ class ReconRunner:
         gowitness_bin = shutil.which('gowitness') or (str(BIN_DIR / 'gowitness') if (BIN_DIR / 'gowitness').is_file() else None)
         if not gowitness_bin:
             return {'error': 'gowitness not found', 'results': []}
-        targets = [h['host'] for h in hosts if _is_responsive(h)]
+        targets = [_gowitness_target(h) for h in hosts if _is_responsive(h) and h.get('host')]
         if not targets:
             return {'error': 'No live hosts found', 'results': []}
         output_dir = self.base / 'scans' / cid / 'screenshots'
@@ -2563,23 +2575,30 @@ class ReconRunner:
             tf.write('\n'.join(subdomains))
             tf_path = tf.name
         probe_timeout = max(300, min(3600, len(subdomains) * 2))
+        out_path = tf_path + '.jsonl'
         try:
             httpx_threads = str(int(os.environ.get('ASM_HTTPX_THREADS', '25') or 25))
             httpx_rate = str(int(os.environ.get('ASM_HTTPX_RATE_LIMIT', '50') or 50))
-            cmd = [httpx_bin, '-l', tf_path, '-silent', '-json', '-status-code', '-title', '-server', '-tech-detect', '-content-length', '-ports', '80,443,3000,5601,8080,8443,8888,9000,9090,9200', '-follow-redirects', '-max-redirects', '3', '-location', '-timeout', '8', '-threads', httpx_threads, '-rate-limit', httpx_rate]
+            # -stream + -o: sem -stream o httpx só escreve a saída no fim, e um timeout perdia a sondagem inteira
+            cmd = [httpx_bin, '-l', tf_path, '-silent', '-json', '-stream', '-o', out_path, '-status-code', '-title', '-server', '-tech-detect', '-content-length', '-ports', '80,443,3000,5601,8080,8443,8888,9000,9090,9200', '-follow-redirects', '-max-redirects', '3', '-location', '-timeout', '8', '-threads', httpx_threads, '-rate-limit', httpx_rate]
             if extra_headers:
                 for h in extra_headers:
                     cmd.insert(1, '-H')
                     cmd.insert(2, h)
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=probe_timeout)
-            Path(tf_path).unlink(missing_ok=True)
+            try:
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=probe_timeout)
+            except subprocess.TimeoutExpired:
+                log.warning('httpx: tempo esgotado (%ss) com %s alvos para %s — usando o resultado parcial', probe_timeout, len(subdomains), cid)
+            output = Path(out_path).read_text(encoding='utf-8', errors='replace') if Path(out_path).exists() else ''
         except Exception as e:
-            Path(tf_path).unlink(missing_ok=True)
             log.exception('ERROR in _probe_hosts_with_httpx: %s', e)
             return []
-        log.debug('httpx completed, stdout has %s lines', len(result.stdout.strip().splitlines()))
+        finally:
+            Path(tf_path).unlink(missing_ok=True)
+            Path(out_path).unlink(missing_ok=True)
+        log.debug('httpx completed, output has %s lines', len(output.strip().splitlines()))
         host_data: dict[str, dict] = {}
-        for line in result.stdout.strip().splitlines():
+        for line in output.strip().splitlines():
             try:
                 item = json.loads(line)
                 host = item.get('input', '').split(':')[0].replace('https://', '').replace('http://', '')
@@ -3742,6 +3761,26 @@ class ReconRunner:
                 cloudflare_hosts += 1
         return cloudflare_hosts / len(hosts) * 100 if hosts else 0.0
 
+    def _other_queue_domains_pending(self, cid: str, queue_target: str) -> set[str]:
+        """Domínios da mesma empresa ainda na fila/rodando (fila por domínio), sem contar este.
+
+        O job deste domínio só sai de 'running' no banco depois que run_pipeline volta; o conjunto
+        _queue_finished cobre dois domínios terminando juntos (senão cada um esperaria o outro)."""
+        if not queue_target:
+            return set()
+        with self._queue_finish_lock:
+            finished = self._queue_finished.setdefault(cid, set())
+            finished.add(queue_target)
+            try:
+                active = set(self.db.list_active_job_targets(company_id=cid, job_type='pipeline'))
+            except Exception as _e:
+                _ignore(_e, 'pipeline.py:queue_pending')
+                active = set()
+            pending = active - finished
+            if not pending:
+                finished.clear()
+            return pending
+
     def run_pipeline(self, cid: str, co: dict, options: dict):
         """Execute full recon pipeline in ordered phases. Blocking — run in thread."""
         options = self._resolve_pipeline_profile(options)
@@ -3761,6 +3800,9 @@ class ReconRunner:
         cf_detected = False
         incremental_skip_phases: set[str] = set()
         queue_target = options.get('queue_domain', '')
+        if queue_target:
+            with self._queue_finish_lock:
+                self._queue_finished.get(cid, set()).discard(queue_target)
         self._load_checkpoints(cid, target=queue_target)
         current_hosts = self._filter_hosts_for_options(self._load_hosts(cid), co, options)
         previous_state = self.pipeline_state.get(cid, {}) or self._load_pipeline_state(cid) or {}
@@ -4136,15 +4178,22 @@ class ReconRunner:
         if self.pipeline_state.get(cid, {}).get('status') == 'stopped':
             self._finalize_in_flight_modules(cid)
         not_done, skipped_modules = self._pipeline_execution_summary(cid, options)
+        pending_domains = self._other_queue_domains_pending(cid, queue_target)
         if self.pipeline_state.get(cid, {}).get('status') != 'stopped':
-            self.pipeline_state[cid].update({'status': 'done' if not not_done else 'done_with_issues', 'finished_at': datetime.now().isoformat(timespec='seconds'), 'not_done': not_done, 'skipped_modules': skipped_modules})
+            if pending_domains:
+                # fila por domínio: o estado é da empresa; só o último domínio encerra o pipeline
+                self.pipeline_state[cid].update({'status': 'running', 'finished_at': None})
+                _log(f"✓ {queue_target} concluído — ainda rodando: {', '.join(sorted(pending_domains))}")
+            else:
+                self.pipeline_state[cid].update({'status': 'done' if not not_done else 'done_with_issues', 'finished_at': datetime.now().isoformat(timespec='seconds'), 'not_done': not_done, 'skipped_modules': skipped_modules})
         if not_done:
             preview = ', '.join((f"{e['module']} ({e['reason']})" if e.get('reason') else e['module'] for e in not_done[:8]))
             _log(f'  ⚠ {len(not_done)} módulo(s) não concluído(s): {preview}')
         if skipped_modules:
             preview = ', '.join((f"{e['module']} ({e['reason']})" for e in skipped_modules[:5]))
             _log(f'  ⏭ {len(skipped_modules)} módulo(s) pulado(s) com justificativa: {preview}')
-        _log('✅ Pipeline completo' if not not_done else '⚠ Pipeline finalizada com pendências justificadas')
+        if not pending_domains:
+            _log('✅ Pipeline completo' if not not_done else '⚠ Pipeline finalizada com pendências justificadas')
         self._sync_module_status_from_results(cid)
         self._persist_pipeline_results(cid, _log, _options=options, _co=co)
         self._save_pipeline_state(cid)

@@ -213,6 +213,72 @@ def run_dnssec_check(domains: list) -> dict:
 
 
 
+# ── DNS curinga ──
+# Zona com *.zona resolve qualquer nome: sem este filtro o brute force aceita a wordlist inteira
+# (num scan real: 458 "subdomínios" de 525 eram só o curinga do Cloudflare).
+
+def _resolve_ips(name: str) -> set[str]:
+    import socket
+    try:
+        return {ai[4][0] for ai in socket.getaddrinfo(name, None, proto=socket.IPPROTO_TCP)}
+    except Exception:
+        return set()
+
+
+def _wildcard_ips(zone: str, probes: int = 2) -> set[str]:
+    """IPs que a zona devolve para rótulos aleatórios; vazio = zona sem curinga."""
+    import secrets
+    ips: set[str] = set()
+    for _ in range(probes):
+        ips |= _resolve_ips(f"sctw-{secrets.token_hex(5)}.{zone}")
+    return ips
+
+
+def drop_wildcard_hits(resolved: list[dict], domain: str, max_zones: int = 200) -> tuple[list[dict], dict]:
+    """Remove nomes que só resolvem para o curinga da zona-mãe mais próxima.
+
+    Retorna (mantidos, {zona: [ips do curinga]}). Um nome cai quando todos os IPs dele
+    estão no conjunto do curinga; nome com IP próprio na mesma zona continua.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    domain = domain.lower().rstrip(".")
+    zones = {domain}
+    for r in resolved:
+        host = str(r.get("host", "")).lower()
+        if "." in host:
+            parent = host.split(".", 1)[1]
+            if parent == domain or parent.endswith("." + domain):
+                zones.add(parent)
+    probed = sorted(zones, key=lambda z: (z.count("."), z))[:max_zones]
+    with ThreadPoolExecutor(max_workers=min(50, len(probed))) as ex:
+        wild = {z: ips for z, ips in zip(probed, ex.map(_wildcard_ips, probed)) if ips}
+    if not wild:
+        return resolved, {}
+    probed_set = set(probed)
+
+    def _closest_zone(host: str) -> str:
+        z = host.split(".", 1)[1] if "." in host else ""
+        while z and z not in probed_set and z != domain:
+            z = z.split(".", 1)[1] if "." in z else ""
+        return z
+
+    in_wild = [(r, wild[z]) for r in resolved if (z := _closest_zone(str(r.get("host", "")).lower())) in wild]
+    missing = [r["host"] for r, _ in in_wild if not r.get("ip")]   # puredns não devolve IP
+    if missing:
+        with ThreadPoolExecutor(max_workers=min(50, len(missing))) as ex:
+            looked_up = dict(zip(missing, ex.map(_resolve_ips, missing)))
+    else:
+        looked_up = {}
+    drop = set()
+    for r, zone_ips in in_wild:
+        host_ips = {r["ip"]} if r.get("ip") else looked_up.get(r["host"], set())
+        if host_ips and host_ips <= zone_ips:
+            drop.add(id(r))
+    kept = [r for r in resolved if id(r) not in drop]
+    return kept, {z: sorted(ips) for z, ips in wild.items()}
+
+
 # ── DNS Brute-force with Permutations ──
 
 def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict:
@@ -436,6 +502,12 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
 
     Path(perms_file).unlink(missing_ok=True)
 
+    total_resolved = len(resolved)
+    resolved, wildcard_zones = drop_wildcard_hits(resolved, domain)
+    if wildcard_zones:
+        _log.info("dns_brute %s: DNS curinga em %s — %s de %s nomes descartados",
+                  domain, ", ".join(sorted(wildcard_zones)[:5]), total_resolved - len(resolved), total_resolved)
+
     # ── Filter out already known hosts ──
     known_hosts = {h.get("host","") for h in hosts}
     new_findings = [
@@ -445,7 +517,9 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
     ]
 
     return {
-        "total_resolved":          len(resolved),
+        "total_resolved":          total_resolved,
+        "wildcard_zones":          wildcard_zones,
+        "wildcard_dropped":        total_resolved - len(resolved),
         "new_found":               len(new_findings),
         "permutations_generated":  len(permutations),
         "permutations_tried":      len(permutations),

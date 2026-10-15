@@ -2,7 +2,7 @@
 from datetime import datetime
 from urllib.error import HTTPError
 import re
-from core.reconlib.base import _log, _random_ua, _subp, http_get, subprocess
+from core.reconlib.base import _log, _random_ua, _subp, http_get, run_bounded, subprocess
 
 # ── Kubernetes / Docker / etcd Infrastructure Exposure ──
 
@@ -26,17 +26,13 @@ def run_infra_exposure(hosts: list) -> dict:
     ]
 
     findings: list[dict] = []
-    tested_ips: set[str] = set()
-
+    by_ip: dict[str, str] = {}
     for h in hosts[:80]:
-        if not isinstance(h, dict):
-            continue
-        ip = h.get("ip", "")
-        if not ip or ip in tested_ips:
-            continue
-        tested_ips.add(ip)
-        host = h.get("host", ip)
+        if isinstance(h, dict) and h.get("ip") and h["ip"] not in by_ip:
+            by_ip[h["ip"]] = h.get("host", h["ip"])
 
+    def _probe_ip(item):
+        ip, host = item
         for port, service, paths, sev, category in PROBES:
             try:
                 s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
@@ -51,9 +47,10 @@ def run_infra_exposure(hosts: list) -> dict:
             accessible_paths: list[dict] = []
             for path in paths[:2]:
                 try:
-                    body, code, _ = http_get(f"http://{ip}:{port}{path}", timeout=5, retries=1)
+                    code, body, _ = http_get(f"http://{ip}:{port}{path}", timeout=5, retries=1)
                     if code and code < 500:
-                        accessible_paths.append({"path": path, "status": code, "preview": (body or "")[:150]})
+                        preview = (body or b"")[:150].decode("utf-8", "ignore")
+                        accessible_paths.append({"path": path, "status": code, "preview": preview})
                 except Exception:
                     _log.debug('recon.py:7319 erro ignorado', exc_info=True)
 
@@ -74,8 +71,11 @@ def run_infra_exposure(hosts: list) -> dict:
                     "matched":      service,
                 })
 
+    complete = run_bounded(_probe_ip, by_ip.items(), workers=10, label="infra_exp")
+    findings = list(findings)
     return {
-        "total_ips_tested": len(tested_ips),
+        "total_ips_tested": len(by_ip),
+        "complete": complete,
         "vulnerable": len(findings),
         "findings": findings,
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
@@ -290,23 +290,25 @@ def run_waf_bypass_test(hosts: list) -> dict:
     ]
 
     findings = []
-    tested = 0
+    tested = []
 
     # Only test hosts that have a WAF or returned 403
     candidates = [h for h in hosts if h.get("waf") or h.get("status_code") in (403, 406)][:30]
 
-    for h in candidates:
+    def _test_host(h):
         host = h.get("host", "")
         if not host:
-            continue
+            return
         url = f"https://{host}/" if not host.startswith("http") else host
-        tested += 1
+        tested.append(host)
 
         # Baseline request
         try:
             base_status, base_body, _ = http_get(url, timeout=8, retries=1)
         except Exception:
-            continue
+            return
+        if not base_status:
+            return  # sem resposta (timeout/circuito aberto): não há com o que comparar
 
         base_len = len(base_body or b"")
 
@@ -315,6 +317,8 @@ def run_waf_bypass_test(hosts: list) -> dict:
                 status, body, _ = http_get(url, timeout=8, retries=1, extra_headers=extra_h)
             except Exception:
                 continue
+            if not status:
+                continue  # status 0 = falha de rede, não "passou do WAF"
 
             body_len = len(body or b"")
             status_change = base_status != status and status < 400
@@ -345,8 +349,11 @@ def run_waf_bypass_test(hosts: list) -> dict:
                 })
                 break  # one bypass per host is enough
 
+    complete = run_bounded(_test_host, candidates, workers=8, label="waf_bypass")
+    findings = list(findings)
     return {
-        "total_tested": tested,
+        "total_tested": len(tested),
+        "complete": complete,
         "bypasses_found": len(findings),
         "findings": findings,
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
@@ -364,15 +371,13 @@ def run_smtp_probe(hosts: list) -> dict:
     _SMTP_PORTS = [25, 587, 465, 2525]
     findings = []
     results = []
-    tested_ips: set = set()
-
+    by_ip: dict[str, str] = {}
     for h in hosts[:60]:
-        ip = h.get("ip", "")
-        host_name = h.get("host", ip)
-        if not ip or ip in tested_ips:
-            continue
-        tested_ips.add(ip)
+        if h.get("ip") and h["ip"] not in by_ip:
+            by_ip[h["ip"]] = h.get("host", h["ip"])
 
+    def _probe_ip(item):
+        ip, host_name = item
         for port in _SMTP_PORTS:
             try:
                 s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
@@ -414,7 +419,8 @@ def run_smtp_probe(hosts: list) -> dict:
                 if version:
                     issues.append(f"Version disclosure: {version}")
                     sev = "medium"
-                if not has_starttls and port in (25, 587):
+                ehlo_ok = any(l.startswith("250") for l in ehlo_resp.splitlines())
+                if ehlo_ok and not has_starttls and port in (25, 587):
                     issues.append("STARTTLS not offered — email in cleartext")
                     sev = "high"
                 if port == 25 and "VRFY" in ehlo_resp.upper():
@@ -439,8 +445,11 @@ def run_smtp_probe(hosts: list) -> dict:
             except Exception:
                 _log.debug('recon.py:7698 erro ignorado', exc_info=True)
 
+    complete = run_bounded(_probe_ip, by_ip.items(), workers=10, label="smtp_probe")
+    findings, results = list(findings), list(results)
     return {
-        "total_ips_tested": len(tested_ips),
+        "total_ips_tested": len(by_ip),
+        "complete": complete,
         "smtp_hosts": len(results),
         "findings": findings,
         "results": results,
@@ -563,16 +572,17 @@ def run_host_header_injection(hosts: list) -> dict:
         "X-Custom-Host",
     ]
     findings = []
-    tested = 0
+    tested = []
 
     candidates = [h for h in hosts if h.get("status_code") and h.get("status_code") < 500][:40]
 
-    for h in candidates:
+    def _test_host(h):
         host = h.get("host", "")
         if not host:
-            continue
-        tested += 1
+            return
+        tested.append(host)
         base_url = f"https://{host}/" if not host.startswith("http") else host
+        misses = 0
 
         # Also test the password reset endpoint if we can guess it
         test_paths = ["/", "/reset-password", "/forgot-password", "/account/recover"]
@@ -583,6 +593,11 @@ def run_host_header_injection(hosts: list) -> dict:
                 try:
                     extra = {inj_header: _POISON_DOMAIN}
                     status, body, resp_h = http_get(url, timeout=8, retries=1, extra_headers=extra)
+                    if not status:
+                        misses += 1
+                        if misses >= 2:
+                            return  # host não responde: as outras 8 tentativas também cairiam no timeout
+                        continue
                     body_str = (body or b"")[:3000].decode("utf-8", "ignore")
 
                     _hhi_req = (
@@ -640,8 +655,11 @@ def run_host_header_injection(hosts: list) -> dict:
                 continue
             break  # found one finding for this host
 
+    complete = run_bounded(_test_host, candidates, workers=8, label="hhi")
+    findings = list(findings)
     return {
-        "total_tested": tested,
+        "total_tested": len(tested),
+        "complete": complete,
         "vulnerable": len(findings),
         "findings": findings,
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
@@ -683,7 +701,7 @@ def run_open_redirect_check(hosts: list, urls: list | None = None) -> dict:
                 for param in _REDIRECT_PARAMS[:5]:
                     candidates.append(f"https://{host}/?{param}=FUZZ")
 
-    for url_template in candidates[:120]:
+    def _test_template(url_template):
         for payload in _REDIRECT_PAYLOADS[:2]:
             if "FUZZ" in url_template:
                 url = url_template.replace("FUZZ", payload)
@@ -763,8 +781,11 @@ def run_open_redirect_check(hosts: list, urls: list | None = None) -> dict:
                     _log.debug('recon.py:8018 erro ignorado', exc_info=True)
                 continue
 
+    complete = run_bounded(_test_template, candidates[:120], workers=8, label="open_redir")
+    findings = list(findings)
     return {
         "total_tested": len(tested_urls),
+        "complete": complete,
         "vulnerable": len(findings),
         "findings": findings,
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
