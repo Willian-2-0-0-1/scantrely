@@ -1386,7 +1386,7 @@ class ASMDatabase:
         company_id: str = "",
         job_type: str = "pipeline",
     ) -> int:
-        """Move pending/running jobs to stopped for host safety.
+        """Move pending/running jobs to paused for host safety (release_safety_hold devolve à fila).
 
         This is intentionally stronger than cancel_pending_jobs(): a watchdog
         must be able to stop the queue even when workers already claimed jobs.
@@ -1404,7 +1404,7 @@ class ASMDatabase:
             cur = conn.execute(
                 f"""
                 UPDATE jobs
-                SET status = 'stopped',
+                SET status = 'paused',
                     error = ?,
                     updated_at = ?
                 WHERE {' AND '.join(clauses)}
@@ -1413,6 +1413,10 @@ class ASMDatabase:
             )
             conn.commit()
         return int(cur.rowcount or 0)
+
+    def count_paused_jobs(self) -> int:
+        with self._connect() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM jobs WHERE status = 'paused'").fetchone()[0])
 
     def release_safety_hold(self, *, reason_prefix: str = "SAFETY-WATCHDOG") -> int:
         """Re-queue jobs the watchdog stopped so workers can claim them again."""
@@ -1425,7 +1429,7 @@ class ASMDatabase:
                 SET status = 'pending',
                     error = '',
                     updated_at = ?
-                WHERE status = 'stopped' AND error LIKE ?
+                WHERE status = 'paused' OR (status = 'stopped' AND error LIKE ?)
                 """,
                 (now, like),
             )

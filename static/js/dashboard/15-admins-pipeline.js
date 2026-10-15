@@ -198,7 +198,7 @@ function _phudPhaseToolLabel(ph, modMap) {
 
 function _pipelineCardLiveInfo(cid) {
   const ps = pipelineState[cid];
-  if (!ps || (ps.status !== "queued" && ps.status !== "running")) return null;
+  if (!ps || !["queued", "running", "paused"].includes(ps.status)) return null;
 
   const modMap = {};
   (ps.phases || []).forEach(ph => (ph.modules || []).forEach(m => {
@@ -221,7 +221,9 @@ function _pipelineCardLiveInfo(cid) {
   const phaseId = activeTool ? (modToPhase[activeTool] || _MOD_TO_PHASE[activeTool]) : "";
   const phase = phaseId ? phases.find(p => p.id === phaseId) : null;
   const phaseLabel = phase ? phase.label : (ps.phase_label || "");
-  const label = ps.status === "queued"
+  const label = ps.status === "paused"
+    ? "Pausado · máquina carregada, retoma sozinho"
+    : ps.status === "queued"
     ? (activeTool ? `Queued · ${activeTool}${phaseLabel ? ` · ${phaseLabel}` : ""}` : "Queued · waiting for worker")
     : (activeTool ? `Running · ${activeTool}${phaseLabel ? ` · ${phaseLabel}` : ""}` : "Running · starting");
 
@@ -292,7 +294,7 @@ function renderPipelineStatus(cid) {
   });
 
   const isRunning = ps.status === "running";
-  const isQueued  = ps.status === "queued";
+  const isQueued  = ps.status === "queued" || ps.status === "paused";   // pausa do watchdog volta à fila
   const isDone    = ps.status === "done";
   const modeIcon = {stealth:"scale",balanced:"scale",fast:"bolt"}[ps.mode||"stealth"] || "scale";
   const cfCoverage = ps.cloudflare_coverage || 0;

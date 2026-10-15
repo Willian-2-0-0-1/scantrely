@@ -697,7 +697,7 @@ def _playwright_js_capture(targets: list, timeout: int = 30) -> dict:
         return host_js, host_calls[:200], js_bodies
 
     # Run all targets in parallel — cap workers so we don't OOM the box
-    max_workers = min(len(targets), 8)
+    max_workers = min(len(targets), 3)   # cada visita abre um navegador; 8 juntos levavam o load acima de 20
     runtime_js:       set  = set()
     network_map:      dict = {}
     playwright_bodies: dict = {}  # url -> JS text body captured via browser fetch

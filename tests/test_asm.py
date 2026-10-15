@@ -2670,7 +2670,7 @@ class TestHealth:
         job = db.create_job(job_type="pipeline", company_id="co", target="example.com")
         db.safety_hold_jobs(reason="SAFETY-WATCHDOG: load 99 > 4")
         held = db.get_job(job["id"])
-        assert held["status"] == "stopped"
+        assert held["status"] == "paused"   # não "stopped": a tela e o worker distinguem pausa de parada
         n = db.release_safety_hold()
         assert n == 1
         again = db.get_job(job["id"])

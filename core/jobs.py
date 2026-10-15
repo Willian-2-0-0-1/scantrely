@@ -132,6 +132,15 @@ class JobScheduler:
             self.db.recover_running_jobs()
             self._stop.clear()
             self._safety_stop.clear()
+            # jobs pausados pelo watchdog antes de um reinício: voltam à fila com a máquina saudável
+            try:
+                if hasattr(self.db, "count_paused_jobs") and self.db.count_paused_jobs():
+                    if self.watchdog_enabled:
+                        self._safety_stop.set()          # o watchdog libera após 30s de folga
+                    elif hasattr(self.db, "release_safety_hold"):
+                        self.db.release_safety_hold()
+            except Exception:
+                _log.debug('jobs.py: retomada de jobs pausados falhou', exc_info=True)
             for idx in range(self.max_workers):
                 thread = threading.Thread(target=self._worker_loop, name=f"asm-job-worker-{idx+1}", daemon=True)
                 thread.start()
@@ -315,9 +324,9 @@ class JobScheduler:
                         except Exception:
                             _log.debug('jobs.py:300 erro ignorado', exc_info=True)
                         for cid, state in list(self.pipeline_state.items()):
-                            if isinstance(state, dict) and state.get("status") == "stopped":
+                            if isinstance(state, dict) and state.get("status") in ("paused", "stopped"):
                                 reason_log = str(state.get("log", [{}])[-1].get("msg", ""))
-                                if "SAFETY-WATCHDOG" in reason_log:
+                                if state.get("status") == "paused" or "SAFETY-WATCHDOG" in reason_log:
                                     state["status"] = "queued"
                                     state.setdefault("log", []).append({"ts": now, "msg": "SAFETY-WATCHDOG released — resources healthy"})
                                     if self.save_pipeline_state:
@@ -368,8 +377,7 @@ class JobScheduler:
         now = datetime.now().isoformat(timespec="seconds")
         for cid, state in list(self.pipeline_state.items()):
             if isinstance(state, dict) and state.get("status") in {"queued", "running"}:
-                state["status"] = "stopped"
-                state["finished_at"] = now
+                state["status"] = "paused"   # não é "parado": o watchdog devolve à fila quando a máquina folgar
                 state.setdefault("log", []).append({"ts": now, "msg": hold_reason})
                 if self.save_pipeline_state:
                     try:
@@ -411,6 +419,8 @@ class JobScheduler:
                 self.run_pipeline(company_id, run_company, options)
                 final_state = self.pipeline_state.get(company_id, {})
                 status = final_state.get("status")
+                if status == "paused":
+                    return   # o job fica "paused" no banco; release_safety_hold o devolve à fila
                 if status == "stopped":
                     self.db.finish_job(job_id, status="cancelled")
                 elif status == "error":

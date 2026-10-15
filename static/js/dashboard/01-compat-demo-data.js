@@ -604,7 +604,7 @@ async function _updateScanProgressPill(jobs) {
     const r = await fetch(`/api/recon/${encodeURIComponent(running.company_id)}/pipeline`, {headers: _authHeaders()});
     if (!r.ok) return;
     const d = await r.json();
-    if (d.status !== "running" && d.status !== "queued") { el.style.display = "none"; return; }
+    if (!["running", "queued", "paused"].includes(d.status)) { el.style.display = "none"; return; }
     const total = Array.isArray(d.phases) ? d.phases.length : 0;
     const idx = (d.phase_idx || 0) + 1;
     const pct = total ? Math.min(100, Math.round((idx / total) * 100)) : 0;

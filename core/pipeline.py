@@ -347,6 +347,8 @@ def screenshot_host_from_filename(name: str) -> str:
 
 _TERMINAL_MODULE_STATUSES = frozenset({'done', 'error', 'timeout', 'skipped', 'cancelled', 'stopped'})
 _FINISHED_PIPELINE_STATUSES = frozenset({'done', 'error', 'cancelled', 'stopped', 'done_with_issues'})
+# interrompem o run: parado pelo usuário, ou pausado pelo watchdog (retoma sozinho depois)
+_HALT_STATUSES = frozenset({'stopped', 'paused'})
 
 
 def module_status_index(state: dict | None) -> dict[str, dict]:
@@ -4045,7 +4047,7 @@ class ReconRunner:
 
         def _run_module(module: str, limiter=None):
             job_key = f'{cid}:{module}'
-            if self.pipeline_state.get(cid, {}).get('status') == 'stopped':
+            if self.pipeline_state.get(cid, {}).get('status') in _HALT_STATUSES:
                 return
             skip_mods = {str(x) for x in self.pipeline_state.get(cid, {}).get('skip_modules') or []}
             if module in skip_mods:
@@ -4091,7 +4093,7 @@ class ReconRunner:
                     else:
                         result = self._invoke_module(module, fn_map[module])
                         envelope = _normalize_module_envelope(module, result)
-                    if self.pipeline_state.get(cid, {}).get('status') == 'stopped':
+                    if self.pipeline_state.get(cid, {}).get('status') in _HALT_STATUSES:
                         _log(f'  ⏹ {module} interrompido — pipeline stopped')
                         now_ts = datetime.now()
                         finished_at = now_ts.isoformat(timespec='seconds')
@@ -4177,7 +4179,7 @@ class ReconRunner:
         state['host_fp_hash'] = self._host_fingerprint_hash(current_hosts)
         state['phase_catalog'] = pipeline_definition()
         for phase_idx, phase in enumerate(PIPELINE_PHASES):
-            if self.pipeline_state.get(cid, {}).get('status') == 'stopped':
+            if self.pipeline_state.get(cid, {}).get('status') in _HALT_STATUSES:
                 _log('⏹ Pipeline stopped by user')
                 break
             phase_id = phase['id']
@@ -4240,7 +4242,7 @@ class ReconRunner:
                             f.result()
                         except Exception as _e:
                             _ignore(_e, 'pipeline.py:5541')
-                        if self.pipeline_state.get(cid, {}).get('status') == 'stopped':
+                        if self.pipeline_state.get(cid, {}).get('status') in _HALT_STATUSES:
                             _log('  ⏹ Pipeline stopped — cancelando módulos restantes')
                             for remaining in futs[idx + 1:]:
                                 try:
@@ -4252,7 +4254,7 @@ class ReconRunner:
             else:
                 for m in modules:
                     _run_module(m, phase_limiter)
-                    if self.pipeline_state.get(cid, {}).get('status') == 'stopped':
+                    if self.pipeline_state.get(cid, {}).get('status') in _HALT_STATUSES:
                         _log('  ⏹ Pipeline stopped')
                         self._finalize_in_flight_modules(cid)
                         break
@@ -4359,7 +4361,7 @@ class ReconRunner:
                             _log(f'  ↳ Recursão: +{added} hosts — pool total: {new_total}')
                 else:
                     _log('  ↳ Nenhum novo subdomínio para sondar')
-        if self.pipeline_state.get(cid, {}).get('status') == 'stopped':
+        if self.pipeline_state.get(cid, {}).get('status') in _HALT_STATUSES:
             self._finalize_in_flight_modules(cid)
         self._wrap_up_run(cid, co, options, queue_target, _log)
 
@@ -4368,7 +4370,7 @@ class ReconRunner:
         alertas e notificações da empresa."""
         not_done, skipped_modules = self._pipeline_execution_summary(cid, options)
         pending_domains = self._other_queue_domains_pending(cid, queue_target)
-        if self.pipeline_state.get(cid, {}).get('status') != 'stopped':
+        if self.pipeline_state.get(cid, {}).get('status') not in _HALT_STATUSES:
             if pending_domains:
                 # fila por domínio: o estado é da empresa; só o último domínio encerra o pipeline
                 self.pipeline_state[cid].update({'status': 'running', 'finished_at': None})
@@ -4386,6 +4388,9 @@ class ReconRunner:
         self._sync_module_status_from_results(cid)
         self._persist_pipeline_results(cid, _log, _options=options, _co=co)
         self._save_pipeline_state(cid)
+        if self.pipeline_state.get(cid, {}).get('status') == 'paused':
+            _log('  ⏸ Pausado pelo watchdog — o progresso foi salvo e o scan retoma sozinho')
+            return
         if pending_domains:
             # fila por domínio: histórico, snapshot/diff/alertas e notificações valem para a empresa
             # inteira; rodando a cada domínio saíam duplicados e o diff usava um snapshot pela metade

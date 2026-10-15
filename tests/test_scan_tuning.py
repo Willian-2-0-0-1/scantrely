@@ -849,3 +849,41 @@ def test_browser_modules_run_one_at_a_time():
     [t.start() for t in ts]; [t.join() for t in ts]
     assert all(order[i][0] != order[i + 1][0] for i in range(0, len(order) - 1, 2))   # in, out, in, out…
     assert [k for k, _ in order] == ["in", "out"] * 3
+
+
+# ── pausa do watchdog ≠ parado (antes: job rodando na pausa virava "cancelled" e nunca voltava) ──
+def test_paused_run_is_not_finished_nor_closed(tmp_path, monkeypatch):
+    r, calls = _wrap_runner(tmp_path, monkeypatch, set())
+    r.pipeline_state["co"]["status"] = "paused"
+    r._wrap_up_run("co", {}, {}, "", lambda m: None)
+    assert calls == ["persist"]                                    # salva progresso, sem fechar a empresa
+    assert r.pipeline_state["co"]["status"] == "paused"
+
+
+def test_worker_leaves_paused_job_for_release():
+    from core.jobs import JobScheduler
+    finished = []
+
+    class DB:
+        def finish_job(self, job_id, **k): finished.append((job_id, k.get("status")))
+
+    state = {}
+
+    def run_pipeline(cid, co, opts):
+        state[cid]["status"] = "paused"
+
+    js = JobScheduler(db=DB(), load_companies=lambda: [{"id": "co", "domains": ["x.com"]}],
+                      run_pipeline=run_pipeline, pipeline_state=state)
+    state["co"] = {}
+    js._execute({"id": "j1", "job_type": "pipeline", "company_id": "co", "options": {}})
+    assert finished == []                                          # fica "paused" no banco para voltar à fila
+
+
+def test_paused_jobs_from_before_restart_are_released(tmp_path):
+    from core.database import ASMDatabase
+    db = ASMDatabase(tmp_path / "t.db")
+    db.initialize()
+    j = db.create_job(job_type="pipeline", company_id="co", target="x.com")
+    db.safety_hold_jobs(reason="SAFETY-WATCHDOG: load 20 > 13")
+    assert db.count_paused_jobs() == 1
+    assert db.release_safety_hold() == 1 and db.get_job(j["id"])["status"] == "pending"

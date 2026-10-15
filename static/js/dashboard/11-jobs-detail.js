@@ -2,7 +2,7 @@
 //  JOB QUEUE
 // ════════════════════════════════════════════════════════════════════════
 function _jobStatusLabel(status) {
-  const labels = {pending:"Pendente", running:"Rodando", done:"Finalizado", error:"Erro", cancelled:"Cancelado", stopped:"Parado"};
+  const labels = {pending:"Pendente", running:"Rodando", done:"Finalizado", error:"Erro", cancelled:"Cancelado", stopped:"Parado", paused:"Pausado (máquina carregada — retoma sozinho)"};
   return labels[status] || status || "unknown";
 }
 
@@ -13,6 +13,7 @@ function _jobStatusClass(status) {
   if (status === "error") return "error";
   if (status === "cancelled") return "cancelled";
   if (status === "stopped") return "stopped";
+  if (status === "paused") return "pending";   // pausa do watchdog: volta à fila sozinha
   return "unknown";
 }
 

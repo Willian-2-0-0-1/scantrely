@@ -16,7 +16,7 @@ let _ltModules = {};       // module -> array of output lines + commands
 function _ltEnsurePolling() {
   const activeCid = Object.keys(pipelineState).find(cid => {
     const ps = pipelineState[cid];
-    return ps && (ps.status === "running" || ps.status === "queued");
+    return ps && (ps.status === "running" || ps.status === "queued" || ps.status === "paused");
   });
   if (!activeCid) {
     if (_ltPoll) { clearInterval(_ltPoll); _ltPoll = null; _ltActiveCid = null; }
