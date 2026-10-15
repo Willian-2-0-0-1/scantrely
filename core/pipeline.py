@@ -2239,8 +2239,8 @@ class ReconRunner:
             tf.write('\n'.join(targets))
             urls_file = tf.name
         try:
-            _ct.trace([gowitness_bin, 'scan', 'file', '-f', urls_file, '--screenshot-path', str(output_dir), '--threads', '5', '-q'])
-            subprocess.run([gowitness_bin, 'scan', 'file', '-f', urls_file, '--screenshot-path', str(output_dir), '--threads', '5', '-q'], capture_output=True, text=True, timeout=300)
+            _ct.trace([gowitness_bin, 'scan', 'file', '-f', urls_file, '--screenshot-path', str(output_dir), '--threads', '3', '-q'])
+            subprocess.run([gowitness_bin, 'scan', 'file', '-f', urls_file, '--screenshot-path', str(output_dir), '--threads', '3', '-q'], capture_output=True, text=True, timeout=300)
         except Exception as _e:
             _ignore(_e, 'pipeline.py:2510')
         finally:

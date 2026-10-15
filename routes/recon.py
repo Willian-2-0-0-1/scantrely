@@ -624,6 +624,24 @@ def create_recon_blueprint(
                 state = loaded
         if not state or not isinstance(state, dict):
             return jsonify({"status": "not_run"})
+        # "running"/"queued" sem nenhum job ativo = scan interrompido (ex.: servidor reiniciado no meio);
+        # sem isto a tela mostrava um scan fantasma para sempre (um scan interrompido ficou "running" por dias)
+        try:
+            age = (datetime.now() - datetime.fromisoformat(str(state.get("started_at")))).total_seconds()
+        except Exception:
+            age = 1e9
+        # > 2 min: entre a tela marcar "queued" e o job existir no banco há um instante
+        if str(state.get("status") or "").lower() in ("running", "queued") and db is not None and age > 120:
+            try:
+                active = db.find_active_job(company_id=cid, job_type="pipeline")
+            except Exception:
+                active = True
+            if not active:
+                state["status"] = "stopped"
+                state.setdefault("log", []).append({
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "msg": "⏹ Scan interrompido (nenhum job ativo — servidor reiniciado durante o scan?)",
+                })
 
         from core.pipeline import module_status_index
         persisted = module_status_index(state)

@@ -3674,3 +3674,27 @@ class TestFindingLifecyclePersist:
         runner._persist_pipeline_results("co")
         f = next(f for f in db.load_asm_data()["companies"][0]["findings"] if f["key"] == key)
         assert f.get("status") is None and f["miss_count"] == 0 and f["first_seen"] == "2026-10-01T00:00:00"
+
+
+class TestGhostRunningState:
+    """Estado "running" sem job ativo (servidor reiniciado no meio do scan) não pode ficar
+    aparecendo na tela como scan em andamento para sempre."""
+
+    def _set(self, flask_app, status, started_at):
+        flask_app._test_runner.pipeline_state["co"] = {"status": status, "started_at": started_at, "log": []}
+
+    def test_old_running_without_job_is_stopped(self, flask_app, auth_client):
+        from datetime import datetime, timedelta
+        self._set(flask_app, "running", (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds"))
+        assert auth_client.get("/api/recon/co/pipeline").get_json()["status"] == "stopped"
+
+    def test_just_queued_is_kept(self, flask_app, auth_client):
+        from datetime import datetime
+        self._set(flask_app, "queued", datetime.now().isoformat(timespec="seconds"))
+        assert auth_client.get("/api/recon/co/pipeline").get_json()["status"] == "queued"
+
+    def test_running_with_active_job_is_kept(self, flask_app, auth_client):
+        from datetime import datetime, timedelta
+        flask_app._test_scheduler.db.create_job(job_type="pipeline", company_id="co", target="co", options={})
+        self._set(flask_app, "running", (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds"))
+        assert auth_client.get("/api/recon/co/pipeline").get_json()["status"] == "running"

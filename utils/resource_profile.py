@@ -109,7 +109,10 @@ def recommended_limits() -> dict[str, int | str]:
             "ASM_HTTPX_RATE_LIMIT": 50,
         },
         "large": {
-            "ASM_JOB_WORKERS": 3,
+            # 2 jobs (= 2 domínios da fila) e 1 gowitness: com 3 + 2, a fase de fingerprint de três
+            # domínios juntos (Chrome + Ruby) passou de load 13 numa estação de 16 núcleos e o
+            # watchdog pausou o scan (15/10/2026)
+            "ASM_JOB_WORKERS": 2,
             "ASM_GLOBAL_PROC_LIMIT": 14,
             "ASM_DOMAIN_FANOUT_WORKERS": 5,
             "ASM_GATE_DEFAULT": 5,
@@ -119,7 +122,7 @@ def recommended_limits() -> dict[str, int | str]:
             "ASM_GATE_AMASS": 1,
             "ASM_GATE_NUCLEI": 2,
             "ASM_GATE_NAABU": 2,
-            "ASM_GATE_GOWITNESS": 2,
+            "ASM_GATE_GOWITNESS": 1,
             "ASM_GATE_WPSCAN": 1,
             "ASM_GATE_FFUF": 2,
             "ASM_HTTPX_THREADS": 35,

@@ -7,6 +7,8 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 ### Estabilidade e desempenho
 
 - **Servidor travava com o uso**: `with sqlite3.connect(...)` só faz commit/rollback, não fecha a conexão. `_connect` (banco e cache HTTP) agora fecha sempre. Com ~500 conexões abertas (`asm.db` + `asm.db-wal`) o processo batia no limite de 1024 descritores, o `accept` falhava em laço (100% de CPU) e nada mais era atendido. Depois: 4 descritores estáveis sob carga.
+- **Scan fantasma**: estado "running"/"queued" sem nenhum job ativo há mais de 2 min (servidor reiniciado no meio do scan) passa a aparecer como interrompido — uma empresa aparecia "rodando" havia 6 dias.
+- **Carga**: perfil `large` com 2 jobs em paralelo (era 3) e 1 gowitness (era 2, com 3 abas do Chrome em vez de 5); whatweb/wpscan (`ruby`) limitados a 1. Com 3 domínios juntos na fase de fingerprint a carga chegou a 14,85 e o watchdog pausou o scan.
 - Serviço de usuário `scantrely` (systemd) sobe o servidor no boot via `restart_server.sh`, com `LimitNOFILE=8192`.
 - Abrir uma empresa: 21 → 16 requisições e ~350 → ~210 ms. GET idêntico em voo é compartilhado (`_sharedGetJSON`); prioridades guardadas por 60s — antes eram buscadas de novo a cada 4s pela sincronização do pipeline e o bloco piscava "Calculando prioridades…".
 - Aba "Domínios e marca" quebrada em todas as empresas: o "Loading" ao abrir a empresa apagava os contêineres embutidos (infra/typosquat). Abas com estrutura própria (`data-keep-layout`) e embutidas não são mais apagadas, e a aba se refaz se preciso. `asm.js` passou a ter versão na URL (ficava preso no cache).

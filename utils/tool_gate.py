@@ -45,6 +45,9 @@ DEFAULT_LIMITS = {
     "naabu": _lim("naabu", 1),
     "nuclei": _lim("nuclei", 1),
     "gowitness": _lim("gowitness", 1),
+    # whatweb/wpscan rodam como "ruby …": o gate pega o nome do executável. Ruby pesado em paralelo
+    # (vários domínios ao mesmo tempo) somava com o Chrome do gowitness e o watchdog pausava o scan.
+    "ruby": _lim("ruby", 1),
     "wpscan": _lim("wpscan", 1),
     "masscan": _lim("masscan", 1),
     "ffuf": _lim("ffuf", 2),
