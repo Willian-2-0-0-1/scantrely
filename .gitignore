@@ -58,3 +58,6 @@ wordlists/
 bin/
 fotoscomplemento_guest_pii_leak.txt
 backups/
+
+# Alvos de scan (espelho do banco, regravado pelo servidor; não publicar)
+config/companies.json
