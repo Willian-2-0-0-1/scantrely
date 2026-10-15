@@ -1,8 +1,6 @@
 """Subdomain Takeover Detection — extraído de core/recon.py (ver core/recon.py para o índice completo)."""
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import as_completed
 from datetime import datetime
-from core.reconlib.base import _subp, http_get
+from core.reconlib.base import _subp, http_get, run_bounded
 from core.reconlib.typosquat import _resolve_domain
 from core.reconlib.waf import _is_waf_challenge_body
 
@@ -59,7 +57,18 @@ _TAKEOVER_CNAME_TARGETS = [
     "fly.dev", "launchrock.com", "pingdom.net", "uservoice.com",
     "tilda.ws", "hubspotpagebuilder.com", "squarespace.com",
     "wixsite.com", "myjetbrains.com", "hashnode.network",
+    # nomes que terceiros conseguem registrar quando o CNAME fica pendurado
+    "elasticbeanstalk.com", "cloudapp.net", "cloudapp.azure.com", "trafficmanager.net",
+    "blob.core.windows.net", "azureedge.net", "azure-api.net",
 ]
+
+# CNAME pendurado (NXDOMAIN) só é takeover se outra pessoa puder registrar o MESMO nome no
+# provedor. ELB/CloudFront/API Gateway geram nomes com ID aleatório: órfão, mas não registrável.
+_CLAIMABLE_ON_NXDOMAIN = (
+    "elasticbeanstalk.com", "azurewebsites.net", "cloudapp.net", "cloudapp.azure.com",
+    "trafficmanager.net", "blob.core.windows.net", "azureedge.net", "azure-api.net",
+    "herokuapp.com", "bitbucket.io", "ghost.io", "surge.sh",
+)
 
 
 def _check_takeover(host: str) -> dict | None:
@@ -85,12 +94,18 @@ def _check_takeover(host: str) -> dict | None:
     # Check if host resolves
     ips = _resolve_domain(host)
     if not ips:
-        # NXDOMAIN = dangling CNAME
+        if cname.endswith(_CLAIMABLE_ON_NXDOMAIN):
+            return {
+                "host": host, "cname": cname, "cname_target": cname_target,
+                "severity": "critical",
+                "issue": f"NXDOMAIN — dangling CNAME to {cname_target} (nome registrável por terceiros)",
+                "takeover_possible": True,
+            }
         return {
             "host": host, "cname": cname, "cname_target": cname_target,
-            "severity": "critical",
-            "issue": f"NXDOMAIN — dangling CNAME to {cname_target} (unclaimed service)",
-            "takeover_possible": True,
+            "severity": "info",
+            "issue": f"CNAME órfão para {cname} — nome não registrável por terceiros; limpar o DNS",
+            "takeover_possible": False,
         }
 
     # Check response body for takeover signatures
@@ -116,8 +131,8 @@ def _check_takeover(host: str) -> dict | None:
 
     return {
         "host": host, "cname": cname, "cname_target": cname_target,
-        "severity": "medium",
-        "issue": f"CNAME → {cname_target} — verify service is active",
+        "severity": "info",
+        "issue": f"CNAME → {cname_target} — responde e sem assinatura de serviço abandonado",
         "takeover_possible": False,
     }
 
@@ -128,17 +143,20 @@ def run_takeover_check(hosts: list) -> dict:
     all_hosts = [h["host"] for h in hosts]
     results = []
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(_check_takeover, h): h for h in all_hosts}
-        for fut in as_completed(futures):
-            r = fut.result()
-            if r:
-                results.append(r)
+    def _one(host):
+        r = _check_takeover(host)
+        if r:
+            results.append(r)
+
+    # agora recebe todos os hosts do escopo (centenas): prazo interno e parcial em vez de estourar
+    complete = run_bounded(_one, all_hosts, workers=20, label="takeover")
+    results = list(results)
 
     critical = [r for r in results if r["severity"] == "critical"]
     return {
-        "results":  sorted(results, key=lambda r: ["critical","medium"].index(r["severity"])),
+        "results":  sorted(results, key=lambda r: ["critical", "medium", "info"].index(r["severity"])),
         "critical_count": len(critical),
         "total_checked":  len(all_hosts),
+        "complete":       complete,
         "scanned_at":     datetime.now().isoformat(timespec="seconds"),
     }

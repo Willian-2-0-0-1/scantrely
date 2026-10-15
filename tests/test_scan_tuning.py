@@ -314,3 +314,45 @@ def test_otx_key_comes_from_settings(monkeypatch):
     monkeypatch.setattr(t, "_http_open", fake_open)
     t.run_api("x.com", {"settings": {"otx_key": "abc"}})
     assert sent["X-OTX-API-KEY"] == "abc"
+
+
+# ── resolvedores do sistema (VPN com firewall estrito recusa 1.1.1.1/8.8.8.8) ──
+def test_system_resolvers_read_resolv_conf(tmp_path):
+    from utils.resolvers import system_resolvers
+    conf = tmp_path / "resolv.conf"
+    conf.write_text("# x\nnameserver 10.64.0.1\nnameserver 10.64.0.1\nsearch lan\n")
+    assert system_resolvers(str(conf)) == ["10.64.0.1"]
+    assert system_resolvers(str(tmp_path / "nao-existe")) == ["127.0.0.53"]
+
+
+def test_tools_use_system_resolvers_not_public_lists():
+    from utils.tools import registry
+    from utils.resolvers import resolvers_file
+    amass = registry.get("amass").command("x.com", {})
+    assert amass[amass.index("-rf") + 1] == resolvers_file()
+    assert str(registry.get("subjack")._ensure_resolvers()) == resolvers_file()
+    dnsx = registry.get("dnsx").command("x.com", {})
+    assert dnsx[dnsx.index("-r") + 1] == resolvers_file()
+
+
+# ── takeover: crítico só com nome registrável ou assinatura ─────────────────
+@pytest.mark.parametrize("cname,critical", [
+    ("app-123.us-east-1.elb.amazonaws.com", False),   # ELB: ID aleatório, ninguém registra
+    ("myapp.us-east-1.elasticbeanstalk.com", True),
+    ("myapp.azurewebsites.net", True),
+])
+def test_dangling_cname_is_critical_only_when_claimable(monkeypatch, cname, critical):
+    import core.reconlib.takeover as tk
+    monkeypatch.setattr(tk, "_subp", lambda *a, **k: types.SimpleNamespace(stdout=cname + ".\n"))
+    monkeypatch.setattr(tk, "_resolve_domain", lambda host: [])
+    r = tk._check_takeover("old.x.com")
+    assert r["takeover_possible"] is critical
+    assert r["severity"] == ("critical" if critical else "info")
+
+
+def test_takeover_scope_is_not_capped_by_active_hosts(tmp_path):
+    hosts = [{"host": f"h{i}.x.com", "status_code": 200 if i < 5 else None} for i in range(100)]
+    r = _runner(tmp_path)
+    opts = {"profile": "bug_bounty", "active": True, "active_max_hosts": 40, "domains": ["x.com"]}
+    assert len(r._filter_hosts_for_options(hosts, {"domains": ["x.com"]}, opts)) == 40
+    assert len(r._filter_hosts_for_options(hosts, {"domains": ["x.com"]}, {**opts, "active_max_hosts": 0})) == 100

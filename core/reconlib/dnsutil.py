@@ -430,10 +430,13 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
     resolved = []
     resolver_used = "none"
 
+    from utils.resolvers import resolvers_file
+    resolver_args = ["-r", resolvers_file()]   # resolvedores públicos padrão do dnsx caem atrás de VPN
+
     def _dnsx_produces_output(bin_path: str, test_host: str = "google.com") -> bool:
         """Sanity-check: dnsx sometimes silently produces no output on some environments."""
         try:
-            r = _subp([bin_path, "-l", "/dev/stdin", "-a", "-silent"],
+            r = _subp([bin_path, "-l", "/dev/stdin", "-a", "-silent", *resolver_args],
                       input=test_host + "\n", capture_output=True, text=True, timeout=10)
             return bool(r.stdout.strip())
         except Exception:
@@ -443,7 +446,7 @@ def run_dns_bruteforce(domain: str, hosts: list, mode: str = "balanced") -> dict
         try:
             result = _subp(
                 [dnsx_bin, "-l", perms_file, "-silent", "-duc", "-a", "-resp",
-                 "-retry", "1", "-threads", "100"],
+                 "-retry", "1", "-threads", "50", *resolver_args],
                 capture_output=True, text=True, timeout=300,
             )
             ansi_re = re.compile(r"\x1b\[[0-9;]*m")

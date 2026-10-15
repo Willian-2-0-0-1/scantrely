@@ -542,19 +542,9 @@ class AmassTool(CommandTool):
     timeout     = 300
 
     def command(self, target: str, opts: dict) -> list[str]:
-        resolvers = Path("/tmp/resolvers.txt")
-        cmd = ["amass", "enum", "-passive", "-d", target, "-timeout", "20"]
-        if not resolvers.exists():
-            try:
-                subprocess.run(
-                    ["curl", "-sL", "--max-time", "10", "-o", str(resolvers),
-                     "https://raw.githubusercontent.com/trickest/resolvers/main/resolvers.txt"],
-                    capture_output=True, timeout=12
-                )
-            except Exception:
-                _log.debug('tools.py:557 erro ignorado', exc_info=True)
-        if resolvers.exists() and resolvers.stat().st_size > 100:
-            cmd += ["-rf", str(resolvers)]
+        from utils.resolvers import resolvers_file
+        # antes: lista pública baixada do GitHub — recusada atrás de VPN com firewall estrito
+        return ["amass", "enum", "-passive", "-d", target, "-timeout", "20", "-rf", resolvers_file()]
         return cmd
 
     def parse(self, stdout: str, stderr: str, target: str) -> list[Finding]:
@@ -660,7 +650,9 @@ class DnsxTool(CommandTool):
         settings = opts.get("settings", {}) or {}
         mode = str(opts.get("mode") or settings.get("dnsx_mode") or "resolve").lower()
         record_types = self._csv_items(opts.get("record_types") or settings.get("dnsx_record_types") or "")
-        resolver_file = opts.get("resolvers") or settings.get("dnsx_resolvers") or ""
+        if not (resolver_file := opts.get("resolvers") or settings.get("dnsx_resolvers") or ""):
+            from utils.resolvers import resolvers_file
+            resolver_file = resolvers_file()
         wildcard_domain = opts.get("wildcard_domain") or settings.get("dnsx_wildcard_domain") or ""
 
         cmd = ["dnsx", "-silent", "-duc"]
@@ -1421,22 +1413,9 @@ class SubjackTool(CommandTool):
     timeout     = 120
 
     def _ensure_resolvers(self) -> Path | None:
-        resolvers = Path("/tmp/subjack_resolvers.txt")
-        if not resolvers.exists() or resolvers.stat().st_size < 20:
-            try:
-                resolvers.write_text(
-                    "1.1.1.1\n"
-                    "1.0.0.1\n"
-                    "8.8.8.8\n"
-                    "8.8.4.4\n"
-                    "9.9.9.9\n"
-                    "208.67.222.222\n"
-                    "208.67.220.220\n",
-                    encoding="utf-8",
-                )
-            except Exception:
-                return None
-        return resolvers
+        # antes: 1.1.1.1/8.8.8.8 fixos — atrás de VPN com firewall estrito o subjack não resolvia nada
+        from utils.resolvers import resolvers_file
+        return Path(resolvers_file())
 
     def command(self, target: str, opts: dict) -> list[str]:
         output_file = f"/tmp/subjack_{target.replace('.','_')}.json"

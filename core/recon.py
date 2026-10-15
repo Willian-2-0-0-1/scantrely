@@ -337,6 +337,7 @@ from core.reconlib.supply_chain import (  # noqa: F401
     run_supply_chain_scan,
 )
 from core.reconlib.takeover import (  # noqa: F401
+    _CLAIMABLE_ON_NXDOMAIN,
     _TAKEOVER_CNAME_TARGETS,
     _TAKEOVER_SIGNATURES,
     _check_takeover,
