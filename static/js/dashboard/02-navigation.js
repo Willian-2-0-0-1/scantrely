@@ -558,7 +558,7 @@ async function switchGroup(groupName, btn, panelName) {
   const co = allCompanies().find(c => c.id === state.currentId);
   const name = panel;
   if (name === 'overview'     && co)              renderOverview(co);
-  if (name === 'domains'      && co)              { renderDomainsTab(co); renderInfraTab(co); renderTyposquatTab(co); }
+  if (name === 'domains'      && co)              { _ensureDomainsLayout(); renderDomainsTab(co); renderInfraTab(co); renderTyposquatTab(co); }
   if (name === 'subdomains'   && co)              renderSubdomainsTab(co);
   if (name === 'pipeline'     && state.currentId) await renderReconTab(state.currentId);
   if (name === 'cve'          && co)              renderCveTab(co);
@@ -582,6 +582,16 @@ async function switchGroup(groupName, btn, panelName) {
   }
   if (btn) btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   updateTabScrollBtns();
+}
+
+// "Domínios e marca" tem estrutura própria (painel + infra + typosquat embutidos). Se algo
+// sobrescreveu a aba, refaz antes de desenhar (senão: "Cannot set properties of null").
+function _ensureDomainsLayout() {
+  const pane = document.getElementById("tab-domains");
+  if (!pane || document.getElementById("dom-main")) return;
+  pane.innerHTML = '<div id="dom-main"></div>'
+    + '<h3 class="dom-sec-title">Infraestrutura e DNS do domínio</h3><div id="tab-infra" class="tab-content embed"></div>'
+    + '<h3 class="dom-sec-title">Domínios parecidos com a marca</h3><div id="tab-typosquat" class="tab-content embed"></div>';
 }
 
 // Painéis que foram absorvidos pela matriz de ativos (uma tabela, uma coluna por assunto) ou pelo painel de domínios.

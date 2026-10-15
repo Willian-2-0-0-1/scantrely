@@ -743,3 +743,32 @@ def test_alerts_listing_and_ack(tmp_path):
     assert db.acknowledge_alert("co", a1) is True
     assert db.get_alerts("co")[0]["acknowledged"] is True
     assert db.acknowledge_alert("other", a1) is False          # não marca alerta de outra empresa
+
+
+# ── vazamento de conexões SQLite (15/10: ~500 conexões abertas → 1024 descritores → servidor travado) ──
+def test_db_operations_do_not_leak_file_descriptors(tmp_path):
+    import os
+    from core.database import ASMDatabase
+    db = ASMDatabase(tmp_path / "t.db")
+    db.initialize()
+    db.create_alert("co", "x", "t", "", "info", {})
+    before = len(os.listdir("/proc/self/fd"))
+    for _ in range(300):
+        db.get_alerts("co")
+        db.load_asm_data()
+    assert len(os.listdir("/proc/self/fd")) - before < 5
+
+
+def test_db_connection_still_commits_and_rolls_back(tmp_path):
+    from core.database import ASMDatabase
+    db = ASMDatabase(tmp_path / "t.db")
+    db.initialize()
+    with db._connect() as conn:
+        conn.execute("INSERT INTO alerts (id, company_id, rule_type, title, created_at) VALUES ('a', 'co', 'x', 't', 'now')")
+    try:
+        with db._connect() as conn:
+            conn.execute("INSERT INTO alerts (id, company_id, rule_type, title, created_at) VALUES ('b', 'co', 'x', 't', 'now')")
+            raise RuntimeError("falha no meio")
+    except RuntimeError:
+        pass
+    assert [a["id"] for a in db.get_alerts("co")] == ["a"]

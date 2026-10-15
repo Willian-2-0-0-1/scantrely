@@ -4,6 +4,13 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 
 ## [Não lançado] - 2026-10-15
 
+### Estabilidade e desempenho
+
+- **Servidor travava com o uso**: `with sqlite3.connect(...)` só faz commit/rollback, não fecha a conexão. `_connect` (banco e cache HTTP) agora fecha sempre. Com ~500 conexões abertas (`asm.db` + `asm.db-wal`) o processo batia no limite de 1024 descritores, o `accept` falhava em laço (100% de CPU) e nada mais era atendido. Depois: 4 descritores estáveis sob carga.
+- Serviço de usuário `scantrely` (systemd) sobe o servidor no boot via `restart_server.sh`, com `LimitNOFILE=8192`.
+- Abrir uma empresa: 21 → 16 requisições e ~350 → ~210 ms. GET idêntico em voo é compartilhado (`_sharedGetJSON`); prioridades guardadas por 60s — antes eram buscadas de novo a cada 4s pela sincronização do pipeline e o bloco piscava "Calculando prioridades…".
+- Aba "Domínios e marca" quebrada em todas as empresas: o "Loading" ao abrir a empresa apagava os contêineres embutidos (infra/typosquat). Abas com estrutura própria (`data-keep-layout`) e embutidas não são mais apagadas, e a aba se refaz se preciso. `asm.js` passou a ter versão na URL (ficava preso no cache).
+
 ### Vigilância contínua
 
 - **`core/watch.py`**: job `watch` (passivo com subfinder + checagem 80/443 com filtro de curinga + diff contra o inventário), ~40s para 350 hosts. Cada mudança vira alerta (host novo, voltou a responder, parou de responder após 2 vigilâncias seguidas, status/título/tecnologia nova; IP não conta) e os webhooks recebem `surface_change`. Primeira vigilância de um domínio recém-adicionado é linha de base: grava tudo e gera um alerta só.

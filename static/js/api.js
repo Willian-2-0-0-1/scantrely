@@ -13,6 +13,22 @@
     return fetch(url, opts);
   }
 
+  // ── GET compartilhado ──────────────────────────────────────────────────────
+  // Abrir uma empresa disparava assets, finding-groups e priorities duas vezes cada (caminhos de
+  // render diferentes). Mesma URL já em voo = mesma resposta; nada fica em cache depois.
+  var _inflight = {};
+  window._sharedGetJSON = function (url) {
+    if (_inflight[url]) return _inflight[url];
+    var p = fetch(url, {headers: _authHeaders()}).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+    _inflight[url] = p;
+    var done = function () { delete _inflight[url]; };
+    p.then(done, done);
+    return p;
+  };
+
   // ── Companies ──────────────────────────────────────────────────────────────
   ASM.api = {
 

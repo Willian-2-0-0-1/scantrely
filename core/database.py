@@ -14,6 +14,7 @@ import logging as _logging
 _log = _logging.getLogger('scantrely.database')
 import os
 import sqlite3
+from contextlib import contextmanager
 import threading
 import uuid
 from datetime import datetime
@@ -354,11 +355,22 @@ class ASMDatabase:
             self._migrate_snapshots()
             self.sync_legacy_files()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
+        """Conexão por operação: commit/rollback no fim do with (como antes) e SEMPRE fecha.
+
+        O with de sqlite3.Connection só faz commit/rollback, não fecha: as conexões ficavam abertas
+        até o coletor de lixo e, com ~500 delas (asm.db + asm.db-wal), o processo batia no limite de
+        1024 descritores — o accept falhava em laço, 100% de CPU, e o servidor parava de responder.
+        """
         conn = sqlite3.connect(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=5000")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=5000")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     _VALID_TABLES = frozenset({
         "settings", "admins", "companies", "schedules", "webhooks",

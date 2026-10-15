@@ -201,7 +201,10 @@
     var descEl = document.getElementById('co-desc');
     if (titleEl) titleEl.textContent = co.name;
     if (descEl) descEl.textContent = 'Loading company details…';
-    $$('#view-company .tab-content').forEach(function (panel) {
+    // abas com estrutura própria (data-keep-layout, ex.: "Domínios e marca" com infra/typosquat
+    // embutidos) e as embutidas não são apagadas: o "Loading" sumia com os contêineres delas
+    $$('#view-company .tab-content:not(.embed)').forEach(function (panel) {
+      if (panel.hasAttribute('data-keep-layout')) return;
       panel.innerHTML = '<div class="empty"><b>Loading</b>Fetching the latest company data.</div>';
     });
   };

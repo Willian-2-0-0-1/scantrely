@@ -7,6 +7,7 @@ TTL: duration of the scan (cache cleared on new scan)
 """
 
 import sqlite3, hashlib, json, time, os
+from contextlib import contextmanager
 import logging as _logging
 _log = _logging.getLogger('scantrely.http_cache')
 from pathlib import Path
@@ -21,11 +22,17 @@ class HttpCache:
         self._db_path = db_path
         self._init_db()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
+        # o with de sqlite3.Connection não fecha a conexão (vazava descritor); fecha sempre
         conn = sqlite3.connect(self._db_path, timeout=5)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self):
         with self._connect() as conn:

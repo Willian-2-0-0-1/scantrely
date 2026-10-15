@@ -32,27 +32,42 @@
     "</article>";
   }
 
+  // O resumo da empresa é redesenhado a cada 4s pela sincronização do pipeline: sem cache, cada
+  // redesenho buscava as prioridades de novo e piscava "Calculando prioridades…" na tela.
+  var _cache = {};          // cid -> {at, html}
+  var TTL_MS = 60000;
+
+  function bind(el) {
+    el.onclick = function (ev) {
+      var b = ev.target.closest("button[data-tab]");
+      if (b && typeof window.switchTab === "function") window.switchTab(b.getAttribute("data-tab"));
+    };
+  }
+
   window.renderPriorities = async function (cid) {
     var el = document.getElementById("ov-priorities");
     if (!el) return;
+    var hit = _cache[cid];
+    if (hit && Date.now() - hit.at < TTL_MS) {
+      if (el.innerHTML !== hit.html) { el.innerHTML = hit.html; bind(el); }
+      return;
+    }
     el.setAttribute("aria-busy", "true");
-    el.innerHTML = '<div class="pr-empty" role="status">Calculando prioridades…</div>';
+    if (!el.innerHTML.trim()) el.innerHTML = '<div class="pr-empty" role="status">Calculando prioridades…</div>';
     try {
-      var r = await fetch("/api/data/company/" + encodeURIComponent(cid) + "/priorities", { headers: window._authHeaders ? window._authHeaders() : {} });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      var d = await r.json();
+      var d = await window._sharedGetJSON("/api/data/company/" + encodeURIComponent(cid) + "/priorities");
       var head = '<div class="pr-title-bar"><h2>O que fazer agora</h2><span class="pr-sub">' +
         (d.actions.length ? d.total + " ações a partir de " + d.findings_total + " achados" : "") + "</span></div>";
+      var html;
       if (!d.actions.length) {
-        el.innerHTML = head + '<div class="pr-empty">Nenhuma ação pendente. Rode um scan para atualizar.</div>';
+        html = head + '<div class="pr-empty">Nenhuma ação pendente. Rode um scan para atualizar.</div>';
       } else {
         var rest = d.hidden ? '<button type="button" class="btn btn-secondary pr-all" data-tab="vulns">Ver mais ' + d.hidden + " ações e todos os achados</button>" : "";
-        el.innerHTML = head + '<div class="pr-list">' + d.actions.map(card).join("") + "</div>" + rest;
+        html = head + '<div class="pr-list">' + d.actions.map(card).join("") + "</div>" + rest;
       }
-      el.onclick = function (ev) {
-        var b = ev.target.closest("button[data-tab]");
-        if (b && typeof window.switchTab === "function") window.switchTab(b.getAttribute("data-tab"));
-      };
+      _cache[cid] = {at: Date.now(), html: html};
+      el.innerHTML = html;
+      bind(el);
     } catch (e) {
       el.innerHTML = '<div class="pr-empty pr-error">Não foi possível calcular as prioridades (' + esc(e.message) + ").</div>";
     } finally {

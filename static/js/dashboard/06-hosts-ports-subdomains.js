@@ -744,9 +744,7 @@ function _subParams(extra = {}) {
 }
 
 async function _subQuery(extra) {
-  const r = await fetch(`/api/data/company/${encodeURIComponent(state.currentId)}/assets?${_subParams(extra)}`, {headers: _authHeaders()});
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const resp = await r.json();
+  const resp = await _sharedGetJSON(`/api/data/company/${encodeURIComponent(state.currentId)}/assets?${_subParams(extra)}`);
   // captura: o servidor não conhece os screenshots capturados pelo navegador/Playwright
   const co = allCompanies().find(c => c.id === state.currentId);
   const shots = co && co._screenshotsByHost;
