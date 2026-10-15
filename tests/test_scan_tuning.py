@@ -887,3 +887,32 @@ def test_paused_jobs_from_before_restart_are_released(tmp_path):
     db.safety_hold_jobs(reason="SAFETY-WATCHDOG: load 20 > 13")
     assert db.count_paused_jobs() == 1
     assert db.release_safety_hold() == 1 and db.get_job(j["id"])["status"] == "pending"
+
+
+# ── git_leaks: "ref:" in bytes dava TypeError engolido → nunca detectava .git exposto ──
+def test_git_head_detection_requires_real_content():
+    from core.reconlib.extra_tools import _looks_like_git_head
+    assert _looks_like_git_head(b"ref: refs/heads/main\n")
+    assert _looks_like_git_head(b"3f2a" * 10 + b"\n")                  # HEAD destacado (sha)
+    assert not _looks_like_git_head(b"<!doctype html><div id=root>ref: x</div>")   # SPA soft-200
+    assert not _looks_like_git_head(b"")
+
+
+def test_git_leaks_finds_exposed_git_and_skips_dead_hosts(monkeypatch):
+    import core.reconlib.extra_tools as ex
+    calls = []
+
+    def fake_get(url, **k):
+        calls.append(url)
+        if "dead" in url:
+            return 0, b"", {}
+        if "spa" in url:
+            return 200, b"<html>app</html>", {}
+        return 200, b"ref: refs/heads/main\n", {}
+
+    monkeypatch.setattr(ex, "http_get", fake_get)
+    monkeypatch.setattr(ex.subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+    out = ex.run_git_leaks([{"host": "git.x.com"}, {"host": "spa.x.com"}, {"host": "dead.x.com"}], ["x.com"])
+    assert out["exposed_git"] == ["https://git.x.com/.git/"]
+    assert [u for u in calls if "spa" in u] == ["https://spa.x.com/.git/HEAD"]   # respondeu em https: não tenta http
+    assert len([u for u in calls if "dead" in u]) == 2

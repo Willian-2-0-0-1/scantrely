@@ -5,62 +5,71 @@ import json
 import re
 import shutil
 import tempfile
-from core.reconlib.base import _log, http_get, subprocess
+from core.reconlib.base import run_bounded, _log, http_get, subprocess
 
 # ── NEW MODULES: gitleaks, jwt_tool, S3Scanner, XSS ────────────────────────────
 
+_GIT_HEAD_RE = re.compile(rb"^(ref: refs/[\w./-]+|[0-9a-f]{40})\s*$")
+
+
+def _looks_like_git_head(body) -> bool:
+    """Conteúdo real de .git/HEAD; página de SPA/soft-200 não conta (regra: sem evidência não é achado)."""
+    return bool(_GIT_HEAD_RE.match((body or b"")[:200].strip()))
+
+
 def run_git_leaks(hosts: list, domains: list, github_token: str = None) -> dict:
-    """Scan exposed .git directories and git history for secrets using gitleaks."""
+    """Scan exposed .git directories and git history for secrets using gitleaks.
+
+    Antes: testava `"ref:" in body` com body em bytes → TypeError engolido em todo host, então nunca
+    detectava nada; e varria até 50 hosts × 2 esquemas em série (estourava os 180s do módulo).
+    """
+    import tempfile
     findings = []
-    scanned = 0
+    scanned = []
+    exposed = []
     gitleaks_bin = shutil.which("gitleaks")
 
-    for h in hosts[:50]:  # cap at 50 hosts
+    def _scan_host(h):
         host = h.get("host", "")
         if not host:
-            continue
+            return
         for scheme in ("https", "http"):
-            try:
-                url = f"{scheme}://{host}/.git/HEAD"
-                status, body, _ = http_get(url, timeout=5, retries=1)
-                if status == 200 and "ref:" in (body or ""):
-                    # Clone and scan
-                    import tempfile
-                    with tempfile.TemporaryDirectory() as tmp:
-                        clone_url = f"{scheme}://{host}/.git"
-                        result = subprocess.run(
-                            ["git", "clone", "--depth", "1", clone_url, tmp],
-                            capture_output=True, text=True, timeout=60
-                        )
-                        if result.returncode == 0 and gitleaks_bin:
-                            scan = subprocess.run(
-                                [gitleaks_bin, "detect", "--source", tmp, "-f", "json", "--no-git"],
-                                capture_output=True, text=True, timeout=60
-                            )
-                            if scan.stdout.strip():
-                                try:
-                                    leaks = json.loads(scan.stdout)
-                                    for leak in (leaks if isinstance(leaks, list) else []):
-                                        findings.append({
-                                            "type": "git_leak",
-                                            "severity": "high",
-                                            "title": f"Git secret exposed: {leak.get('Description','')}",
-                                            "host": host,
-                                            "value": leak.get("Secret", ""),
-                                            "file": leak.get("File", ""),
-                                            "module": "git_leaks",
-                                        })
-                                except json.JSONDecodeError:
-                                    pass
-                            scanned += 1
-                    break  # one scheme per host
-            except Exception:
-                continue
+            status, body, _ = http_get(f"{scheme}://{host}/.git/HEAD", timeout=5, retries=1)
+            if not status:
+                continue                       # sem resposta nesse esquema: tenta o outro
+            if status == 200 and _looks_like_git_head(body):
+                exposed.append(f"{scheme}://{host}/.git/")
+                with tempfile.TemporaryDirectory() as tmp:
+                    result = subprocess.run(["git", "clone", "--depth", "1", f"{scheme}://{host}/.git", tmp],
+                                            capture_output=True, text=True, timeout=60)
+                    if result.returncode == 0 and gitleaks_bin:
+                        scan = subprocess.run([gitleaks_bin, "detect", "--source", tmp, "-f", "json", "--no-git"],
+                                              capture_output=True, text=True, timeout=60)
+                        try:
+                            leaks = json.loads(scan.stdout) if scan.stdout.strip() else []
+                        except json.JSONDecodeError:
+                            leaks = []
+                        for leak in (leaks if isinstance(leaks, list) else []):
+                            findings.append({
+                                "type": "git_leak",
+                                "severity": "high",
+                                "title": f"Git secret exposed: {leak.get('Description','')}",
+                                "host": host,
+                                "value": leak.get("Secret", ""),
+                                "file": leak.get("File", ""),
+                                "module": "git_leaks",
+                            })
+                scanned.append(host)
+            return                              # respondeu: não precisa do outro esquema
 
+    complete = run_bounded(_scan_host, hosts[:50], workers=8, label="git_leaks")
+    findings = list(findings)
     return {
         "findings": findings,
         "total": len(findings),
-        "hosts_scanned": scanned,
+        "exposed_git": list(exposed),
+        "hosts_scanned": len(scanned),
+        "complete": complete,
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
     }
 

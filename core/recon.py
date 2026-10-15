@@ -206,6 +206,7 @@ from core.reconlib.email_sec import (  # noqa: F401
     run_email_recon,
 )
 from core.reconlib.extra_tools import (  # noqa: F401
+    _looks_like_git_head,
     run_git_leaks,
     run_s3_scanner,
 )

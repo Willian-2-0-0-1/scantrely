@@ -2213,11 +2213,21 @@ class ReconRunner:
             _rl.wait()
             _ct.trace([whatweb_bin, '--log-json', '/dev/stdout'] + targets[:3])
             techs = {}
-            batch_size = 10
+            # prazo do módulo inteiro abaixo dos 180s: lotes até onde der, devolvendo o que já veio.
+            # (o whatweb só grava o log no fim — um lote morto por timeout não rende nada)
+            deadline = time.monotonic() + 150
+            batch_size = 20
+            skipped = 0
             for i in range(0, len(targets), batch_size):
                 batch = targets[i:i + batch_size]
+                left = deadline - time.monotonic()
+                if left < 15:
+                    skipped = len(targets) - i
+                    break
                 try:
-                    result = subprocess.run([whatweb_bin, '--log-json', '/dev/stdout'] + batch, capture_output=True, text=True, timeout=60)
+                    result = subprocess.run([whatweb_bin, '--log-json', '/dev/stdout', '--max-threads', '10', '--open-timeout', '8',
+                                             '--read-timeout', '12', '--no-errors', '-q'] + batch,
+                                            capture_output=True, text=True, timeout=min(45, left))
                     for line in result.stdout.strip().splitlines():
                         try:
                             item = json.loads(line)
@@ -2232,7 +2242,10 @@ class ReconRunner:
                             _ignore(_e, 'pipeline.py:2471')
                 except Exception as _e:
                     _ignore(_e, 'pipeline.py:2473')
-            return {'techs': techs, 'scanned_at': datetime.now().isoformat(timespec='seconds')}
+            out = {'techs': techs, 'scanned_at': datetime.now().isoformat(timespec='seconds')}
+            if skipped:
+                out['partial'] = f'{skipped} de {len(targets)} hosts ficaram de fora (prazo do módulo)'
+            return out
         except Exception as e:
             return {'error': str(e), 'results': []}
 
