@@ -1,9 +1,3 @@
-// ════════════════════════════════════════════════════════════════════════
-//  NAVIGATION
-//  NAVIGATION
-// ════════════════════════════════════════════════════════════════════════
-function showAll() { showPage("companies"); }
-
 function _syncSidebarActive() {
   document.querySelectorAll(".sidebar-nav .nav-item").forEach(el => el.classList.remove("active"));
   document.querySelectorAll(".nav-co").forEach(el => el.classList.remove("active"));
@@ -360,7 +354,6 @@ function renderCompanyView(co) {
   renderFindingsTab(co);
   renderCveTab(co);
   invalidateEndpointCache(co);
-  renderEndpointsTab(co);
   renderDomainsTab(co);
   renderSubdomainsTab(co);
   renderInfraTab(co);
@@ -480,8 +473,8 @@ async function selectCompany(id) {
 
 const TAB_GROUPS = {
   overview:    ['overview'],
-  hosts:       ['subdomains', 'domains', 'endpoints', 'ports', 'infra', 'screenshots', 'graph', 'typosquat'],
-  vulns:       ['vulns', 'cve', 'supplychain', 'jsreverse'],
+  hosts:       ['subdomains', 'domains', 'graph'],
+  vulns:       ['vulns', 'cve', 'supplychain'],
   exposure:    ['exposure'],
   operation:   ['operation', 'alerts', 'timeline', 'diff', 'suppressed', 'toollogs', 'pipeline', 'terminal']
 };
@@ -565,20 +558,14 @@ async function switchGroup(groupName, btn, panelName) {
   const co = allCompanies().find(c => c.id === state.currentId);
   const name = panel;
   if (name === 'overview'     && co)              renderOverview(co);
-  if (name === 'domains'      && co)              renderDomainsTab(co);
+  if (name === 'domains'      && co)              { renderDomainsTab(co); renderInfraTab(co); renderTyposquatTab(co); }
   if (name === 'subdomains'   && co)              renderSubdomainsTab(co);
-  if (name === 'endpoints'    && co)              renderEndpointsTab(co);
-  if (name === 'ports'        && co)              renderPortsTab(co);
-  if (name === 'typosquat'    && co)              renderTyposquatTab(co);
   if (name === 'pipeline'     && state.currentId) await renderReconTab(state.currentId);
   if (name === 'cve'          && co)              renderCveTab(co);
   if (name === 'supplychain'  && co)              renderSupplyChainTab(co);
-  if (name === 'jsreverse'    && co)              renderJsReverseTab(co);
   if (name === 'vulns'        && co)              renderVulnsTab(co);
   if (name === 'findings'     && co)              renderFindingsTab(co);
   if (name === 'operation'    && co)              renderOperationTab(co);
-  if (name === 'infra'        && co)              renderInfraTab(co);
-  if (name === 'screenshots'  && state.currentId) loadScreenshots(state.currentId, co);
   if (name === 'toollogs'     && state.currentId) {
     await loadToolLogs();
   }
@@ -597,7 +584,27 @@ async function switchGroup(groupName, btn, panelName) {
   updateTabScrollBtns();
 }
 
+// Painéis que foram absorvidos pela matriz de ativos (uma tabela, uma coluna por assunto) ou pelo painel de domínios.
+// Quem ainda chama o nome antigo (atalhos, busca global, prioridades) cai no lugar certo, já com o filtro aplicado.
+const TAB_REDIRECT = {
+  endpoints:   {to: "subdomains", has: "endpoints"},
+  ports:       {to: "subdomains", has: "riskport"},
+  screenshots: {to: "subdomains", has: "shot"},
+  jsreverse:   {to: "subdomains", has: "secrets"},
+  infra:       {to: "domains"},
+  typosquat:   {to: "domains"},
+};
+
 async function switchTab(name, btn) {
+  const redirect = TAB_REDIRECT[name];
+  if (redirect) {
+    await switchTab(redirect.to, btn);
+    if (redirect.has) {
+      const sel = document.getElementById("sub-has");
+      if (sel) { sel.value = redirect.has; _subApplyFilter(); }
+    }
+    return;
+  }
   const groupName = TAB_TO_GROUP[name] || name;
   if (!state.groupPanel) state.groupPanel = {};
   if ((TAB_GROUPS[groupName] || []).includes(name)) state.groupPanel[groupName] = name;

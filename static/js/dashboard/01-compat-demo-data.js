@@ -508,43 +508,6 @@ function _infraRow(key, value, cls = "") {
   return `<div class="ic-row"><span class="ic-k">${esc(key)}</span><span class="ic-v ${cls}">${value}</span></div>`;
 }
 
-function _portSummaryCard(label, value, accent = "") {
-  return `
-    <div class="job-kpi ${accent}">
-      <div class="job-kpi-num">${typeof value === "string" && value !== "" && !/^\d+$/.test(value) ? esc(value) : Number(value || 0)}</div>
-      <div class="job-kpi-label">${esc(label)}</div>
-    </div>`;
-}
-
-function _filteredHighRiskPorts(rows) {
-  const seen = new Set();
-  return (rows || []).filter(row => {
-    const port = String(row.port || "").trim();
-    if (!_isHighRiskPort(port, row.service || "")) return false;
-    const key = `${row.ip || ""}:${port}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).map(row => ({
-    ...row,
-    service: _portServiceLabel(row.port, row.service || ""),
-  }));
-}
-
-function _portRiskRow(h) {
-  return `
-    <div style="display:flex;gap:12px;align-items:center;padding:6px 10px;border-bottom:1px solid rgba(244,63,94,0.12)">
-      <span style="font-family:var(--mono);font-size:.71rem;color:var(--text2);min-width:120px">${esc(h.ip||'')}</span>
-      <span style="font-family:var(--mono);font-size:.71rem;font-weight:700;color:#f43f5e;min-width:45px">:${h.port}</span>
-      <span style="font-size:.68rem;color:var(--text3)">${esc(h.service||'')}</span>
-      <span class="sev ${h.severity==='critical'?'sev-c':'sev-h'}" style="margin-left:auto;font-size:.59rem">${(h.severity||'high').toUpperCase()}</span>
-    </div>`;
-}
-
-function _toolsStat(value, label, color = "var(--text)") {
-  return `<div class="tools-stat"><span class="tools-stat-num" style="color:${color}">${esc(value)}</span><div class="tools-stat-lbl">${esc(label)}</div></div>`;
-}
-
 function _timelineRow(e) {
   const ports = Array.isArray(e.ports) ? e.ports.join(', ') : e.ports;
   return `

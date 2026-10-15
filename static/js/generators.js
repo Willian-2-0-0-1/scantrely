@@ -900,5 +900,4 @@ function genActivate(id){
   const main=document.getElementById('gen-main'); if(!main)return;
   const renders={cpf:_genRender_cpf,cnpj:_genRender_cnpj,rg:_genRender_rg,cep:_genRender_cep,pis:_genRender_pis,renavam:_genRender_renavam,cnh:_genRender_cnh,titulo:_genRender_titulo,ie:_genRender_ie,cartao:_genRender_cartao,placa:_genRender_placa,veiculo:_genRender_veiculo,conta:_genRender_conta,certidao:_genRender_certidao,pessoa:_genRender_pessoa,empresa:_genRender_empresa,curriculo:_genRender_curriculo,nome:_genRender_nome,nick:_genRender_nick,numeros:_genRender_numeros,senha:_genRender_senha};
   const fn=renders[id]; if(fn)main.innerHTML=fn();
-  if(id==='letras')genUpdateLetras();
 }

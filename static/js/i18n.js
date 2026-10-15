@@ -252,7 +252,7 @@ window.I18N_STRINGS = {
   tab_graph:           {en:"Graph", "pt-br":"Grafo", es:"Grafo"},
   nav_exposure:        {en:"Exposure", "pt-br":"Exposição", es:"Exposición"},
   subtab_overview:     {en:"Overview", "pt-br":"Visão geral", es:"Resumen"},
-  subtab_domains:      {en:"Domains", "pt-br":"Domínios", es:"Dominios"},
+  subtab_domains:      {en:"Domains & brand", "pt-br":"Domínios e marca", es:"Dominios y marca"},
   subtab_hosts:        {en:"Hosts", "pt-br":"Hosts", es:"Hosts"},
   subtab_endpoints:    {en:"Endpoints", "pt-br":"Endpoints", es:"Endpoints"},
   subtab_ports:        {en:"Ports", "pt-br":"Portas", es:"Puertos"},

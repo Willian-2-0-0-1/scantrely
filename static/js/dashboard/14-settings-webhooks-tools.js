@@ -180,11 +180,6 @@ function _boolish(v, def = false) {
   return def;
 }
 
-function _intish(v, def) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : def;
-}
-
 function _syncPlaywrightDefaults(raw) {
   const next = {};
   for (const key of PLAYWRIGHT_SETTING_KEYS) {

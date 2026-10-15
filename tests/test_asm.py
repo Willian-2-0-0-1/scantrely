@@ -3553,7 +3553,6 @@ class TestOriginLink:
         assert "js/dashboard/17-terminal-alerts-init.js" in html
         assert "operation-persist.js?v=2" in html
         assert "function isJsPathNoise" in js
-        assert 'id="endpoints-secrets"' in js
         assert "_isFpJsSecret" in js
         assert "function _shotSrc" in js
         assert "'/' + h.screenshot" not in js
@@ -3575,7 +3574,7 @@ class TestOriginLink:
         assert "hostPanel = \"subdomains\"" in js
         assert "js/dashboard/17-terminal-alerts-init.js" in html
         assert "dashboard.css?v=" in html
-        assert "i18n.js?v=21" in html
+        assert "i18n.js?v=22" in html
         assert "exposure.js?v=3" in html
         assert "Prévia do screenshot" in html
         assert "← Prev" not in html
@@ -3604,40 +3603,6 @@ class TestOriginLink:
         assert "js/dashboard/17-terminal-alerts-init.js" in html
         assert "exposure.js?v=3" in html
         assert "_setIconLabel(btn, active ? \"stop\" : \"play\", label)" in js or "_setIconLabel(btn, active ? 'stop' : 'play', label)" in js
-
-    def test_recon_screenshots_copy_is_localized(self):
-        js = _dashboard_js()
-        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-        i18n = (ROOT / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
-        start = js.index("function loadScreenshots")
-        end = js.index("function renderPlaywrightOverview")
-        body = js[start:end]
-        panel = js[js.index("function _renderReconEvidencePanel"):js.index("function _ssShow")]
-        assert "Recon evidence and attack surface leads" not in js
-        assert "Loading recon data" not in js
-        assert "Crawled URLs (" not in body
-        assert "Pages visited by the integrated browser recon phase" not in js
-        assert "Filter endpoints..." not in js
-        assert "Filter secrets..." not in js
-        assert "Filter findings..." not in js
-        assert "No crawled pages yet" not in js
-        assert "No endpoints discovered yet" not in js
-        assert "No secrets or hardcoded keys found" not in js
-        assert "No Postman collections found" not in js
-        assert "Vulnerability Findings (" not in js
-        assert "Playwright Findings (" not in js
-        assert "more endpoints — use filter" not in js
-        assert 'section-kicker">Coverage' not in js
-        assert "_opT(\"recon_title\"" in body or "_opT('recon_title'" in body
-        assert 'aria-busy' in body
-        assert 'role="status"' in body
-        assert "recon_title" in i18n
-        assert "recon_loading" in i18n
-        assert "recon_crawled_empty" in i18n
-        assert "_opT(\"recon_cov_kicker\"" in panel or "_opT('recon_cov_kicker'" in panel
-        assert "s.value||'').slice(0,40)" not in body
-        assert "js/dashboard/17-terminal-alerts-init.js" in html
-        assert "i18n.js?v=21" in html
 
     def test_confirmed_vulns_copy_is_localized(self):
         js = _dashboard_js()
@@ -3669,7 +3634,7 @@ class TestOriginLink:
         assert "vuln_loading" in i18n
         assert "vuln_cnt" in i18n
         assert "js/dashboard/17-terminal-alerts-init.js" in html
-        assert "i18n.js?v=21" in html
+        assert "i18n.js?v=22" in html
 
 
 class TestFindingLifecyclePersist:

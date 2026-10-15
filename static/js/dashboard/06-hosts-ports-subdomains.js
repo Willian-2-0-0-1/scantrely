@@ -4,61 +4,6 @@
 let _co_hosts = [], _hosts_page = 1, _hosts_sort = "host", _hosts_asc = true;
 const HPP = 30;
 
-function renderHostsTab(co) {
-  const pane = document.getElementById("tab-hosts");
-  if (!pane) return;
-  pane.innerHTML = `
-    <div id="playwright-host-inventory" style="margin-bottom:12px"></div>
-    <div class="filter-bar">
-      <input type="text" class="fi grow" id="h-search" placeholder="Search host, IP, technology..." oninput="applyHostFilter()">
-      <select class="fi" id="h-waf" onchange="applyHostFilter()">
-        <option value="">All WAF/CDN</option>
-        <option value="Imperva">Imperva</option>
-        <option value="Cloudflare">Cloudflare</option>
-        <option value="AWS">AWS CloudFront</option>
-        <option value="Google">Google Cloud</option>
-        <option value="Direct">Direct (no WAF)</option>
-        <option value="Firewalled">Direct (Firewall)</option>
-      </select>
-      <select class="fi" id="h-status" onchange="applyHostFilter()">
-        <option value="">All hosts</option>
-        <option value="active">With open ports</option>
-        <option value="inactive">No ports mapped</option>
-      </select>
-      <span style="font-size:.68rem;color:var(--text3);padding:6px 4px;" id="h-cnt"></span>
-      <button class="btn btn-secondary" style="font-size:.68rem;padding:4px 10px;margin-left:auto"
-              onclick="exportHosts('csv')" title="Export CSV"> CSV</button>
-      <button class="btn btn-secondary" style="font-size:.68rem;padding:4px 10px"
-              onclick="exportHosts('json')" title="Export JSON"> JSON</button>
-    </div>
-    <div class="tbl-wrap">
-      <table>
-        <thead><tr>
-          <th onclick="sortHosts('host')">Host ↕</th>
-          <th onclick="sortHosts('ip')">IP Address ↕</th>
-          <th>Title</th>
-          <th>WAF / CDN</th>
-          <th>Technologies</th>
-          <th>Open Ports</th>
-          <th style="width:66px">Shot</th>
-        </tr></thead>
-        <tbody id="h-tbody"></tbody>
-      </table>
-      <div class="pager">
-        <span class="pager-info" id="h-pinfo"></span>
-        <div class="pager-btns">
-          <button class="pb" id="h-prev" onclick="hostsPageNav(-1)">← Prev</button>
-          <span id="h-pnums"></span>
-          <button class="pb" id="h-next" onclick="hostsPageNav(1)">Next →</button>
-        </div>
-      </div>
-    </div>`;
-  _co_hosts = [...(co.hosts||[])];
-  _hosts_page = 1;
-  applyHostFilter();
-  renderPlaywrightHostInventoryTab(co);
-}
-
 function _paintCrawlHostInventory(mount, crawl) {
   if (!mount) return;
   if (!crawl.length) {
@@ -131,17 +76,6 @@ function _filteredHosts() {
   });
 }
 
-function applyHostFilter() {
-  _hosts_page = 1;
-  renderHostsTable(_filteredHosts());
-}
-
-function sortHosts(key) {
-  if(_hosts_sort===key) _hosts_asc=!_hosts_asc; else {_hosts_sort=key;_hosts_asc=true;}
-  _co_hosts.sort((a,b)=>{ const av=(a[key]||"").toLowerCase(),bv=(b[key]||"").toLowerCase(); return _hosts_asc?av.localeCompare(bv):bv.localeCompare(av); });
-  applyHostFilter();
-}
-
 function hostsPageNav(d) {
   const filtered = _filteredHosts();
   const totPg = Math.ceil(filtered.length / HPP) || 1;
@@ -171,92 +105,6 @@ function renderHostsTable(filtered) {
 // ════════════════════════════════════════════════════════════════════════
 let _co_ports = [], _ports_page = 1;
 const PPP = 25;
-
-function renderPortsTab(co) {
-  const ps = co.port_scan || {};
-  const highRiskRows = _filteredHighRiskPorts(ps.high_risk || []);
-  const scanSummary = (ps.tool || ps.ips_scanned) ? (() => {
-    const tool      = ps.tool || "nmap";
-    const scanned   = ps.ips_scanned || 0;
-    const skipped   = ps.waf_ips_skipped || 0;
-    const highRisk  = highRiskRows.length;
-    const scanDate  = ps.scanned_at ? ps.scanned_at.replace("T"," ").slice(0,16) : "";
-    return `
-      <div class="jobs-summary" style="margin-bottom:12px">
-        ${_portSummaryCard("Tool", tool)}
-        ${_portSummaryCard("IPs scanned", scanned)}
-        ${skipped ? _portSummaryCard("WAF IPs skipped", skipped, "") : ""}
-        ${highRisk ? _portSummaryCard("High-risk ports", highRisk, "error") : ""}
-        ${scanDate ? `<div class="job-kpi" style="grid-column:1/-1"><div class="job-kpi-label">Scanned</div><div class="job-detail-v" style="margin-top:4px">${esc(scanDate)}</div></div>` : ""}
-      </div>`;
-  })() : "";
-
-  const highRiskPanel = highRiskRows.length ? (() => {
-    const rows = highRiskRows.map(h => _portRiskRow(h)).join('');
-    return `<div style="background:rgba(244,63,94,0.05);border:1px solid rgba(244,63,94,0.25);border-radius:7px;margin-bottom:12px;overflow:hidden">
-      <div style="padding:8px 12px;font-size:.72rem;font-weight:700;color:#f43f5e;border-bottom:1px solid rgba(244,63,94,0.2)">${icoHtml("warning",14)} Portas de Alto Risco (${highRiskRows.length})</div>
-      ${rows}
-    </div>`;
-  })() : "";
-
-  document.getElementById("tab-ports").innerHTML = `
-    <div class="section-shell">
-      <div class="section-head">
-        <div class="section-head-main">
-          <div class="section-kicker">Ports</div>
-          <div class="section-title">Open service exposure by host</div>
-          <div class="section-sub">Use this view to spot concentration of exposed services and quickly pivot by host, IP or common ports.</div>
-        </div>
-      </div>
-      ${scanSummary}
-      ${highRiskPanel}
-      <div class="filter-bar">
-      <input type="text" class="fi grow" id="p-search" placeholder="Search host or IP..." oninput="applyPortFilter()">
-      <select class="fi" id="p-port" onchange="applyPortFilter()">
-        <option value="">All ports</option>
-        <option value="80">80 (HTTP)</option>
-        <option value="443">443 (HTTPS)</option>
-        <option value="8080">8080</option>
-        <option value="8443">8443</option>
-        <option value="3000">3000</option>
-        <option value="5000">5000</option>
-        <option value="9000">9000</option>
-      </select>
-      <span style="font-size:.68rem;color:var(--text3);padding:6px 4px;" id="p-cnt"></span>
-      </div>
-      <div class="table-shell">
-        <div class="table-topline">
-          <div class="table-title">Hosts with exposed ports</div>
-          <div class="table-note">Sorted visually by host row; count column highlights concentration.</div>
-        </div>
-      <table>
-        <thead><tr><th>Host</th><th>IP Address</th><th>WAF / CDN</th><th>Open Ports</th><th>#</th><th style="width:40px"></th></tr></thead>
-        <tbody id="p-tbody"></tbody>
-      </table>
-      <div class="pager">
-        <span class="pager-info" id="p-pinfo"></span>
-        <div class="pager-btns">
-          <button class="pb" onclick="portsPageNav(-1)">← Prev</button>
-          <span id="p-pnums"></span>
-          <button class="pb" onclick="portsPageNav(1)">Next →</button>
-        </div>
-      </div>
-      </div>
-    </div>`;
-  _co_ports = (co.hosts||[]).filter(h=>(h.ports||[]).length>0);
-  _ports_page = 1;
-  applyPortFilter();
-}
-
-function applyPortFilter() {
-  const q  = document.getElementById("p-search")?.value.toLowerCase()||"";
-  const pt = document.getElementById("p-port")?.value||"";
-  const filtered = _co_ports.filter(h=>{
-    return (!q||(h.host||"").includes(q)||(h.ip||"").includes(q)) && (!pt||(h.ports||[]).includes(pt));
-  });
-  _ports_page = 1;
-  renderPortsTable(filtered);
-}
 
 function portsPageNav(d) {
   const q=document.getElementById("p-search")?.value.toLowerCase()||"";
@@ -706,31 +554,6 @@ function _hostTechLabels(h) {
   return labels;
 }
 
-function _hostTechCell(h) {
-  const signals = _hostInfraSignals(h);
-  const infra = signals.map(s => _infraChip(s.label, s.cls, s.title)).join("");
-  const infraLabels = new Set(signals.map(s => s.label.toLowerCase()));
-  const techs = (h?.technologies || [])
-    .map(t => String(t || "").trim())
-    .filter(Boolean)
-    .filter(t => !(infraLabels.has("cdn cloudflare") && t.toLowerCase() === "cloudflare"))
-    .filter(t => !(infraLabels.has("cloud aws") && /^(aws|amazon|amazon cloudfront|aws cloudfront)$/i.test(t)))
-    .filter(t => !(infraLabels.has("cloud gcp") && /^(gcp|google cloud)$/i.test(t)))
-    .filter(t => !(infraLabels.has("cloud azure") && /^(azure|microsoft azure)$/i.test(t)))
-    .filter(t => !infraLabels.has(t.toLowerCase()));
-  const remainingSlots = Math.max(0, 4 - signals.length);
-  const shownTech = techs.slice(0, remainingSlots).map(_techChip).join("");
-  const overflow = techs.length > remainingSlots ? `<span class="ai-tech ai-tech-more">+${techs.length - remainingSlots}</span>` : "";
-  return infra || shownTech || overflow ? `${infra}${shownTech}${overflow}` : '<span class="ai-dash">—</span>';
-}
-
-function _fmtCL(n) {
-  if (n == null || n === "") return "—";
-  const v = Number(n);
-  if (!isFinite(v)) return "—";
-  return v.toLocaleString("en-US");
-}
-
 async function renderSubdomainsTab(co) {
   const el = document.getElementById("tab-subdomains");
   if (!el) return;
@@ -762,7 +585,7 @@ function openSubdomainsFiltered(term) {
 }
 
 function renderDomainsTab(co, historyRows = null) {
-  const el = document.getElementById("tab-domains");
+  const el = document.getElementById("dom-main");
   if (!el) return;
   const rawDomains = Array.isArray(co.domains) ? co.domains.map(_normalizeScopeDomain).filter(Boolean) : [];
   if (!rawDomains.length) {
@@ -990,103 +813,3 @@ function _subRenderTable(rows) {
   tb.innerHTML = rows.map(h => `<tr class="ai-row" onclick="openHostDrawer('${escAttr(h.host)}')">${cols.map(c => c.td(h, ctx)).join("")}</tr>`).join("");
 }
 
-function renderSubHistoryTab(co) {
-  const el = document.getElementById("tab-subhistory");
-  if (!el) return;
-
-  fetch(`/api/data/${co.id}/subhistory`, {headers: _authHeaders()})
-    .then(r => r.json())
-    .then(data => {
-      renderHistoryContent(el, data.history || [], co.id);
-    })
-    .catch(() => {
-      el.innerHTML = `
-        <div style="padding:60px 20px;text-align:center;color:var(--text3)">
-          <div style="font-size:2rem;margin-bottom:12px"></div>
-          <div style="font-size:.9rem;color:var(--text2);margin-bottom:6px">Subdomain history</div>
-          <div style="font-size:.75rem">Run the pipeline to start tracking subdomain changes.</div>
-        </div>`;
-    });
-}
-
-function renderHistoryContent(el, history, cid) {
-  if (!history || history.length === 0) {
-    el.innerHTML = `
-      <div style="padding:60px 20px;text-align:center;color:var(--text3)">
-        <div style="font-size:2rem;margin-bottom:12px"></div>
-        <div style="font-size:.9rem;color:var(--text2);margin-bottom:6px">No history yet</div>
-        <div style="font-size:.75rem">History will be populated after each pipeline scan.</div>
-      </div>`;
-    return;
-  }
-
-  const added = history.filter(h => h.event === "added");
-  const removed = history.filter(h => h.event === "removed");
-  const seen = history.filter(h => h.event === "seen");
-
-  el.innerHTML = `
-    <div style="padding:24px 0 8px">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-        <div style="font-size:1rem;font-weight:700"> Subdomain Timeline</div>
-        <div style="font-size:0.75rem;color:var(--text3)">${history.length} eventos</div>
-      </div>
-
-      <div class="stat-strip" style="margin-bottom:18px">
-        <div class="stat-box" style="border-left:3px solid var(--green)">
-          <div class="stat-num" style="color:var(--green)">${added.length}</div>
-          <div class="stat-lbl">Adicionados</div>
-        </div>
-        <div class="stat-box" style="border-left:3px solid var(--red)">
-          <div class="stat-num" style="color:var(--red)">${removed.length}</div>
-          <div class="stat-lbl">Removidos</div>
-        </div>
-        <div class="stat-box" style="border-left:3px solid var(--blue)">
-          <div class="stat-num" style="color:var(--blue)">${seen.length}</div>
-          <div class="stat-lbl">Vistos</div>
-        </div>
-      </div>
-
-      <div class="sec-hdr">
-        <span class="sec-title">Eventos Recentes</span>
-        <span class="sec-cnt">${Math.min(history.length, 100)}</span>
-      </div>
-
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Subdomain</th>
-              <th>Evento</th>
-              <th>Status</th>
-              <th>Fonte</th>
-              <th>First Seen</th>
-              <th>Last Seen</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${history.slice(0, 100).map(h => {
-              const eventStyle = {
-                added: "color:var(--green)",
-                removed: "color:var(--red)",
-                seen: "color:var(--blue)"
-              }[h.event] || "";
-              const eventLabel = {
-                added: " Adicionado",
-                removed: " Removido",
-                seen: " Visto"
-              }[h.event] || h.event;
-              return `
-                <tr>
-                  <td><span class="host-a">${h.subdomain}</span></td>
-                  <td><span style="${eventStyle};font-weight:600;font-size:.7rem">${eventLabel}</span></td>
-                  <td>${h.is_alive ? '<span style="color:var(--green);font-size:.68rem">${icoHtml("dot",14)} Vivo</span>' : '<span style="color:var(--text3);font-size:.68rem">○ Morto</span>'}</td>
-                  <td><span style="font-size:.7rem;color:var(--text2)">${h.source || "—"}</span></td>
-                  <td><span style="font-size:.7rem;color:var(--text3)">${h.first_seen?.split("T")[0] || "—"}</span></td>
-                  <td><span style="font-size:.7rem;color:var(--text3)">${h.last_seen?.split("T")[0] || "—"}</span></td>
-                </tr>`;
-            }).join("")}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
-}

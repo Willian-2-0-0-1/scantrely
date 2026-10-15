@@ -182,16 +182,11 @@ function renderLiveTerminal(cid) {
   _renderLTTerminal();
 }
 
-function startLTPoll(cid) { _ltActiveCid = cid; _ltEnsurePolling(); }
-function stopLTPoll() { if (_ltPoll) { clearInterval(_ltPoll); _ltPoll = null; } }
 function toggleLTPause() {
   _ltPaused = !_ltPaused;
   const btn = document.getElementById("lt-pause-btn");
  if (btn) btn.innerHTML = _ltPaused ? icoHtml("play",14)+" Resume" : icoHtml("pause",14)+" Pause";
 }
-async function fetchLT(cid) { _ltActiveCid = cid; return _fetchLT(); }
-
-
 // ════════════════════════════════════════════════════════════════════════
 //  ALERTS TAB
 // ════════════════════════════════════════════════════════════════════════
@@ -425,17 +420,6 @@ async function renderDiffTab(co) {
 // ════════════════════════════════════════════════════════════════════════
 //  FALSE POSITIVE MANAGER
 // ════════════════════════════════════════════════════════════════════════
-
-function openFPModal(host, title, cid) {
-  window._fpHost  = host;
-  window._fpTitle = title;
-  window._fpCid   = cid || window._fpCurrentCid || "";
-  document.getElementById("fp-host").textContent  = host || "(any host)";
-  document.getElementById("fp-title").textContent = title;
-  document.getElementById("fp-reason").value = "";
-  document.getElementById("fp-error").style.display = "none";
-  document.getElementById("modal-fp").classList.add("show");
-}
 
 function closeFPModal() {
   document.getElementById("modal-fp").classList.remove("show");
@@ -725,9 +709,6 @@ function closeHostDrawer() {
   if (overlay) overlay.classList.remove('show');
   document.body.style.overflow = '';
 }
-
-// Legacy stub — settings now lives at showPage('settings')
-function openSettings(){ showPage("settings"); }
 
 Object.assign(window, {
   loadJobs,

@@ -70,200 +70,8 @@ let _particleAnim = null;
 
 function _stripAnsi(s) { return s.replace(/\x1b\[[0-9;]*m/g, ''); }
 
-function _detectModules(line) {
-  const plain = _stripAnsi(line);
-
-  // Setup soft-failed
-  const fail = plain.match(/Setup soft-failed for (\w+):/);
-  if (fail) { _modState[fail[1]] = 'skipped'; renderHUD(); return; }
-
-  // API is ready
-  const ready = plain.match(/\[SUCC\][^\n]*?(\w+):\s+(?:\[.*?m)?API is ready/);
-  if (ready) { _modState[ready[1]] = 'ready'; renderHUD(); return; }
-
-  // Scan completed — finalize all pending HUD phases
-  if (/completed in .+ with status FINISHED/i.test(plain)) {
-    _finalizeScanHUD();
-    return;
-  }
-
-  // Modules running
-  const runMatch = plain.match(/Modules running[^)]+\)\s+(.*)/);
-  if (runMatch) {
-    const cur = new Set();
-    (runMatch[1].match(/(\w+)\(\d+:\d+:\d+\)/g) || []).forEach(p => {
-      const name = p.match(/(\w+)\(/)[1];
-      cur.add(name);
-      _moduleActive.add(name);
-      _modState[name] = 'running';
-    });
-    _prevRunning.forEach(m => {
-      if (!cur.has(m)) { _moduleDone.add(m); _modState[m] = 'done'; }
-    });
-    _prevRunning = cur;
-    _updateETA();
-    renderHUD();
-  }
-}
-
-// Mark all HUD phase modules that never appeared in "Modules running" as done.
-// Called when scan finishes — catches modules that ran too fast to be logged.
-function _finalizeScanHUD() {
-  _prevRunning.forEach(m => { _moduleDone.add(m); _modState[m] = 'done'; });
-  _prevRunning = new Set();
-  BBOT_HUD_PHASES.forEach(phase => {
-    phase.mods.forEach(m => {
-      if (!_modState[m]) { _modState[m] = 'done'; _moduleDone.add(m); }
-    });
-  });
-  _updateETA();
-  renderHUD();
-}
-
-// ── Particle engine ──────────────────────────────────────────────────────
-function _startParticles() {
-  const canvas = document.getElementById('hud-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  function resize() { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; }
-  resize();
-  const obs = new ResizeObserver(resize);
-  obs.observe(canvas.parentElement);
-  const pts = Array.from({length:55}, () => ({
-    x: Math.random(), y: Math.random(),
-    vx: (Math.random()-.5)*.0004, vy: (Math.random()-.5)*.0004,
-    r: Math.random()*.9+.2, a: Math.random()*.35+.05,
-  }));
-  function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    pts.forEach(p => {
-      const x = p.x * canvas.width, y = p.y * canvas.height;
-      ctx.beginPath(); ctx.arc(x, y, p.r, 0, Math.PI*2);
-      ctx.fillStyle = `rgba(0,180,255,${p.a})`; ctx.fill();
-      p.x += p.vx; p.y += p.vy;
-      if (p.x < 0) p.x = 1; if (p.x > 1) p.x = 0;
-      if (p.y < 0) p.y = 1; if (p.y > 1) p.y = 0;
-    });
-    _particleAnim = requestAnimationFrame(draw);
-  }
-  if (_particleAnim) cancelAnimationFrame(_particleAnim);
-  draw();
-}
 function _stopParticles() {
   if (_particleAnim) { cancelAnimationFrame(_particleAnim); _particleAnim = null; }
-}
-
-// ── HUD render ───────────────────────────────────────────────────────────
-function _phaseStatus(idx) {
-  const phase = BBOT_HUD_PHASES[idx];
-  const all = [...phase.mods, ...Object.keys(_modState).filter(m => _MOD_PHASE[m]===idx && !phase.mods.includes(m))];
-  if (all.some(m => _modState[m]==='running'))  return 'active';
-  if (all.some(m => _modState[m]==='done'))      return 'done';
-  return 'pending';
-}
-
-function _buildPanel(phase, idx, show) {
-  if (!show) return `<div class="hud-panel ph-hidden"></div>`;
-  const st = _phaseStatus(idx);
-  const all = [...phase.mods, ...Object.keys(_modState).filter(m => _MOD_PHASE[m]===idx && !phase.mods.includes(m))];
-
-  const running = all.filter(m => _modState[m]==='running');
-  const done    = all.filter(m => _modState[m]==='done');
-  const ready   = all.filter(m => _modState[m]==='ready');
-  const skipped = all.filter(m => _modState[m]==='skipped');
-
-  const totalActive = running.length + done.length + ready.length;
-  const pct = totalActive ? Math.round(done.length / Math.max(totalActive, 1) * 100) : 0;
-
-  // Show: running first, then recent done, then ready; max 7 per panel
-  const toShow = [...running, ...done.slice(-4), ...ready.slice(0,2)].slice(0,7);
-  const skipHtml = skipped.length
-    ? `<div class="hud-panel-mod hud-mod-skipped"><div class="hud-panel-mod-dot"></div><span>${skipped.length} sem api key</span></div>`
-    : '';
-  const modHtml = toShow.map(m => {
-    const s = _modState[m]||'pending';
-    return `<div class="hud-panel-mod hud-mod-${s}"><div class="hud-panel-mod-dot"></div><span>${m.replace(/_/g,' ')}</span></div>`;
-  }).join('');
-
-  const statsHtml = (done.length || running.length || skipped.length)
-    ? `<div style="font-size:.53rem;color:#1e3a4a;margin-top:3px;letter-spacing:.04em">${done.length} ok · ${running.length} active · ${skipped.length} skip</div>`
-    : '';
-
-  // Placeholder when no modules ran yet: distinguish "waiting" vs "all skipped"
-  const allSkipped = !toShow.length && skipped.length > 0 && skipped.length === all.length;
-  const placeholder = allSkipped
-    ? `<div class="hud-panel-mod hud-mod-skipped"><div class="hud-panel-mod-dot"></div><span>sem chaves configuradas</span></div>`
-    : `<div class="hud-panel-mod hud-mod-pending"><div class="hud-panel-mod-dot"></div><span>aguardando…</span></div>`;
-
-  return `<div class="hud-panel ${st}">
-    <div class="hud-panel-label" style="color:${phase.color}">${phase.label}</div>
-    <div class="hud-panel-prog"><div class="hud-panel-prog-bar" style="width:${pct}%;background:${phase.color}"></div></div>
-    ${modHtml || placeholder}
-    ${skipHtml}${statsHtml}
-  </div>`;
-}
-
-function renderHUD() {
-  const topEl   = document.getElementById('hud-top');
-  const botEl   = document.getElementById('hud-bot');
-  const nodesEl = document.getElementById('hud-nodes');
-  const glowEl  = document.getElementById('hud-tl-glow');
-  if (!topEl||!botEl||!nodesEl) return;
-
-  // Timeline glow (progress across phases)
-  const donePhases = BBOT_HUD_PHASES.filter((_,i)=>_phaseStatus(i)==='done').length;
-  const activePh   = BBOT_HUD_PHASES.findIndex((_,i)=>_phaseStatus(i)==='active');
-  const progress   = activePh>=0 ? (activePh+.5)/BBOT_HUD_PHASES.length : donePhases/BBOT_HUD_PHASES.length;
-  if (glowEl) glowEl.style.right = `${Math.round((1-progress)*100)}%`;
-
-  // Nodes
-  nodesEl.innerHTML = BBOT_HUD_PHASES.map((phase, idx) => {
-    const st = _phaseStatus(idx);
-    return `<div class="hud-node ${st}" style="--nc:${phase.color}" title="${phase.label}">
-      <div class="hud-node-inner">${st==='done'?icoHtml("check",14):(phase.ico?icoHtml(phase.ico,14):phase.icon)}</div>
-      <div class="hud-node-label">${phase.label}</div>
-    </div>`;
-  }).join('');
-
-  // Panels alternating top/bottom
-  topEl.innerHTML = BBOT_HUD_PHASES.map((p,i) => _buildPanel(p,i, i%2===0)).join('');
-  botEl.innerHTML = BBOT_HUD_PHASES.map((p,i) => _buildPanel(p,i, i%2===1)).join('');
-}
-
-function _fmtSec(s) {
-  if (s >= 3600) return `~${Math.ceil(s/3600)}h`;
-  if (s >= 60)   return `~${Math.ceil(s/60)}m`;
-  return `~${s}s`;
-}
-
-function _updateETA() {
-  // Total = all modules ever seen (active + done)
-  const allSeen = new Set([..._moduleActive, ..._moduleDone]);
-  const total   = allSeen.size || 1;
-  const done    = _moduleDone.size;
-  const active  = _prevRunning.size;
-  const remaining = Math.max(0, total - done);
-
-  // Sum ETA for modules not yet done
-  let remSec = 0;
-  allSeen.forEach(m => { if (!_moduleDone.has(m)) remSec += (MODULE_ETA_S[m] || 45); });
-  const elapsed = Math.floor((Date.now() - scanStartTime) / 1000);
-  // Decay: each elapsed second removes proportional estimated time
-  remSec = Math.max(0, remSec - Math.floor(elapsed * (done / Math.max(total, 1))));
-
-  const el = document.getElementById('term-modules');
-  const sb = document.getElementById('scanbar-modules');
-  if (remaining > 0) {
-    const etaStr = _fmtSec(remSec);
-    const html = `<span style="color:var(--teal)">${done}/${total}</span> modules`
-      + ` · <span style="color:var(--yellow)">${active} active</span>`
-      + ` · <span style="color:var(--text3)">${remaining} remaining · ETA ${etaStr}</span>`;
-    if (el) el.innerHTML = html;
-    if (sb) sb.textContent = `${done}/${total} · ${active} active · ETA ${etaStr}`;
-  } else {
-    if (el) el.innerHTML = `<span style="color:var(--green)">${icoHtml("check",14)} ${done} modules completed</span>`;
-  if (sb) sb.textContent = ` ${done} modules`;
-  }
 }
 
 function selectProfile(val, el) {
@@ -299,24 +107,6 @@ async function monitorNow(cid) {
     }
   } catch(e) { showToast('Failed: ' + e.message); }
  if (btn) { btn.disabled = false; btn.textContent = ' Monitor Now'; }
-}
-
-async function enableSchedule(cid, enabled) {
-  try {
-    if (enabled) {
-      var interval = prompt('Scan interval (hours):', '24');
-      if (!interval) return;
-    }
-    var r = await fetch('/api/schedule/' + cid, {
-      method:'POST',
-      headers: {'Content-Type':'application/json', ..._authHeaders()},
-      body: JSON.stringify({enabled: enabled, interval_hours: enabled ? parseInt(interval) : 24, profile: 'bug_bounty'})
-    });
-    if (r.ok) {
-      showToast('Schedule ' + (enabled ? 'enabled — every ' + interval + 'h' : 'disabled'));
-      loadScheduleStatus(cid);
-    }
-  } catch(e) { showToast('Failed: ' + e.message); }
 }
 
 async function loadScheduleStatus(cid) {
@@ -557,36 +347,6 @@ function startLiveDataPolling(companyId) {
   }, 8000);
 }
 
-function openTerminal(scanId, scanName, companyId) {
-  activeScanId  = scanId;
-  scanLineCount = 0;
-  scanStartTime = Date.now();
-  _scanModules  = [];
-  _moduleActive = new Set();
-  _moduleDone   = new Set();
-  _prevRunning  = new Set();
-  _modState     = {};
-  _hudLogLines  = [];
-  const modEl = document.getElementById('term-modules');
-  if (modEl) modEl.innerHTML = '';
-  const sbEl = document.getElementById('scanbar-modules');
-  if (sbEl) sbEl.textContent = '';
-
-  document.getElementById("term-title").textContent = scanName;
-  document.getElementById("term-body").innerHTML = "";
-  const logEl = document.getElementById('hud-mini-log');
-  if (logEl) logEl.innerHTML = '';
-  document.getElementById("terminal-overlay").classList.add("show");
-  document.getElementById("term-stop-btn").style.display = "";
-  document.getElementById("scanbar-name").textContent = scanName;
-
-  renderHUD();
-  _startParticles();
-  updateTermStatus("running");
-  streamScanOutput(scanId, companyId);
-  startLiveDataPolling(companyId);
-}
-
 function closeTerminal() {
   document.getElementById("terminal-overlay").classList.remove("show");
   document.getElementById("scan-bar").style.display = "none";
@@ -613,83 +373,6 @@ async function stopScan() {
   if (stopBtn) stopBtn.style.display = "none";
 }
 
-function updateTermStatus(status) {
-  const labels = {running:"Scanning…", done:"Completed", error:"Error", stopped:"Stopped"};
-  const el = document.getElementById("term-status");
-  el.innerHTML = `<span class="scan-status ${status}"><span class="scan-dot"></span>${labels[status]||status}</span>`;
-
-  const sb = document.getElementById("scanbar-status");
-  sb.className = `scan-status ${status}`;
-  sb.innerHTML = `<span class="scan-dot"></span>${labels[status]||status}`;
-
-  if (status !== "running") {
-    document.getElementById("term-stop-btn").style.display = "none";
-    const lb = document.getElementById("term-live-badge");
-    if (lb) lb.style.display = "none";
-  }
-}
-
-function streamScanOutput(scanId, companyId) {
-  if (scanEventSrc) scanEventSrc.close();
-  const src = new EventSource(`/api/scan/${scanId}/stream`);
-  scanEventSrc = src;
-
-  src.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.done) {
-      src.close(); scanEventSrc = null;
-      stopLiveDataPolling();
-      updateTermStatus(msg.status);
-      _finalizeScanHUD();
-      document.getElementById("term-stop-btn").style.display = "none";
-      // Final reload after scan completes
-      setTimeout(()=>reloadServerData().then(()=>{
-        if (state.currentId === companyId) {
-          const co = allCompanies().find(c=>c.id===companyId);
-          if (co) renderCompanyView(co);
-        }
-        renderAllCompanies(); renderSidebar();
-      }), 1500);
-      return;
-    }
-    appendTermLine(msg.line);
-    updateTermStatus(msg.status);
-  };
-
-  src.onerror = () => {
-    src.close(); scanEventSrc = null;
-    updateTermStatus("error");
-  };
-}
-
-function appendTermLine(raw) {
-  scanLineCount++;
-  const plain = _stripAnsi(raw);
-
-  // Hidden buffer for legacy references
-  const body = document.getElementById("term-body");
-  if (body) { const d = document.createElement("div"); d.textContent = plain; body.appendChild(d); }
-
-  // Action bar: update on meaningful lines only
-  const actionEl = document.getElementById('hud-action');
-  if (actionEl && plain.trim()) {
-    const isFind  = plain.includes('[FINDING]') || plain.includes('[VULNERABILITY]');
-    const isOk    = plain.includes('[✓]') || plain.includes('[SUCC]');
-    const isWarn  = plain.includes('[!]');
-    const isRun   = plain.includes('Modules running');
-    if (isFind || isOk || isWarn || isRun || plain.includes('[INFO]')) {
-   actionEl.textContent = ' ' + plain.replace(/\[.*?\]\s*/g,'').slice(0,140);
-      actionEl.className = 'hud-action-bar' + (isFind?'  al-find': isOk?' al-ok': isWarn?' al-active': ' al-run');
-    }
-  }
-
-  document.getElementById("term-stats").textContent = `${scanLineCount} lines`;
-  const elapsed = Math.floor((Date.now()-scanStartTime)/1000);
-  document.getElementById("term-time").textContent = `${Math.floor(elapsed/60)}m ${elapsed%60}s elapsed`;
-
-  _detectModules(raw);
-}
-
 // ── Scan Log Viewer ──────────────────────────────────────────────────────
 let _logAllLines = [];
 
@@ -701,45 +384,6 @@ function _logLineClass(line) {
   if (line.includes('[INFO]'))                                return 'll-info';
   if (!line.trim())                                           return 'll-dim';
   return '';
-}
-
-async function openScanLog(cid, scanName) {
-  const overlay = document.getElementById('log-modal-overlay');
-  const bodyEl  = document.getElementById('log-modal-body');
-  const titleEl = document.getElementById('log-modal-title');
-  const metaEl  = document.getElementById('log-modal-meta');
-  const countEl = document.getElementById('log-modal-count');
-  const searchEl= document.getElementById('log-modal-search');
-  if (!overlay) return;
-  titleEl.textContent = scanName;
-  metaEl.textContent  = 'Loading…';
-  bodyEl.innerHTML    = `<div style="color:var(--text3);padding:20px">Loading scan log…</div>`;
-  searchEl.value      = '';
-  overlay.classList.add('show');
-  try {
-    const r = await fetch(`/api/scan-history/${encodeURIComponent(cid)}/${encodeURIComponent(scanName)}/log`, {headers:_authHeaders()});
-    if (!r.ok) throw new Error((await r.json()).error || r.statusText);
-    const data = await r.json();
-    _logAllLines = data.lines;
-    metaEl.textContent  = `${data.total.toLocaleString()} linhas`;
-    countEl.textContent = `${data.lines.length} exibidas de ${data.total}`;
-    _renderLogLines(_logAllLines, bodyEl);
-  } catch(e) {
-    bodyEl.innerHTML = `<div style="color:var(--red);padding:20px">Erro: ${esc(e.message)}</div>`;
-  }
-}
-
-function _renderLogLines(lines, bodyEl) {
-  const frag = document.createDocumentFragment();
-  lines.forEach(raw => {
-    const plain = _stripAnsi(raw);
-    const d = document.createElement('div');
-    d.className = 'log-line ' + _logLineClass(plain);
-    d.textContent = plain;
-    frag.appendChild(d);
-  });
-  bodyEl.innerHTML = '';
-  bodyEl.appendChild(frag);
 }
 
 function filterLogLines(q) {
@@ -767,16 +411,3 @@ function scrollLogTo(pos) {
   b.scrollTop = pos === 'bottom' ? b.scrollHeight : 0;
 }
 
-function lineClass(line) {
-  if (line.includes("[DNS_NAME]"))        return "dns";
-  if (line.includes("[FINDING]"))         return "find";
-  if (line.includes("[VULNERABILITY]"))   return "vuln";
-  if (line.includes("[WAF]"))             return "waf";
-  if (line.includes("[TECHNOLOGY]"))      return "tech";
-  if (line.includes("[HTTP_RESPONSE]"))   return "http";
-  if (line.includes("[STORAGE_BUCKET]"))  return "warn";
-  if (line.includes("[✓]") || line.includes("[*]")) return "ok";
-  if (line.includes("[!]"))               return "warn";
-  if (line.includes("[ERROR]"))           return "err";
-  return "default";
-}

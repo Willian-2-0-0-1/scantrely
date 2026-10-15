@@ -491,7 +491,7 @@ def finding_risk_map(co: dict) -> dict[str, dict]:
 
 
 # ── linhas, filtros, ordenação e página ────────────────────────────────────
-def build_rows(co: dict, history: list[dict] | None = None) -> list[dict]:
+def build_rows(co: dict, history: list[dict] | None = None, screenshots: dict[str, str] | None = None) -> list[dict]:
     inv = [h for h in build_inventory(co, history) if is_active(h)]
     agg = compute_aggregates(co)
     rmap = finding_risk_map(co)
@@ -502,6 +502,8 @@ def build_rows(co: dict, history: list[dict] | None = None) -> list[dict]:
         h["_agg"] = a
         h["_domain"] = match_domain(h["host"], domain_set)
         h["_risk"] = risk_info(h, rmap)
+        if not h.get("screenshot") and screenshots and h["host"] in screenshots:
+            h["screenshot"] = screenshots[h["host"]]
         rows.append(h)
     return rows
 

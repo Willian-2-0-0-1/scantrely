@@ -441,24 +441,6 @@ function renderPipelineStatus(cid) {
   }
 }
 
-function renderCleanupResults(data) {
-  if (!data || !data.removed || data.removed.length === 0) return "";
-  const removed = data.removed.slice(0, 10);
-  const more = data.removed.length - 10;
-  return `
-    <div style="margin-top:12px;padding:10px 14px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:7px">
-      <div style="font-size:.7rem;font-weight:600;color:var(--green);margin-bottom:6px"> Subdomains removed (${data.removed.length})</div>
-      <div style="display:flex;flex-direction:column;gap:3px">
-        ${removed.map(r => `<div style="font-size:.67rem;color:var(--text2);display:flex;gap:8px;padding:1px 0">
-          <span style="color:var(--text3);min-width:90px;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis">${esc(r.host)}</span>
-          <span style="color:var(--orange)">${esc(r.reason)}</span>
-        </div>`).join("")}
-        ${more > 0 ? `<div style="font-size:.65rem;color:var(--text3);padding-top:2px">… and ${more} more</div>` : ""}
-      </div>
-      <div style="font-size:.67rem;color:var(--text3);margin-top:6px">${data.remaining} valid subdomains remaining</div>
-    </div>`;
-}
-
 const RECON_MODULES = [
   {id:"email",     label:"Email Security",          desc:"SPF, DMARC, DKIM, MX analysis",                     eta:"~10s", ico:"envelope"},
   {id:"certs",     label:"Certificate Transparency",desc:"crt.sh CT logs + SSL/TLS probe",                   eta:"~20s", ico:"lock"},

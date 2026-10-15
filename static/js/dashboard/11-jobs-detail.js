@@ -109,18 +109,6 @@ function _jobDetailPanel() {
   return document.getElementById("job-detail-panel");
 }
 
-function _renderJobDetailEmpty(message) {
-  const panel = _jobDetailPanel();
-  if (!panel) return;
-  panel.style.display = "block";
-  panel.innerHTML = `
-    <div class="job-detail-card">
-      <div class="job-detail-title">Job Detail</div>
-      <div class="job-detail-copy">${esc(message || "Select a job to inspect.")}</div>
-    </div>
-  `;
-}
-
 function _renderJobDetail(job, preview) {
   const panel = _jobDetailPanel();
   if (!panel) return;

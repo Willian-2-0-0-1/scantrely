@@ -4246,3 +4246,7 @@ button.am-sev:hover, button.am-count:hover { filter:brightness(1.25); }
   .am-chip { white-space: nowrap; }
   .ai-table-wrap { max-height: none; }
 }
+
+/* ── Painel de domínios: infra e typosquat embutidos ─────────────────── */
+.tab-content.embed { display: block; }
+.dom-sec-title { margin: 28px 0 10px; font-size: .95rem; color: var(--text1); padding-bottom: 6px; border-bottom: 1px solid var(--border); }

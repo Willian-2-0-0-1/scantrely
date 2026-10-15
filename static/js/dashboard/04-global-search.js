@@ -173,21 +173,6 @@ async function selectGlobalSearchResult(idx) {
   }
 }
 
-function _renderRiskGauge(crit, high, med, info, total) {
-  const r = 44, stroke = 5, circ = 2 * Math.PI * r;
-  const score = total > 0 ? Math.round((crit * 4 + high * 3 + med * 2 + info) / (total * 4) * 100) : 0;
-  const color = score >= 70 ? '#fb7185' : score >= 40 ? '#fb923c' : score >= 15 ? '#fbbf24' : '#4ade80';
-  const dash = (score / 100) * circ;
-  return `<svg width="120" height="120" viewBox="0 0 120 120" class="risk-gauge">
-    <circle cx="60" cy="60" r="${r}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="${stroke}"/>
-    <circle cx="60" cy="60" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke+2}"
-      stroke-dasharray="${dash} ${circ - dash}" stroke-linecap="round"
-      transform="rotate(-90 60 60)" style="filter:drop-shadow(0 0 8px ${color}44)"/>
-    <text x="60" y="55" text-anchor="middle" fill="${color}" font-size="22" font-weight="800">${score}</text>
-    <text x="60" y="73" text-anchor="middle" fill="var(--text3)" font-size="9" font-weight="600" letter-spacing="0.08em">RISK SCORE</text>
-  </svg>`;
-}
-
 function renderOverview(co) {
   setTimeout(() => { if (typeof renderPriorities === "function") renderPriorities(co.id); }, 0);
   const s = co.stats || {};
@@ -214,40 +199,6 @@ function renderOverview(co) {
     </div>
     <div id="ov-trends" style="margin-top:16px"></div>
     ${typeof renderExposureTeaser === "function" ? renderExposureTeaser(co) : ""}`;
-}
-
-async function loadScanHistory(cid) {
-  const el = document.getElementById("ov-history");
-  if(!el) return;
-  el.innerHTML = `<span style="color:var(--text3)">Loading…</span>`;
-  try {
-    const r = await fetch(`/api/scan-history/${cid}`, {headers:_authHeaders()});
-    const history = await r.json();
-    if(!history.length){ el.innerHTML = `<span style="color:var(--text3)">No past scans found.</span>`; return; }
-    el.innerHTML = `<div class="history-list">` +
-      history.map(s => {
-        const dt = new Date(s.mtime*1000).toLocaleString();
-        const dnsColor = s.dns_names > 0 ? "var(--teal)" : "var(--text3)";
-        const fColor   = s.findings  > 0 ? "var(--orange)" : "var(--text3)";
-        const safeId   = `sh-${cid}-${esc(s.name)}`.replace(/[^a-zA-Z0-9_-]/g,"_");
-        return `<div id="${safeId}" class="history-row">
-          <span class="history-name">${esc(s.name)}</span>
-          <span class="history-stat">${esc(dt)}</span>
-          <span class="history-stat" style="color:${dnsColor}"><strong>${s.dns_names}</strong> hosts</span>
-          <span class="history-stat" style="color:${fColor}"><strong>${s.findings}</strong> findings</span>
-          <span class="history-stat"><strong>${s.events}</strong> events · ${s.size_kb}KB</span>
-          <div class="history-cta">
-          ${s.has_asm_log ? `<button class="btn btn-secondary" style="font-size:.65rem;padding:2px 8px;color:var(--teal)" onclick="openScanLog('${cid}','${esc(s.name)}')">${icoHtml("clipboard",14)} Ver Log</button>` : ''}
-          <button class="btn btn-secondary" style="font-size:.65rem;padding:2px 8px"
-                  onclick="reparseHistory('${cid}','${esc(s.name)}',this)">Re-parse</button>
-          <button class="btn btn-secondary" style="font-size:.65rem;padding:2px 8px;color:var(--red)"
-                  onclick="deleteScanHistory('${cid}','${esc(s.name)}','${safeId}',this)">Delete</button>
-          </div>
-        </div>`;
-      }).join("") + `</div>`;
-  } catch(e) {
-    el.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`;
-  }
 }
 
 async function reparseHistory(cid, scanName, btn) {
@@ -308,21 +259,3 @@ async function deleteScanHistory(cid, scanName, rowId, btn) {
   }
 }
 
-async function deleteAllScanHistory(cid) {
-  if (!confirm(`Delete ALL scans for "${cid}"? This action cannot be undone.`)) return;
-  const el = document.getElementById("ov-history");
-  if (el) el.innerHTML = `<span style="color:var(--text3)">Deleting…</span>`;
-  try {
-    const r = await fetch(`/api/scan-history/${encodeURIComponent(cid)}`, {
-      method: "DELETE", headers: _authHeaders(),
-    });
-    if (!r.ok) throw await _apiErr(r);
-    const d = await r.json();
-    if (el) el.innerHTML = `<span style="color:var(--text3)">${d.count} scan(s) deleted. Findings cleared.</span>`;
-    await reloadServerData();
-    const co = allCompanies().find(c => c.id === cid);
-    if (co) { renderOverview(co); renderFindingsTab(co); renderCveTab(co); renderSubdomainsTab(co); }
-  } catch(e) {
-    if (el) el.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`;
-  }
-}

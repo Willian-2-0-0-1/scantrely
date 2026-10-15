@@ -164,11 +164,16 @@ def create_scan_blueprint(
     def _asset_rows(cid: str, co: dict) -> list[dict]:
         from core import asset_matrix
         history = db.get_subdomain_history(cid, limit=1000)
-        stamp = (get_asm_data_timestamp(), len(history), history[0]["created_at"] if history else "")
+        shots = _list_screenshots(cid)
+        stamp = (get_asm_data_timestamp(), len(history), history[0]["created_at"] if history else "",
+                 len(shots), shots[0]["mtime"] if shots else 0)
         hit = _asset_cache.get(cid)
         if hit and hit[0] == stamp:
             return hit[1]
-        rows = asset_matrix.build_rows(co, history)
+        by_host: dict = {}
+        for sh in shots:   # mais recente primeiro: a primeira de cada host vale
+            by_host.setdefault(asset_matrix.normalize_domain(sh["host"]), f"screenshots/{cid}/{sh['filename']}")
+        rows = asset_matrix.build_rows(co, history, screenshots=by_host)
         _asset_cache[cid] = (stamp, rows)
         return rows
 
@@ -452,40 +457,20 @@ def create_scan_blueprint(
             offset, limit = 0, 3000
         return jsonify({"lines": lines[offset:offset + limit], "total": len(lines), "offset": offset})
 
-    @bp.route("/api/screenshots/<cid>", methods=["GET"])
-    @require_auth
-    def api_screenshots_list(cid: str):
+    def _list_screenshots(cid: str, host_meta: dict | None = None) -> list[dict]:
+        """Capturas em scans/<cid>/screenshots (gowitness v3 por pasta ou arquivos planos), mais recentes primeiro."""
         shots_dir = base_dir / "scans" / cid / "screenshots"
         if not shots_dir.exists():
-            return jsonify([])
-
-        # Build host metadata index for status_code / title / server enrichment
-        host_meta: dict = {}
-        try:
-            data = load_asm_data()
-            co = next((c for c in data.get("companies", []) if c.get("id") == cid), None)
-            if co:
-                for h in co.get("hosts", []):
-                    hostname = h.get("host", "")
-                    if hostname:
-                        host_meta[hostname] = h
-        except Exception:
-            _log.debug('scans.py:400 erro ignorado', exc_info=True)
-
+            return []
+        host_meta = host_meta or {}
         shots = []
-        # Support both flat files and gowitness v3 directory-per-host structure
         for ext in ("*.jpeg", "*.jpg", "*.png"):
             for file_path in shots_dir.rglob(ext):
-                # Skip files that aren't images (gwitness may store text responses)
                 if file_path.suffix.lower() not in ('.png', '.jpg', '.jpeg'):
                     continue
-                # Determine hostname from path: <screenshots>/screenshot/<hostname>/<hash>.png
                 rel = file_path.relative_to(shots_dir)
                 parts = rel.parts
-                if len(parts) >= 2:
-                    hostname = parts[-2]  # parent dir = hostname
-                else:
-                    hostname = ""
+                hostname = parts[-2] if len(parts) >= 2 else ""
                 if not hostname or hostname in ("screenshot", "response"):
                     url = _gowitness_name_to_url(file_path.stem)
                     try:
@@ -495,23 +480,33 @@ def create_scan_blueprint(
                         hostname = ""
                 if not hostname:
                     continue
-                # Build relative path for serving (subdir/hash.png)
-                serve_path = str(rel).replace("\\", "/")
                 meta = host_meta.get(hostname, {})
-                sc = meta.get("status_code")
                 shots.append({
-                    "filename":    serve_path,
+                    "filename":    str(rel).replace("\\", "/"),
                     "url":         f"https://{hostname}",
                     "host":        hostname,
                     "size":        file_path.stat().st_size,
                     "mtime":       file_path.stat().st_mtime,
-                    "status_code": sc,
+                    "status_code": meta.get("status_code"),
                     "title":       meta.get("title", ""),
                     "server":      meta.get("server", ""),
                     "ip":          meta.get("ip", ""),
                 })
         shots.sort(key=lambda item: item["mtime"], reverse=True)
-        return jsonify(shots)
+        return shots
+
+    @bp.route("/api/screenshots/<cid>", methods=["GET"])
+    @require_auth
+    def api_screenshots_list(cid: str):
+        host_meta: dict = {}
+        try:
+            data = load_asm_data()
+            co = next((c for c in data.get("companies", []) if c.get("id") == cid), None)
+            if co:
+                host_meta = {h["host"]: h for h in co.get("hosts", []) if h.get("host")}
+        except Exception:
+            _log.debug('scans.py: erro ao indexar hosts das capturas', exc_info=True)
+        return jsonify(_list_screenshots(cid, host_meta))
 
     @bp.route("/screenshots/<cid>/<path:filename>")
     def serve_screenshot(cid: str, filename: str):
