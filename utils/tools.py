@@ -539,12 +539,14 @@ class AmassTool(CommandTool):
     category    = ToolCategory.SUBDOMAIN
     description = "In-depth attack surface mapping and subdomain enumeration"
     install_cmd = "snap install amass  # or: go install github.com/owasp-amass/amass/v4/...@master"
-    timeout     = 300
+    timeout     = 210   # amass -timeout 3 (min) + margem, abaixo dos 240s do módulo
 
     def command(self, target: str, opts: dict) -> list[str]:
         from utils.resolvers import resolvers_file
         # antes: lista pública baixada do GitHub — recusada atrás de VPN com firewall estrito
-        return ["amass", "enum", "-passive", "-d", target, "-timeout", "20", "-rf", resolvers_file()]
+        # -timeout é em MINUTOS: com 20, segurava a fase 1 por 4–5 min por domínio e, sem chaves de API,
+        # quase nunca trouxe nada (15/10/2026: timeout/erro vazio em quase todas as execuções)
+        return ["amass", "enum", "-passive", "-d", target, "-timeout", "3", "-rf", resolvers_file()]
         return cmd
 
     def parse(self, stdout: str, stderr: str, target: str) -> list[Finding]:

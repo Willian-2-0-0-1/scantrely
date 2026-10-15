@@ -642,7 +642,7 @@ def pipeline_definition() -> list[dict]:
 _MAX_PARALLEL_MODULES = 8
 _DEFAULT_MODULE_TIMEOUT = 180
 _MODULE_TIMEOUTS = {
-    'amass': 600,
+    'amass': 240,
     'gowitness': 420,
     'screenshot': 420,
     'cve': 360,
