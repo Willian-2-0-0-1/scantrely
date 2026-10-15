@@ -101,6 +101,16 @@ if command -v lsof >/dev/null 2>&1; then
   done
 fi
 
+# Rotação do log (o servidor escreve via redirecionamento, então gira aqui, com o antigo já parado).
+LOG_ROTATE_MB="${ASM_LOG_ROTATE_MB:-20}"
+if [[ -f "$LOG_FILE" ]] && (( $(stat -c %s "$LOG_FILE") > LOG_ROTATE_MB * 1024 * 1024 )); then
+  for n in 2 1; do
+    [[ -f "$LOG_FILE.$n.gz" ]] && mv -f "$LOG_FILE.$n.gz" "$LOG_FILE.$((n + 1)).gz"
+  done
+  mv -f "$LOG_FILE" "$LOG_FILE.1" && gzip -f "$LOG_FILE.1"
+  echo "[*] Log girado: $LOG_FILE.1.gz (guarda 3)"
+fi
+
 # Single-port handoff: short gap between the old bind dying and the new listen.
 sleep 1
 

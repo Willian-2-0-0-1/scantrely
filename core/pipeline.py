@@ -4291,6 +4291,11 @@ class ReconRunner:
                     _log('  ↳ Nenhum novo subdomínio para sondar')
         if self.pipeline_state.get(cid, {}).get('status') == 'stopped':
             self._finalize_in_flight_modules(cid)
+        self._wrap_up_run(cid, co, options, queue_target, _log)
+
+    def _wrap_up_run(self, cid: str, co: dict, options: dict, queue_target: str, _log):
+        """Fim de um run: status, persistência e — só no último domínio da fila — histórico,
+        alertas e notificações da empresa."""
         not_done, skipped_modules = self._pipeline_execution_summary(cid, options)
         pending_domains = self._other_queue_domains_pending(cid, queue_target)
         if self.pipeline_state.get(cid, {}).get('status') != 'stopped':
@@ -4311,6 +4316,15 @@ class ReconRunner:
         self._sync_module_status_from_results(cid)
         self._persist_pipeline_results(cid, _log, _options=options, _co=co)
         self._save_pipeline_state(cid)
+        if pending_domains:
+            # fila por domínio: histórico, snapshot/diff/alertas e notificações valem para a empresa
+            # inteira; rodando a cada domínio saíam duplicados e o diff usava um snapshot pela metade
+            _log('  ↳ histórico, alertas e notificações ficam para o último domínio')
+            return
+        self._finish_company_scan(cid, co, _log)
+
+    def _finish_company_scan(self, cid: str, co: dict, _log):
+        """Uma vez por scan da empresa (no último domínio da fila)."""
         try:
             data = self.db.load_asm_data()
             co_data = next((c for c in data.get('companies', []) if c.get('id') == cid), {})

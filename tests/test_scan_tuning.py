@@ -477,3 +477,54 @@ def test_services_baseline_tolerates_dynamic_bytes_only_on_large_pages():
     assert not sv._same_as_baseline({"status": 200, "length": 24, "snippet": "DB_PASSWORD=x"},
                                     {"status": 200, "length": 32, "snippet": "<html><div id=root>"})
     assert not sv._same_as_baseline({"status": 403, "length": 20000, "snippet": "<html>a"}, big)
+
+
+# ── item 5: histórico/alertas/notificações uma vez por scan da empresa ──────
+def _wrap_runner(tmp_path, monkeypatch, active):
+    r = _runner(tmp_path, _JobsDB(active))
+    calls = []
+    for name in ("_sync_module_status_from_results", "_save_pipeline_state"):
+        monkeypatch.setattr(r, name, lambda *a, **k: None)
+    monkeypatch.setattr(r, "_persist_pipeline_results", lambda *a, **k: calls.append("persist"))
+    monkeypatch.setattr(r, "_pipeline_execution_summary", lambda cid, opts: ([], []))
+    monkeypatch.setattr(r, "_finish_company_scan", lambda cid, co, log: calls.append("finish"))
+    r.pipeline_state["co"] = {"status": "running", "log": []}
+    return r, calls
+
+
+def test_first_domain_persists_but_does_not_notify(tmp_path, monkeypatch):
+    r, calls = _wrap_runner(tmp_path, monkeypatch, {"a.example", "b.example"})
+    r._wrap_up_run("co", {}, {}, "a.example", lambda m: None)
+    assert calls == ["persist"]
+    assert r.pipeline_state["co"]["status"] == "running"
+
+
+def test_last_domain_closes_scan_once(tmp_path, monkeypatch):
+    r, calls = _wrap_runner(tmp_path, monkeypatch, {"a.example", "b.example"})
+    r._wrap_up_run("co", {}, {}, "a.example", lambda m: None)
+    r._wrap_up_run("co", {}, {}, "b.example", lambda m: None)
+    assert calls == ["persist", "persist", "finish"]
+    assert r.pipeline_state["co"]["status"] == "done"
+
+
+def test_single_job_scan_closes_immediately(tmp_path, monkeypatch):
+    r, calls = _wrap_runner(tmp_path, monkeypatch, set())
+    r._wrap_up_run("co", {}, {}, "", lambda m: None)
+    assert calls == ["persist", "finish"]
+
+
+# ── item 6: polling bem-sucedido fora do log ────────────────────────────────
+@pytest.mark.parametrize("msg,kept", [
+    ('127.0.0.1 - - [x] "GET /api/recon/co/pipeline HTTP/1.1" 200 -', False),
+    ('127.0.0.1 - - [x] "GET /api/recon/co/tool-logs HTTP/1.1" 200 -', False),
+    ('127.0.0.1 - - [x] "GET /api/live-output/co?since=1.5 HTTP/1.1" 200 -', False),
+    ('127.0.0.1 - - [x] "GET /api/jobs HTTP/1.1" 304 -', False),
+    ('127.0.0.1 - - [x] "GET /api/recon/co/pipeline HTTP/1.1" 500 -', True),    # erro fica
+    ('127.0.0.1 - - [x] "POST /api/recon/co/pipeline HTTP/1.1" 202 -', True),   # ação fica
+    ('127.0.0.1 - - [x] "GET /api/data/company/co HTTP/1.1" 200 -', True),     # rota normal fica
+])
+def test_polling_filter(msg, kept):
+    import logging
+    from utils.log_filters import QuietPollingFilter
+    rec = logging.LogRecord("werkzeug", logging.INFO, "", 0, msg, None, None)
+    assert QuietPollingFilter().filter(rec) is kept

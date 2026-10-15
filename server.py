@@ -49,6 +49,10 @@ def _configure_logging() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     install_log_filter()
+    if os.environ.get("ASM_LOG_POLLING", "0") != "1":
+        from utils.log_filters import QuietPollingFilter
+        logging.getLogger("werkzeug").addFilter(QuietPollingFilter())
+
 
 _configure_logging()
 
