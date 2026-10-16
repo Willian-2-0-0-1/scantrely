@@ -67,7 +67,7 @@ def run_cors_scan(hosts: list) -> dict:
                     continue
                 # Skip generic WAF/CDN challenge pages — a reflected ACAO on a
                 # block page is not the application's real CORS policy.
-                if _is_waf_challenge_body(body_snip):
+                if _is_waf_challenge_body(body_snip, status, hdrs):
                     continue
 
                 has_creds = acac == "true"

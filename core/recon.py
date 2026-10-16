@@ -367,14 +367,13 @@ from core.reconlib.edge import (  # noqa: F401
     Verdict,
     classify,
     fetch_baseline,
+    is_edge_page,
     summarize,
     _length,
     _lower_headers,
     _snippet,
 )
 from core.reconlib.waf import (  # noqa: F401
-    _WAF_CHALLENGE_SIGNATURES,
-    _WAF_SIGNATURES,
     _detect_waf,
     _is_waf_challenge_body,
     run_waf_detection,

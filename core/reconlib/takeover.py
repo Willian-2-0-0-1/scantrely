@@ -109,15 +109,15 @@ def _check_takeover(host: str) -> dict | None:
         }
 
     # Check response body for takeover signatures
-    _, raw, _ = http_get(f"https://{host}", timeout=6, retries=1)
+    status, raw, hdrs = http_get(f"https://{host}", timeout=6, retries=1)
     if not raw:
-        _, raw, _ = http_get(f"http://{host}", timeout=6, retries=1)
+        status, raw, hdrs = http_get(f"http://{host}", timeout=6, retries=1)
     body = (raw[:2000].decode("utf-8", "ignore") if raw else "").lower()
 
     # If the response is a generic WAF/CDN challenge page, its text can
     # accidentally match a takeover signature (e.g. "access denied",
     # "does not exist") without the host actually being unclaimed.
-    if not _is_waf_challenge_body(body):
+    if not _is_waf_challenge_body(body, status, hdrs):
         for service, sigs in _TAKEOVER_SIGNATURES.items():
             for sig in sigs:
                 if sig in body:

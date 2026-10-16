@@ -1124,3 +1124,38 @@ def test_report_html_includes_coverage_section():
     assert "Cobertura dos testes" in html and "2/10" in html and "não prova" in html
     co["edge_coverage"] = {}
     assert "Cobertura dos testes" not in _render_report_html(co, [], risk)
+
+
+# ── waf.py sobre o classify ─────────────────────────────────────────────────
+def test_detect_waf_separates_cdn_in_front_from_blocking(monkeypatch):
+    import core.reconlib.waf as wf
+    monkeypatch.setattr(wf, "_subp", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError()))
+
+    def fake(url, **kw):
+        if "OR" in url:
+            return 403, b"<h1>Attention Required! | Cloudflare</h1>", {"cf-mitigated": "challenge", "cf-ray": "1"}
+        return 200, b"<html>ok</html>", {"cf-ray": "1", "Server": "cloudflare"}
+    monkeypatch.setattr(wf, "http_get", fake)
+    r = wf._detect_waf("a.x.com")
+    assert r["wafs"] == ["Cloudflare"] and r["protected"] and r["probe_blocked"] and r["block_status"] == 403
+
+    # CDN na frente que deixa a sondagem passar: identificada, mas não barrou nada
+    monkeypatch.setattr(wf, "http_get", lambda url, **kw: (200, b"<html>ok</html>", {"cf-ray": "1"}))
+    r = wf._detect_waf("b.x.com")
+    assert r["wafs"] == ["Cloudflare"] and not r["probe_blocked"]
+
+    # sem sinal nenhum
+    monkeypatch.setattr(wf, "http_get", lambda url, **kw: (200, b"ok", {}))
+    assert wf._detect_waf("c.x.com")["protected"] is False
+
+    # 403 só na sondagem, sem fabricante: heurística antiga continua
+    monkeypatch.setattr(wf, "http_get", lambda url, **kw: (403, b"no", {}) if "OR" in url else (200, b"ok", {}))
+    assert wf._detect_waf("d.x.com")["wafs"] == ["Unknown WAF (blocked malicious request)"]
+
+
+def test_waf_challenge_body_needs_status_context():
+    from core.reconlib.waf import _is_waf_challenge_body as chk
+    assert chk("Attention Required! | Cloudflare")                      # marca de enforcement basta
+    assert chk("Access Denied. Reference #18.2", 403)
+    assert not chk("Access Denied no painel de configurações", 200)     # texto solto em 200 é da aplicação
+    assert not chk("")
