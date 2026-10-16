@@ -11,6 +11,13 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 - **Listas para ferramentas** (`core/tool_lists.py`, `GET /api/data/company/<id>/lists/<hosts|urls|endpoints|params>`, menu Exportar): só o que está no escopo.
 - **Enviar ao Burp** (`core/burp_feed.py`, `POST /api/data/company/<id>/burp`): GET de cada URL pelo proxy do Burp (`burp_proxy`, padrão `http://127.0.0.1:8080`), até 500 por envio; confere que o proxy é mesmo o Burp (`http://burp/`) antes de enviar.
 
+### Identificação: quem respondeu e cobertura dos testes
+
+- **Borda x aplicação** (`core/reconlib/edge.py`): `classify` separa resposta da aplicação, bloqueio de WAF/CDN e limitação de taxa. `cf-ray` e similares só identificam o fabricante; só marca de enforcement (`cf-mitigated`, `x-amzn-waf`…) ou texto de bloqueio em 403/406/419 vira "bloqueado". Baseline por host (caminho aleatório) descarta respostas iguais para tudo e hosts em que a borda barra até caminho inexistente.
+- **Validação por conteúdo** (`core/verification.py`): tabela de regras (`.env`, `.git`, `.sql`, `tfstate`, `web.config`, backups por magic bytes, Actuator, Swagger, `server-status`…). 200 sem o conteúdo esperado não vira achado em `services` nem no `ffuf`.
+- **Cobertura** (`edge_coverage`): `services`, `leaks` e `graphql` contam quantas sondagens chegaram na aplicação. Aparece no card "Test Coverage (WAF/CDN)" da aba Infra e na seção "Cobertura dos testes" do relatório HTML/PDF, com aviso quando menos da metade chegou.
+- **Correção:** `graphql` trocava status e corpo do `http_get` e nunca detectava nada; `ffuf` gravava o host errado nos achados.
+
 ### Estabilidade e desempenho
 
 - **Servidor travava com o uso**: `with sqlite3.connect(...)` só faz commit/rollback, não fecha a conexão. `_connect` (banco e cache HTTP) agora fecha sempre. Com ~500 conexões abertas (`asm.db` + `asm.db-wal`) o processo batia no limite de 1024 descritores, o `accept` falhava em laço (100% de CPU) e nada mais era atendido. Depois: 4 descritores estáveis sob carga.

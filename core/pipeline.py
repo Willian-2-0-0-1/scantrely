@@ -1657,12 +1657,15 @@ class ReconRunner:
         targets = [h['host'] for h in hosts if h.get('ports')]
         all_findings: list = []
 
+        from core.reconlib.edge import Coverage
+        cov = Coverage()
+
         def _one(host):
-            all_findings.extend(self._recon.run_services_recon(host))
+            all_findings.extend(self._recon.run_services_recon(host, coverage=cov))
         # ~130 caminhos por host: prazo interno e parcial em vez de estourar os 180s do módulo
         complete = _run_bounded(_one, targets, workers=10, label='services')
         all_findings = list(all_findings)
-        return {'findings': sorted(all_findings, key=lambda x: ['critical', 'high', 'medium', 'low'].index(x.get('severity', 'low'))), 'complete': complete, 'scanned_at': datetime.now().isoformat(timespec='seconds')}
+        return {'findings': sorted(all_findings, key=lambda x: ['critical', 'high', 'medium', 'low'].index(x.get('severity', 'low'))), 'complete': complete, 'coverage': cov.as_dict(), 'scanned_at': datetime.now().isoformat(timespec='seconds')}
 
     def _run_dep_confusion(self, cid: str, co: dict, options: dict) -> dict:
         token = options.get('github_token', '') or self.get_settings().get('github_token', '')
@@ -3825,6 +3828,12 @@ class ReconRunner:
             if key not in existing_keys:
                 all_findings.append({'key': key, 'type': 'tableau_exposure', 'title': f.get('title', ''), 'severity': f.get('severity', 'medium'), 'category': 'exposure', 'desc': f.get('desc', ''), 'host': f.get('host', ''), 'value': f.get('url', ''), 'url': f.get('url', ''), 'module': 'tableau', 'request_raw': f.get('request_raw', ''), 'response_raw': f.get('response_raw', ''), 'matched': f.get('matched', '')})
                 existing_keys.add(key)
+        from core.reconlib.edge import summarize as _edge_summarize
+        _cov = {m: _result(m).get('coverage') for m in ('services', 'leaks', 'graphql')}
+        if any(_cov.values()):
+            co_data['edge_coverage'] = _edge_summarize(_cov)
+            if not co_data['edge_coverage']['negatives_meaningful']:
+                log(f"  ↳ Cobertura: {co_data['edge_coverage']['summary']}")
         all_findings = merge_persist_findings(co_data, all_findings, existing_keys, primary_domain)
         from core.finding_hygiene import tidy_findings, derive_attack_chains
         all_findings = tidy_findings(all_findings, co_data)

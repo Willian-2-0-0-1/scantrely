@@ -211,6 +211,7 @@ from core.reconlib.extra_tools import (  # noqa: F401
     run_s3_scanner,
 )
 from core.reconlib.ffuf import (  # noqa: F401
+    _verify_findings,
     run_content_discovery,
 )
 from core.reconlib.github_org import (  # noqa: F401
@@ -359,6 +360,17 @@ from core.reconlib.typosquat import (  # noqa: F401
 )
 from core.reconlib.vhost import (  # noqa: F401
     run_vhost_discovery,
+)
+from core.reconlib.edge import (  # noqa: F401
+    Baseline,
+    Coverage,
+    Verdict,
+    classify,
+    fetch_baseline,
+    summarize,
+    _length,
+    _lower_headers,
+    _snippet,
 )
 from core.reconlib.waf import (  # noqa: F401
     _WAF_CHALLENGE_SIGNATURES,

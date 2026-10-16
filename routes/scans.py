@@ -48,7 +48,7 @@ _SCAN_DATA_KEYS = (
     "tech_versions", "tech_queried",
     # infra
     "asn_data", "cidr_ranges", "asn_numbers", "dns_data",
-    "headers_data", "leaks_data", "api_exposure", "waf_results",
+    "headers_data", "leaks_data", "api_exposure", "waf_results", "edge_coverage",
 )
 
 def create_scan_blueprint(
@@ -110,6 +110,7 @@ def create_scan_blueprint(
             "screenshots_count": company.get("screenshots_count", 0),
             "tech_summary": company.get("tech_summary", {}),
             "waf_coverage": company.get("waf_coverage", {}),
+            "edge_coverage": company.get("edge_coverage", {}),
             "summary_only": True,
         }
         return summary

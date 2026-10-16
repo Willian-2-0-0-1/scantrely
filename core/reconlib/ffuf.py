@@ -1,10 +1,49 @@
 """Content Discovery via ffuf + Wordlists — extraído de core/recon.py (ver core/recon.py para o índice completo)."""
 from datetime import datetime
-from core.reconlib.base import _log, _subp
+from core.reconlib.base import _log, _subp, http_get
+from core.reconlib.edge import classify, fetch_baseline
+from core.verification import has_content_rule, looks_like_sensitive_file
 
 # ── Content Discovery via ffuf + Wordlists ──
 # Uses project-bundled wordlists for: directories, files, API routes, parameters.
 # Runs ffuf against live hosts with smart rate limiting per mode.
+
+_VERIFY_CAP = 60   # sondagens de confirmação por execução
+
+
+def _verify_findings(findings: list) -> tuple[list, dict]:
+    """Pós-filtro: hosts cuja borda barra até caminho inexistente perdem os achados (a aplicação não foi
+    testada); 200 em arquivo sensível só fica se o conteúdo for o esperado."""
+    from urllib.parse import urlparse
+    info = {"blocked_hosts": [], "dropped": 0}
+    bases: dict = {}
+    kept, probes = [], 0
+    for f in findings:
+        u = urlparse(f.get("url") or "")
+        if not u.hostname:
+            kept.append(f)
+            continue
+        origin = f"{u.scheme}://{u.netloc}"
+        f["host"] = u.hostname
+        if origin not in bases:
+            bases[origin] = fetch_baseline(origin, 5, get=http_get)
+            if bases[origin] is not None and bases[origin].edge_blocked:
+                info["blocked_hosts"].append(u.hostname)
+        base = bases[origin]
+        if base is not None and base.edge_blocked:
+            info["dropped"] += 1
+            continue
+        if f.get("status") == 200 and has_content_rule(u.path) and probes < _VERIFY_CAP:
+            probes += 1
+            st, body, hdrs = http_get(f["url"], timeout=5, retries=0)
+            if st == 200 and not classify(st, hdrs, body).edge and looks_like_sensitive_file(u.path, body):
+                f["verified"] = True
+            else:
+                info["dropped"] += 1
+                continue
+        kept.append(f)
+    return kept, info
+
 
 def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
     """
@@ -214,6 +253,9 @@ def run_content_discovery(hosts: list, mode: str = "balanced") -> dict:
             except Exception:
                 _log.debug('recon.py:8933 erro ignorado', exc_info=True)
 
+    findings, edge_info = _verify_findings(findings)
+    stats["edge_blocked_hosts"] = edge_info["blocked_hosts"]
+    stats["dropped_unverified"] = edge_info["dropped"]
     return {
         "findings": findings[:500],
         "stats": stats,

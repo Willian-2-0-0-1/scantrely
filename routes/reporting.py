@@ -86,6 +86,20 @@ def _render_report_html(company: dict, findings: list, risk: dict) -> str:
             f'<td>{ports}</td><td>{_esc(host.get("waf", ""))}</td>'
             f'<td>{_esc(", ".join(host.get("technologies", [])[:3]))}</td></tr>\n'
         )
+    cov = company.get("edge_coverage") or {}
+    cov_html = ""
+    if cov.get("total"):
+        warn = "" if cov.get("negatives_meaningful") else (
+            '<p style="color:#f97316;font-weight:700">A maior parte dos testes n\u00e3o chegou na aplica\u00e7\u00e3o: '
+            'a aus\u00eancia de achados abaixo n\u00e3o prova que ela \u00e9 segura.</p>')
+        mod_rows = "".join(
+            f'<tr><td>{_esc(m)}</td><td>{c.get("reached_application", 0)}/{c.get("total", 0)}</td>'
+            f'<td>{c.get("edge_blocked", 0)}</td><td>{c.get("edge_throttled", 0)}</td></tr>'
+            for m, c in (cov.get("by_module") or {}).items())
+        cov_html = (
+            f'<h2>Cobertura dos testes</h2><p>{_esc(cov.get("summary", ""))}</p>{warn}'
+            '<table><tr><th>M\u00f3dulo</th><th>Chegaram na aplica\u00e7\u00e3o</th><th>Bloqueadas pela borda</th><th>Limitadas</th></tr>'
+            f'{mod_rows}</table>')
     score = risk["score"]
     score_color = sev_color.get(risk["label"].lower(), "#6b7280")
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -114,6 +128,7 @@ td{{padding:7px 12px;border-bottom:1px solid #1e293b}}
 <td>{company['stats'].get('open_ports',0)}</td><td>{company['stats'].get('waf_protected',0)}</td>
 <td>{len(findings)}</td>
 </tr></table>
+{cov_html}
 <h2>Findings ({len(findings)})</h2>
 <table><tr><th>Severity</th><th>Category</th><th>Title</th><th>Host</th><th>Description</th></tr>
 {f_rows or '<tr><td colspan="5" style="color:#64748b">No findings</td></tr>'}

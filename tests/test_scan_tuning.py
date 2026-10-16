@@ -1023,3 +1023,104 @@ def test_brand_domain_for_sale_is_info_but_active_stays():
     live = {"type": "brand_domain_exposure", "key": "b2", "severity": "medium", "desc": "`x-login.com` ativo. IP: 5.6.7.8", "metadata": {"status": "active"}}
     out = {f["key"]: f["severity"] for f in tidy_findings([sale, live], {})}
     assert out == {"b1": "info", "b2": "medium"}
+
+
+# ── borda (WAF/CDN) e validação por conteúdo ────────────────────────────────
+def test_edge_classify_separates_proxy_from_enforcement():
+    from core.reconlib.edge import classify, APPLICATION, EDGE_BLOCKED, EDGE_THROTTLED
+    assert classify(200, {"cf-ray": "1", "Server": "cloudflare"}, b"<html>Bem-vindo</html>").origin == APPLICATION
+    assert classify(403, {"cf-ray": "1"}, b"forbidden").origin == APPLICATION          # 403 comum de autorização
+    v = classify(403, {"cf-mitigated": "challenge"}, b"")
+    assert v.origin == EDGE_BLOCKED and v.vendor == "Cloudflare"
+    assert classify(403, {}, b"<h1>Access Denied</h1> Reference #18.2").origin == EDGE_BLOCKED
+    assert classify(429, {}, b"").origin == EDGE_THROTTLED
+    assert classify(200, {}, b"too many requests, says the blog post").origin == APPLICATION
+
+
+def test_edge_coverage_flags_meaningless_negatives():
+    from core.reconlib.edge import Coverage, classify
+    cov = Coverage()
+    blocked = classify(403, {"x-amzn-waf-action": "block"}, b"")
+    for _ in range(3):
+        cov.add(blocked)
+    cov.add(classify(200, {}, b"ok"))
+    assert cov.blocked == 3 and not cov.meaningful and "AWS WAF" in cov.as_dict()["vendors"]
+
+
+def test_services_drops_edge_blocked_host_and_html_env(monkeypatch):
+    import core.reconlib.services as sv
+    monkeypatch.setattr(sv, "http_get", lambda url, **kw: (403, b"Attention Required! | Cloudflare", {}))
+    assert sv.run_services_recon("blocked.x.com") == []
+
+    def routes(host, path):
+        if path == "/.env":
+            return 200, b"<html><body>app</body></html>", {"Content-Length": "40"}
+        if path == "/.git/config":
+            return 200, b"[core]\n\trepositoryformatversion = 0\n", {"Content-Length": "34"}
+        return 404, b"nf", {}
+    monkeypatch.setattr(sv, "http_get", _services_get(routes))
+    assert [r["path"] for r in sv.run_services_recon("app.x.com")] == ["/.git/config"]
+
+
+def test_sensitive_content_rules_cover_new_types():
+    from core.verification import looks_like_sensitive_file as ok
+    assert ok("/terraform.tfstate", b'{"version":4,"terraform_version":"1.5","resources":[]}')
+    assert not ok("/terraform.tfstate", b"<html>x</html>")
+    assert ok("/backup.zip", b"PK\x03\x04rest") and not ok("/backup.zip", b"<html>nope</html>")
+    assert ok("/actuator/env", b'{"activeProfiles":[],"propertySources":[]}')
+    assert not ok("/actuator/env", b"Not found")
+
+
+def test_graphql_detects_playground_and_skips_catch_all(monkeypatch):
+    import core.reconlib.graphql as gq
+    spa = b"<html>introspection altair</html>"
+
+    def fake(url, **kw):
+        if "/sctw-" in url:
+            return 404, b"nf", {}
+        if url.endswith("/graphiql"):
+            return 200, b"<html>GraphiQL</html>", {}
+        return 404, b"nf", {}
+    monkeypatch.setattr(gq, "http_get", fake)
+    out = gq.run_graphql_discovery([{"host": "api.x.com", "ports": ["443"]}], [])
+    assert out["total_found"] == 1 and out["findings"][0]["playground"]
+
+    monkeypatch.setattr(gq, "http_get", lambda url, **kw: (200, spa, {"Content-Length": "33"}))
+    assert gq.run_graphql_discovery([{"host": "spa.x.com", "ports": ["443"]}], [])["total_found"] == 0
+
+
+def test_edge_summarize_warns_when_most_probes_never_reached_the_app():
+    from core.reconlib.edge import summarize
+    ok = summarize({"services": {"total": 10, "reached_application": 9, "edge_blocked": 1, "edge_throttled": 0, "vendors": []}})
+    assert ok["negatives_meaningful"] and "NÃO" not in ok["summary"]
+    bad = summarize({"services": {"total": 10, "reached_application": 2, "edge_blocked": 8, "edge_throttled": 0, "vendors": ["Cloudflare"]},
+                     "graphql": {}})
+    assert not bad["negatives_meaningful"] and "NÃO" in bad["summary"] and "Cloudflare" in bad["summary"]
+    assert list(bad["by_module"]) == ["services"]
+
+
+def test_services_and_leaks_record_coverage(monkeypatch):
+    import core.reconlib.services as sv
+    from core.reconlib import leaks
+    from core.reconlib.edge import Coverage
+    cov = Coverage()
+    monkeypatch.setattr(sv, "http_get", lambda url, **kw: (403, b"Attention Required! | Cloudflare", {}))
+    sv.run_services_recon("b.x.com", coverage=cov)
+    assert cov.blocked == 1 and cov.reached == 0
+
+    cov2 = Coverage()
+    monkeypatch.setattr(leaks, "http_get", lambda url, **k: (200, b"<html>", {}))
+    leaks.check_exposed_git([{"host": "a.x.com", "ports": ["443"]}], cov2)
+    assert cov2.total == 2 and cov2.reached == 2
+
+
+def test_report_html_includes_coverage_section():
+    from routes.reporting import _render_report_html
+    co = {"name": "X", "stats": {}, "hosts": [], "edge_coverage": {
+        "total": 10, "reached_application": 2, "edge_blocked": 8, "edge_throttled": 0, "negatives_meaningful": False,
+        "summary": "2/10 sondagens", "by_module": {"services": {"total": 10, "reached_application": 2, "edge_blocked": 8, "edge_throttled": 0}}}}
+    risk = {"score": 1, "label": "Low", "breakdown": {"critical_findings": 0, "high_findings": 0, "medium_findings": 0, "low_findings": 0}}
+    html = _render_report_html(co, [], risk)
+    assert "Cobertura dos testes" in html and "2/10" in html and "não prova" in html
+    co["edge_coverage"] = {}
+    assert "Cobertura dos testes" not in _render_report_html(co, [], risk)

@@ -47,6 +47,7 @@ function renderInfraTab(co) {
     (co.asn_numbers || []).length ||
     Object.keys(dns).length ||
     Object.keys(waf).length ||
+    (co.edge_coverage && co.edge_coverage.total) ||
     Object.keys(cloudAssets).length ||
     Object.keys(cloudHosts).length ||
     cloudBucketFindings.length ||
@@ -84,6 +85,20 @@ function renderInfraTab(co) {
       ...wafRows,
       ...(unprotected > 0 ? [_infraRow("No WAF", `${unprotected} hosts exposed`, "warn")] : []),
     ]);
+  }
+
+  const edgeCov = co.edge_coverage || {};
+  if (edgeCov.total) {
+    const pct = Math.round((edgeCov.ratio || 0) * 100);
+    const covRows = [
+      _infraRow("Reached the app", `${edgeCov.reached_application}/${edgeCov.total} (${pct}%)`, edgeCov.negatives_meaningful ? "" : "warn"),
+      _infraRow("Blocked by edge", String(edgeCov.edge_blocked || 0), edgeCov.edge_blocked ? "warn" : ""),
+      _infraRow("Rate-limited", String(edgeCov.edge_throttled || 0)),
+      ...(edgeCov.vendors && edgeCov.vendors.length ? [_infraRow("Edge", esc(edgeCov.vendors.join(", ")))] : []),
+      ...Object.entries(edgeCov.by_module || {}).map(([m, c]) => _infraRow(m, `${c.reached_application}/${c.total}`, c.negatives_meaningful ? "" : "warn")),
+      ...(edgeCov.negatives_meaningful ? [] : [_infraRow("Warning", esc(edgeCov.summary || ""), "warn")]),
+    ];
+    cards += _infraCard("Test Coverage (WAF/CDN)", covRows);
   }
 
   if (Object.keys(cloudAssets).length || Object.keys(cloudHosts).length) {

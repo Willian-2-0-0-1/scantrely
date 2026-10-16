@@ -199,16 +199,22 @@ def search_codebase_leaks(domain: str) -> dict:
 
 
 from core.verification import looks_like_git
+from core.reconlib.edge import Coverage, classify
 
 
-def check_exposed_git(hosts: list) -> list:
+def check_exposed_git(hosts: list, coverage=None) -> list:
     """Quick check for exposed .git directories."""
     exposed = []
     targets = [h["host"] for h in hosts if h.get("ports") and "443" in h["ports"]]
 
     def check(host):
         for path in ["/.git/config", "/.git/HEAD"]:
-            status, body, _ = http_get(f"https://{host}{path}", timeout=3, retries=0)
+            status, body, hdrs = http_get(f"https://{host}{path}", timeout=3, retries=0)
+            verdict = classify(status, hdrs, body)
+            if coverage is not None and status:
+                coverage.add(verdict)
+            if verdict.edge:
+                return None   # borda respondeu no lugar da aplicação
             # HTTP 200 sozinho não prova nada: SPA/soft-404 devolve HTML para qualquer caminho.
             if status == 200 and body and looks_like_git(path, body):
                 return {"host": host, "path": path, "severity": "critical", "verified": True,
@@ -223,7 +229,8 @@ def check_exposed_git(hosts: list) -> list:
 
 
 def run_leaks_recon(domain: str, hosts: list, github_token: str = None) -> dict:
-    git_exposed = check_exposed_git(hosts)
+    coverage    = Coverage()
+    git_exposed = check_exposed_git(hosts, coverage)
     github      = search_github(domain, token=github_token)
     hackertarget = search_codebase_leaks(domain)
     return {
@@ -231,6 +238,7 @@ def run_leaks_recon(domain: str, hosts: list, github_token: str = None) -> dict:
         "git_exposed": git_exposed,
         "github":      github,
         "hackertarget":hackertarget,
+        "coverage":    coverage.as_dict(),
         "total_findings": len(git_exposed) + len(github.get("results",[])),
         "scanned_at":  datetime.now().isoformat(timespec="seconds"),
     }

@@ -1,6 +1,7 @@
 """GraphQL Discovery — extraído de core/recon.py (ver core/recon.py para o índice completo)."""
 from datetime import datetime
 from core.reconlib.base import _log, _random_ua, http_get
+from core.reconlib.edge import Coverage, classify, fetch_baseline
 
 # ── GraphQL Discovery ──
 
@@ -16,6 +17,7 @@ def run_graphql_discovery(hosts: list, domains: list) -> dict:
     INTROSPECTION = b'{"query":"{__schema{types{name}}}"}'
     PLAYGROUND_KW = {"graphiql", "graphql playground", "altair", "__schema", "introspection"}
 
+    cov = Coverage()
     findings: list[dict] = []
     endpoints_found: list[str] = []
     seen: set[str] = set()
@@ -44,13 +46,23 @@ def run_graphql_discovery(hosts: list, domains: list) -> dict:
         base, host = base_host_pair
         local_findings = []
         local_endpoints = []
+        ref = fetch_baseline(base, 5, get=http_get)
+        if ref is not None:
+            cov.add(ref.verdict)
+        if ref is None or ref.edge_blocked:   # host fora, ou borda barrando até caminho inexistente
+            return local_findings, local_endpoints
         for path in PATHS:
             url = f"{base}{path}"
             try:
-                body, status, _ = http_get(url, timeout=5, retries=0)
-                if status is None:
+                status, raw, hdrs = http_get(url, timeout=5, retries=0)
+                if not status:
                     continue
-                is_playground = status == 200 and body and any(kw in body.lower() for kw in PLAYGROUND_KW)
+                verdict = classify(status, hdrs, raw)
+                cov.add(verdict)
+                if verdict.edge or ref.matches(status, raw, hdrs):
+                    continue
+                body = (raw or b"").decode("utf-8", "ignore")
+                is_playground = status == 200 and bool(body) and any(kw in body.lower() for kw in PLAYGROUND_KW)
                 introspection_works = False
                 schema_types: list[str] = []
                 if status == 200:
@@ -108,5 +120,6 @@ def run_graphql_discovery(hosts: list, domains: list) -> dict:
         "total_found": len(findings),
         "endpoints": endpoints_found,
         "findings": findings,
+        "coverage": cov.as_dict(),
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
     }
