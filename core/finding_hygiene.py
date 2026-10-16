@@ -264,6 +264,41 @@ def dismiss_false_positives(findings: list[dict], co_data: dict) -> list[dict]:
     return keep
 
 
+# Hedge de impacto descrito mas não demonstrado (inglês + português).
+_HEDGE = ("could ", "may ", "might ", "potential", "possible", "possibly", "teóric", "poderia", "possív",
+          "potencial", "caso o ", "caso a ", "would allow", "permitiria")
+_PROOF_FIELDS = ("response_raw", "matched", "evidence")
+_NO_EVIDENCE_CAP = ("cve", "attack_chain", "tech_change")   # já têm regra própria / são derivados
+
+
+def evidence_grade(f: dict) -> str:
+    """`proven` = verificado; `partial` = guarda resposta/trecho que casou; `none` = só a afirmação do módulo."""
+    if f.get("verified") is True:
+        return "proven"
+    if any(str(f.get(k) or "").strip() for k in _PROOF_FIELDS) or (f.get("type") == "secret" and f.get("value")):
+        return "partial"
+    return "none"
+
+
+def calibrate_by_evidence(f: dict) -> dict:
+    """Crítico/alto sem prova e com linguagem de hipótese ("poderia", "possível"…) vira médio "(potencial)".
+    Guarda a severidade original em `severity_raw`. Idempotente."""
+    if f.get("severity") not in ("critical", "high"):
+        return f
+    f["evidence_grade"] = grade = evidence_grade(f)   # só onde a severidade depende da prova
+    if grade != "none" or f.get("type") in _NO_EVIDENCE_CAP:
+        return f
+    text = f"{f.get('desc') or ''} {f.get('title') or ''}".lower()
+    if not any(w in text for w in _HEDGE):
+        return f
+    f.setdefault("severity_raw", f["severity"])
+    f["severity"] = "medium"
+    title = str(f.get("title") or "")
+    if title and "(potencial)" not in title:
+        f["title"] = f"{title} (potencial)"
+    return f
+
+
 def tidy_findings(findings: list[dict], co_data: dict) -> list[dict]:
     """Aplica todas as regras de higiene. Idempotente."""
     out: list[dict] = []
@@ -281,7 +316,7 @@ def tidy_findings(findings: list[dict], co_data: dict) -> list[dict]:
             f["severity"] = "info"   # estacionado à venda em corretora: monitorar, não é ameaça confirmada
         if f.get("type") == "secret" and _is_public_client_key(f):
             f["severity"] = cap_severity("header", f.get("severity"))   # chave pública de front-end: no máximo médio
-        out.append(f)
+        out.append(calibrate_by_evidence(f))
 
     vd = co_data.get("vhost_data")
     if vd is not None:

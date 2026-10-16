@@ -1159,3 +1159,58 @@ def test_waf_challenge_body_needs_status_context():
     assert chk("Access Denied. Reference #18.2", 403)
     assert not chk("Access Denied no painel de configurações", 200)     # texto solto em 200 é da aplicação
     assert not chk("")
+
+
+# ── itens 3-5: evidência, playbooks e máscara de segredos ───────────────────
+def test_evidence_calibration_caps_hedged_unproven_high():
+    from core.finding_hygiene import tidy_findings, evidence_grade
+    hedged = {"key": "e1", "type": "exposure", "severity": "high", "title": "Painel exposto", "host": "a.x.com",
+              "desc": "O painel poderia permitir acesso administrativo"}
+    proven = {**hedged, "key": "e2", "desc": "O painel poderia permitir acesso", "response_raw": "HTTP/1.1 200 OK\r\n\r\nadmin"}
+    firm = {**hedged, "key": "e3", "desc": "Painel responde sem autenticação"}
+    out = {f["key"]: f for f in tidy_findings([hedged, proven, firm], {})}
+    assert out["e1"]["severity"] == "medium" and out["e1"]["evidence_grade"] == "none" and out["e1"]["title"].endswith("(potencial)") and out["e1"]["severity_raw"] == "high"
+    assert out["e2"]["severity"] == "high" and out["e2"]["evidence_grade"] == "partial"   # tem prova
+    assert out["e3"]["severity"] == "high" and out["e3"]["evidence_grade"] == "none"      # sem hedge
+    again = tidy_findings([out["e1"]], {})[0]
+    assert again["title"].count("(potencial)") == 1 and again["severity_raw"] == "high"
+    assert evidence_grade({"verified": True}) == "proven"
+
+
+def test_redact_masks_credentials_in_text_and_findings():
+    from core.redact import redact_text, redact_finding
+    t = redact_text("AKIAIOSFODNN7EXAMPLE password=hunter2hunter2 postgres://u:s3cr3tpw@h/db")
+    assert "AKIAIOSFODNN7EXAMPLE" not in t and "hunter2hunter2" not in t and "s3cr3tpw" not in t and "AKIA****MPLE" in t
+    assert redact_text("author=Joseph") == "author=Joseph"
+    assert redact_text(t) == t   # idempotente
+    f = {"type": "secret", "value": "abcdefghijklmnopqrstuvwxyz123", "desc": "achado abcdefghijklmnopqrstuvwxyz123"}
+    r = redact_finding(f)
+    assert "abcdefghijklmnopqrstuvwxyz123" not in r["value"] + r["desc"] and f["value"].startswith("abcdefghij")
+
+
+def test_exports_mask_secrets_but_json_keeps_raw():
+    from routes.reporting import findings_to_sarif, _render_report_html
+    from core.redact import redact_findings
+    f = {"title": "Chave AWS", "severity": "high", "desc": "AKIAIOSFODNN7EXAMPLE exposta", "host": "a.x.com", "type": "secret",
+         "value": "AKIAIOSFODNN7EXAMPLE"}
+    assert "AKIAIOSFODNN7EXAMPLE" not in str(findings_to_sarif({"name": "X", "findings": [f]}))
+    risk = {"score": 1, "label": "Low", "breakdown": {"critical_findings": 0, "high_findings": 1, "medium_findings": 0, "low_findings": 0}}
+    html = _render_report_html({"name": "X", "stats": {}, "hosts": []}, redact_findings([f]), risk)
+    assert "AKIAIOSFODNN7EXAMPLE" not in html and "AKIA****MPLE" in html
+    assert f["value"] == "AKIAIOSFODNN7EXAMPLE"
+
+
+def test_services_probes_new_playbook_paths_with_content_gate(monkeypatch):
+    import core.reconlib.services as sv
+    paths = [p for ps in sv.EXPOSED_PATHS.values() for p in ps]
+    assert "/terraform.tfstate" in paths and "/docker-compose.yml" in paths and "/trace.axd" in paths
+
+    def routes(host, path):
+        if path == "/terraform.tfstate":
+            return 200, b'{"version":4,"terraform_version":"1.5.0","resources":[]}', {"Content-Length": "55"}
+        if path == "/docker-compose.yml":
+            return 200, b"<html>app</html>", {"Content-Length": "16"}   # SPA responde 200 qualquer coisa
+        return 404, b"nf", {}
+    monkeypatch.setattr(sv, "http_get", _services_get(routes))
+    out = sv.run_services_recon("app.x.com")
+    assert [(r["path"], r["severity"]) for r in out] == [("/terraform.tfstate", "critical")]

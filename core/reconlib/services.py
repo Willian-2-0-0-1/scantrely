@@ -21,10 +21,12 @@ EXPOSED_PATHS = {
         "/v1/api-docs","/v2/api-docs","/v3/api-docs",
         "/graphql","/graphiql","/__graphql","/api/graphql","/playground",
         "/api/v1/","/api/v2/","/api/",
+        "/swagger/v1/swagger.json","/api/swagger.json","/api/openapi.json",
     ],
     "Monitoring & DevOps": [
         "/actuator","/actuator/health","/actuator/env","/actuator/beans",
         "/actuator/mappings","/actuator/loggers","/actuator/threaddump",
+        "/actuator/configprops","/actuator/httptrace",
         "/metrics","/health","/status","/info","/ping",
         "/kibana","/grafana","/jenkins","/sonarqube","/consul",
         "/prometheus","/jaeger","/zipkin","/hawtio","/jolokia",
@@ -36,6 +38,9 @@ EXPOSED_PATHS = {
         "/wp-config.php","/configuration.php","/config.yml","/config.yaml",
         "/backup.zip","/backup.sql","/dump.sql","/db.sql",
         "/.htaccess","/.htpasswd","/web.config",
+        "/terraform.tfstate","/terraform.tfstate.backup","/.terraform/terraform.tfstate",
+        "/docker-compose.yml","/docker-compose.yaml",
+        "/backup.tar.gz","/backup.tgz","/site.zip","/www.zip","/web.zip",
         "/crossdomain.xml","/clientaccesspolicy.xml",
         "/.well-known/security.txt",
     ],
@@ -46,7 +51,7 @@ EXPOSED_PATHS = {
         "/forgot-password","/reset-password","/register",
     ],
     "Cloud & Infra": [
-        "/server-status","/server-info",
+        "/server-status","/server-info","/trace.axd",
         "/_cat/indices","/_cluster/health","/_nodes",
         "/solr/","/redis/",
         "/trace","/TRACE",
@@ -122,7 +127,7 @@ def run_services_recon(host: str, timeout: int = 5, coverage=None) -> list:
                 sev = "high" if result["status"] == 200 else "medium"
                 # Upgrade severity for specific paths
                 if any(x in path for x in [".git",".env","sql","config","backup",
-                                            "wp-config","phpmyadmin","adminer"]):
+                                            "wp-config","phpmyadmin","adminer","tfstate"]):
                     sev = "critical" if result["status"] == 200 else "high"
                 results.append({
                     "url":      url,

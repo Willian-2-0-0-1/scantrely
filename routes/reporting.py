@@ -13,12 +13,14 @@ from html import escape as _esc
 
 from flask import Blueprint, Response, jsonify, request, g
 
+from core.redact import redact_findings
+
 
 _SARIF_LEVEL = {"critical": "error", "high": "error", "medium": "warning", "low": "note", "info": "note"}
 
 
 def findings_to_sarif(company: dict) -> dict:
-    findings = company.get("findings") or []
+    findings = redact_findings(company.get("findings") or [])
     rules = {}
     results = []
     for finding in findings:
@@ -182,7 +184,7 @@ def create_reporting_blueprint(
             out = io.StringIO()
             writer = csv.writer(out)
             writer.writerow(["severity", "category", "title", "host", "url", "desc", "module"])
-            for finding in company.get("findings", []):
+            for finding in redact_findings(company.get("findings", [])):
                 writer.writerow([
                     finding.get("severity", ""),
                     finding.get("category", ""),
@@ -231,6 +233,7 @@ def create_reporting_blueprint(
                 finding for finding in company.get("findings", [])
                 if (finding.get("host", ""), finding.get("title", "")) not in suppressed
             ]
+            active_findings = redact_findings(active_findings)   # relatório circula: segredo só mascarado
             html = _render_report_html(company, active_findings, risk)
             return Response(
                 html,
@@ -254,6 +257,7 @@ def create_reporting_blueprint(
                 finding for finding in company.get("findings", [])
                 if (finding.get("host", ""), finding.get("title", "")) not in suppressed
             ]
+            active_findings = redact_findings(active_findings)   # relatório circula: segredo só mascarado
             html = _render_report_html(company, active_findings, risk)
             try:
                 from playwright.sync_api import sync_playwright

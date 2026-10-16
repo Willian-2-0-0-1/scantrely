@@ -64,7 +64,7 @@ _CONTENT_RULES = [
     (re.compile(r"\.(tar\.gz|tgz|gz)$"), lambda p, r: r.startswith(b"\x1f\x8b")),
     (re.compile(r"\.(rar)$"), lambda p, r: r.startswith(b"Rar!")),
     (re.compile(r"\.(7z)$"), lambda p, r: r.startswith(b"7z\xbc\xaf")),
-    (re.compile(r"/actuator(/|$)"), lambda p, r: _json_has(r, b"status", b"_links", b"propertySources", b"activeProfiles", b"beans")),
+    (re.compile(r"/actuator(/|$)"), lambda p, r: _json_has(r, b"status", b"_links", b"propertySources", b"activeProfiles", b"beans", b"loggers", b"contexts", b"threads", b"traces", b"configprops")),
     (re.compile(r"(swagger|openapi|api-docs)[^/]*\.json$|/v[23]/api-docs$"), lambda p, r: _json_has(r, b"swagger", b"openapi", b"paths")),
     (re.compile(r"swagger-ui"), lambda p, r: b"swagger-ui" in r.lower() or b"swagger ui" in r.lower()),
     (re.compile(r"server-status$"), lambda p, r: b"Apache Server Status" in r or b"Server Version" in r),
