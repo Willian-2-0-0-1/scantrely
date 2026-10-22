@@ -9,6 +9,14 @@ from core.reconlib.leaks import _dns_resolves
 
 # ── GitHub Org Repository Discovery ──
 
+BUILD_CONFIG_RE = re.compile(
+    r'(^|/)(ts|js)config[\w.-]*\.json$'
+    r'|(^|/)(ionic|angular|nx|lerna|tslint|eslint|babel|jest|karma|cypress|tailwind|postcss|vite|webpack|next|nuxt|vue|svelte|app)\.config\.(json|js|ts|mjs|cjs)$'
+    r'|(^|/)(package|composer|manifest|firebase|vercel|netlify|renovate)\.json$',
+    re.I,
+)
+
+
 def run_github_repos(domains: list, token: str = "") -> dict:
     """
     Enumerate public GitHub repositories belonging to the target organization.
@@ -46,6 +54,8 @@ def run_github_repos(domains: list, token: str = "") -> dict:
         r'|terraform\.tfvars$|\.tfstate$|kube.*config$',
         re.I
     )
+    # configuração de build é pública por natureza: tsconfig.json/ionic.config.json caíam em "config.json"
+    _BUILD_CONFIG = BUILD_CONFIG_RE
 
     for org in sorted(orgs)[:6]:
         # Check if org exists on GitHub
@@ -85,7 +95,7 @@ def run_github_repos(domains: list, token: str = "") -> dict:
             if isinstance(tree_data, dict):
                 for item in tree_data.get("tree", [])[:200]:
                     fname = item.get("path", "")
-                    if _SENSITIVE_FILES.search(fname):
+                    if _SENSITIVE_FILES.search(fname) and not _BUILD_CONFIG.search(fname):
                         sensitive_files.append({
                             "repo":  repo_name,
                             "file":  fname,

@@ -96,10 +96,18 @@ _JS_NOISE_SFX = (".securiti.ai", ".clarity.ms", ".hotjar.com", ".googleapis.com"
 _CSS_MODULE_CLASS_RE = re.compile(r"^_?[A-Za-z][\w-]*_[a-z0-9]{5}_\d+$")
 
 
+def _unescape_js(s: str) -> str:
+    """\\xE9 / \\u00e9 do bundle → caractere (texto de interface em espanhol/português vinha escapado)."""
+    return re.sub(r"\\x([0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1) or m.group(2), 16)), s or "")
+
+
 def fp_js_secret(stype, value) -> bool:
     v = value or ""
     if stype == "password":
         inner = re.sub(r"""['"]$""", "", re.sub(r"""^(?:password|passwd|pwd)\s*[=:]\s*['"]""", "", v, flags=re.I))
+        # texto de interface em qualquer língua (letras acentuadas inclusive), duas palavras ou mais
+        if re.match(r"^[^\W\d_]+( [^\W\d_]+)+$", _unescape_js(inner).strip()):
+            return True
         if _CSS_MODULE_CLASS_RE.match(inner.strip()):
             return True
         if _FP_PWD_RE.search(inner):

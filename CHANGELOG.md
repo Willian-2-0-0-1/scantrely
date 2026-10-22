@@ -6,6 +6,11 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 
 ### Do recon para o teste manual
 
+- **Texto de interface não é senha** (`core/reconlib/jsrecon.py`, `core/asset_matrix.py`): `\xE9`/`é` do bundle decodificado (`_unescape_js`); valor de `password` com duas ou mais palavras naturais (qualquer língua, com acento) é falso positivo — "Olvidé mi contraseña" saía como segredo alto.
+- **Config de build não é arquivo sensível** (`core/reconlib/github_org.py`, `core/finding_hygiene.py`): `tsconfig.json`, `ionic.config.json`, `webpack.config.js` e afins são públicos por natureza (`BUILD_CONFIG_RE`) e saem de `github_sensitive_file`, que agora também teto em médio — só o nome do arquivo, sem conteúdo verificado.
+- **Segredo em comentário e mapa do css-loader** (`core/finding_hygiene.py`): token dentro de bloco de comentário (exemplo de documentação) teto em médio; `exports={password:"_183C…"}` do css-loader/webpack reconhecido como classe CSS pelo contexto, não só pelo valor.
+- **CVE de outro produto** (`core/finding_hygiene.py`, `core/reconlib/cve.py`): o CPE do `python` fixa o fabricante (`python:python`) — com curinga vinham a extensão Python do VS Code e o Odoo ("when running with Python 3.6"); o que escapar, `dismiss_false_positives` descarta pela descrição.
+- **Vhost já inventariado** (`core/finding_hygiene.py`): nome que já está no inventário DNS respondendo em IP compartilhado (CDN) não é "ambiente não publicado" — `vhost_findings` recebe os hosts conhecidos.
 - **Fora do escopo por empresa** (`core/scope.py`, coluna `companies.out_of_scope_json`): `host.exemplo.com`, `*.x.exemplo.com` ou URL colada. Host excluído não entra em sondagem HTTP, módulos ativos, takeover, vigilância, listas nem Burp. Campo novo em "Editar escopo"; a API valida os itens.
 - **Importar escopo do programa**: colar os blocos In scope / Out of scope (HackerOne, Bugcrowd, Intigriti…) e "Ler escopo" (`POST /api/scope/parse`, só lê): `*.x.com` vira domínio, URL vira host; IP, id de app e texto ficam como ignorados.
 - **Listas para ferramentas** (`core/tool_lists.py`, `GET /api/data/company/<id>/lists/<hosts|urls|endpoints|params>`, menu Exportar): só o que está no escopo.

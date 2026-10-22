@@ -242,6 +242,7 @@ from core.reconlib.infra import (  # noqa: F401
 )
 from core.reconlib.jsrecon import (  # noqa: F401
     _ENDPOINT_RE,
+    _unescape_js,
     _FP_LABEL_RE,
     _FP_PASSWORD_RE,
     _INTERESTING_RE,

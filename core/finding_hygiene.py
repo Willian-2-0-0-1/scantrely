@@ -23,6 +23,7 @@ SEVERITY_CAPS = {
     "staging_in_csp": "low",        # referência a staging na CSP
     "brand_domain_exposure": "medium",  # domínio parecido: risco de marca/monitoramento, sem prova de uso malicioso
     "email_security": "medium",     # SPF/DKIM/DMARC ausente
+    "github_sensitive_file": "medium",  # só o NOME do arquivo num repo público; sem conteúdo verificado
 }
 _RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
@@ -94,7 +95,7 @@ def repair_deep(obj):
 
 
 # ── VHost ──────────────────────────────────────────────────────────────────
-def vhost_findings(vhost_data: dict) -> list[dict]:
+def vhost_findings(vhost_data: dict, known_hosts: set | None = None) -> list[dict]:
     """Converte a saída crua do módulo vhost em achados, sem falsos positivos.
 
     Resposta idêntica (status+tamanho) em vários vhosts do mesmo IP é a página
@@ -120,6 +121,10 @@ def vhost_findings(vhost_data: dict) -> list[dict]:
             continue
         for r in items:
             name = r["vhost"]
+            # nome que já está no inventário (DNS público): é o host normal respondendo no IP
+            # compartilhado (CDN), não "ambiente não publicado" — admin.<marca> num IP do Cloudflare
+            if known_hosts and name.lower() in known_hosts:
+                continue
             code = int(status) if str(status).isdigit() else 0
             sev = r.get("severity") if r.get("severity") in SEV_ORDER else "low"
             keyword = any(w in name.lower() for w in _VHOST_ADMIN_WORDS)
@@ -212,13 +217,56 @@ def _false_positive_infra(f: dict) -> bool:
     return not any(infra_evidence_ok(f.get("category", ""), p.get("preview", "")) for p in paths if isinstance(p, dict))
 
 
+# mapa de classes do css-loader/webpack: exports={password:"_183Cch4cOmU19AvZiW-vo0",progress:"_1g-44…"}
+_CSS_EXPORT_MAP_RE = re.compile(r'exports\s*=\s*\{|:"_[0-9A-Za-z_-]{12,32}"')
+_HASHED_CLASS_RE = re.compile(r'^_[0-9A-Za-z_-]{12,32}$')
+_COMMENT_RE = re.compile(r'/\*|^\s*\*|\n\s*\*|\s\*\s', re.M)
+
+
+def _secret_value(f: dict) -> str:
+    v = str(f.get("value") or "")
+    return re.sub(r'^[\w$.]+\s*[:=]\s*["\']?', '', v).rstrip('"\'')
+
+
 def _false_positive_js_secret(f: dict) -> bool:
-    """Segredo de JS gravado que os filtros atuais de falso positivo descartariam (ex.: classe CSS)."""
+    """Segredo de JS gravado que os filtros atuais descartariam: classe CSS (inclusive o mapa do
+    css-loader, que só se reconhece pelo contexto), rótulo ou texto de interface."""
     if f.get("type") != "secret" or f.get("module") != "js_secrets":
         return False
     meta = f.get("metadata") if isinstance(f.get("metadata"), dict) else {}
     from core.asset_matrix import fp_js_secret
-    return fp_js_secret(meta.get("secret_type") or "", f.get("value") or "")
+    if fp_js_secret(meta.get("secret_type") or "", f.get("value") or ""):
+        return True
+    ctx = str(meta.get("context") or "")
+    return bool(_HASHED_CLASS_RE.match(_secret_value(f)) and _CSS_EXPORT_MAP_RE.search(ctx))
+
+
+def _secret_in_comment(f: dict) -> bool:
+    """Token num bloco de comentário (exemplo de uso na documentação do código): sem verificação, não é alto."""
+    meta = f.get("metadata") if isinstance(f.get("metadata"), dict) else {}
+    return f.get("type") == "secret" and bool(_COMMENT_RE.search(str(meta.get("context") or "")))
+
+
+def _false_positive_github_file(f: dict) -> bool:
+    if f.get("type") != "github_sensitive_file":
+        return False
+    from core.reconlib.github_org import BUILD_CONFIG_RE
+    return bool(BUILD_CONFIG_RE.search(str(f.get("value") or f.get("url") or "").rsplit("/", 1)[-1]))
+
+
+# CVE de OUTRO produto que só cita o detectado: com fabricante curinga no CPE, "python" trazia a
+# extensão Python do VS Code e o Odoo ("when running with Python 3.6")
+_OTHER_PRODUCT_RE = {"python": re.compile(r"Visual Studio Code|VS Code|\bOdoo\b|Jupyter|Anaconda", re.I)}
+
+
+def _false_positive_cve(f: dict, co_data: dict) -> bool:
+    if f.get("type") != "cve":
+        return False
+    product = next((str(c.get("product") or "").lower() for c in co_data.get("cve_findings") or []
+                    if isinstance(c, dict) and c.get("cve_id") == f.get("value")), "")
+    product = product or str(f.get("title") or "").split("—")[-1].strip().split(" ")[0].lower()
+    rx = _OTHER_PRODUCT_RE.get(product)
+    return bool(rx and rx.search(str(f.get("desc") or "")))
 
 
 def _for_sale(f: dict) -> bool:
@@ -243,6 +291,18 @@ def dismiss_false_positives(findings: list[dict], co_data: dict) -> list[dict]:
                 dismissed.append({"key": f.get("key"), "title": f.get("title"), "host": f.get("host"), "type": f.get("type"),
                                   "reason": "Resposta HTML (SPA/soft-200), não é um repositório .git",
                                   "evidence": str(f.get("desc") or "")[:120], "dismissed_at": datetime.now().isoformat(timespec="seconds")})
+            continue
+        if _false_positive_cve(f, co_data):
+            if f.get("key") not in known:
+                dismissed.append({"key": f.get("key"), "title": f.get("title"), "host": f.get("host"), "type": f.get("type"),
+                                  "reason": "CVE de outro produto (só cita o detectado)",
+                                  "evidence": str(f.get("desc") or "")[:120], "dismissed_at": datetime.now().isoformat(timespec="seconds")})
+            continue
+        if _false_positive_github_file(f):
+            if f.get("key") not in known:
+                dismissed.append({"key": f.get("key"), "title": f.get("title"), "host": f.get("host"), "type": f.get("type"),
+                                  "reason": "Configuração de build (pública por natureza), não arquivo sensível",
+                                  "evidence": str(f.get("value") or "")[:120], "dismissed_at": datetime.now().isoformat(timespec="seconds")})
             continue
         if _false_positive_js_secret(f):
             if f.get("key") not in known:
@@ -312,6 +372,8 @@ def tidy_findings(findings: list[dict], co_data: dict) -> list[dict]:
             if k in f:
                 f[k] = repair_mojibake(f[k])
         f["severity"] = cap_severity(f.get("type"), f.get("severity"))
+        if _secret_in_comment(f):
+            f["severity"] = cap_severity("header", f.get("severity"))   # no máximo médio
         if f.get("type") == "brand_domain_exposure" and _for_sale(f):
             f["severity"] = "info"   # estacionado à venda em corretora: monitorar, não é ameaça confirmada
         if f.get("type") == "secret" and _is_public_client_key(f):
@@ -320,7 +382,8 @@ def tidy_findings(findings: list[dict], co_data: dict) -> list[dict]:
 
     vd = co_data.get("vhost_data")
     if vd is not None:
-        out = [f for f in out if f.get("type") != "vhost"] + vhost_findings(vd)
+        known = {str(h.get("host", "")).lower() for h in co_data.get("hosts") or [] if isinstance(h, dict)}
+        out = [f for f in out if f.get("type") != "vhost"] + vhost_findings(vd, known)
 
     return _group_headers(out)
 

@@ -1025,6 +1025,48 @@ def test_brand_domain_for_sale_is_info_but_active_stays():
     assert out == {"b1": "info", "b2": "medium"}
 
 
+# ── 15/10, zigpay: 10 "altos" sem evidência ──
+def test_build_config_files_are_not_sensitive():
+    from core.reconlib.github_org import BUILD_CONFIG_RE
+    from core.finding_hygiene import tidy_findings
+    assert BUILD_CONFIG_RE.search("tsconfig.json") and BUILD_CONFIG_RE.search("ionic.config.json")
+    assert not BUILD_CONFIG_RE.search("config.json") and not BUILD_CONFIG_RE.search(".env")
+    ts = {"type": "github_sensitive_file", "key": "g1", "severity": "high", "value": "https://github.com/o/r/blob/main/tsconfig.json"}
+    env = {"type": "github_sensitive_file", "key": "g2", "severity": "high", "value": "https://github.com/o/r/blob/main/.env.prod"}
+    out = {f["key"]: f["severity"] for f in tidy_findings([ts, env], {})}
+    assert out == {"g2": "medium"}           # tsconfig some; .env fica, mas só o nome não basta para alto
+
+
+def test_js_secret_text_css_map_and_comment():
+    from core.asset_matrix import fp_js_secret
+    from core.finding_hygiene import tidy_findings
+    assert fp_js_secret("password", 'Password:"Olvid\\xE9 mi contrase\\xF1a"')
+    css = {"type": "secret", "module": "js_secrets", "key": "c1", "severity": "high", "value": 'password:"_183Cch4cOmU19AvZiW-vo0"',
+           "metadata": {"secret_type": "password", "context": 'progress:"_1g-44EWs0YB6tB5bSo16t4"}},184:function(A,g,C){A.exports={password:"'}}
+    com = {"type": "secret", "module": "js_secrets", "key": "c2", "severity": "high", "value": 'authToken: "467ddd8b-52e4-45bc-841e-07e56b8494be"',
+           "metadata": {"secret_type": "access_token", "context": '/*  * const auth = {  *   authToken:'}}
+    out = {f["key"]: f["severity"] for f in tidy_findings([css, com], {})}
+    assert out == {"c2": "medium"}
+
+
+def test_vhost_already_in_inventory_is_not_hidden():
+    from core.finding_hygiene import vhost_findings
+    vd = {"findings": [{"vhost": "admin.x.com", "ip": "104.26.5.188", "status": 200, "length": 4778},
+                       {"vhost": "secret-staging.x.com", "ip": "104.26.5.188", "status": 200, "length": 900}]}
+    assert [f["value"] for f in vhost_findings(vd, {"admin.x.com"})] == ["secret-staging.x.com"]
+
+
+def test_python_cves_from_other_products_are_dismissed():
+    from core.finding_hygiene import dismiss_false_positives
+    from core.reconlib.cve import _CPE_PRODUCT_NAMES
+    assert _CPE_PRODUCT_NAMES["python"] == "python:python"          # fabricante fixo na consulta ao NVD
+    co = {"cve_findings": [{"cve_id": c, "product": "python"} for c in ("CVE-2020-1171", "CVE-2020-29396", "CVE-2026-3087")]}
+    fs = [{"type": "cve", "key": "a", "value": "CVE-2020-1171", "desc": "RCE in Visual Studio Code when the Python extension loads…"},
+          {"type": "cve", "key": "b", "value": "CVE-2020-29396", "desc": "A sandboxing issue in Odoo Community 11.0 … when running with Python 3.6"},
+          {"type": "cve", "key": "c", "value": "CVE-2026-3087", "desc": "If shutil.unpack_archive() is given a ZIP archive with an absolute Windows path…"}]
+    assert [f["key"] for f in dismiss_false_positives(fs, co)] == ["c"]
+
+
 # ── borda (WAF/CDN) e validação por conteúdo ────────────────────────────────
 def test_edge_classify_separates_proxy_from_enforcement():
     from core.reconlib.edge import classify, APPLICATION, EDGE_BLOCKED, EDGE_THROTTLED

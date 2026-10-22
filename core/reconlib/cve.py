@@ -78,7 +78,7 @@ _CPE_PRODUCT_NAMES: dict[str, str] = {
     "solr":                      "solr",
     # Languages / runtimes
     "php":                       "php",
-    "python":                    "python",
+    "python":                    "python:python",   # fabricante explícito: com "*" vinha a extensão Python do VS Code (microsoft:python)
     "ruby":                      "ruby",
     "node.js":                   "node.js",
     "nodejs":                    "node.js",
