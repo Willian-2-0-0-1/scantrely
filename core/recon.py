@@ -180,8 +180,11 @@ from core.reconlib.cve import (  # noqa: F401
     _CVE_SKIP_PRODUCTS,
     _KEV_CACHE,
     _KEV_LOADED,
+    _KNOWN_EXPLOITS,
+    _exploit_rank,
     _fetch_epss,
     _load_kev,
+    apply_known_exploits,
     run_cve_lookup,
 )
 from core.reconlib.dnsutil import (  # noqa: F401

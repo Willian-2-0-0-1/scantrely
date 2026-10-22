@@ -164,6 +164,41 @@ def _fetch_epss(cve_ids: list[str]) -> dict[str, float]:
     return scores
 
 
+# CVEs com exploit público confirmado: enriquecem o achado (referência do PoC e correção
+# específica) e ganham o mesmo peso de KEV na ordenação — CVE recém-publicada tem EPSS ≈ 0
+# e afundaria embaixo de média antiga com EPSS alto.
+_KNOWN_EXPLOITS: dict[str, dict] = {
+    "CVE-2026-109618": {
+        "title": "php2shell — RCE pré-autenticação: UAF em session.upload_progress (core do PHP)",
+        "fix": "Atualizar para PHP 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12 ou superior; em versões EOL (≤ 8.1, sem patch) definir session.upload_progress.enabled=Off.",
+        "refs": ["https://github.com/eness/php2shell-CVE-2026-109618-CVE-2026-109619-PoC"],
+    },
+    "CVE-2026-109619": {
+        "title": "php2shell — estado global aponta para memória de request sem reset correto (mesma correção do 109618)",
+        "fix": "Atualizar para PHP 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12 ou superior; em versões EOL (≤ 8.1, sem patch) definir session.upload_progress.enabled=Off.",
+        "refs": ["https://github.com/eness/php2shell-CVE-2026-109618-CVE-2026-109619-PoC"],
+    },
+}
+
+
+def apply_known_exploits(findings: list[dict]) -> None:
+    """Enriquece in-place achados de CVEs com exploit público conhecido (refs, correção, flag)."""
+    for f in findings:
+        meta = _KNOWN_EXPLOITS.get(f.get("cve_id", ""))
+        if not meta:
+            continue
+        f["public_exploit"] = True
+        f["exploit_refs"] = list(meta["refs"])
+        extra = f"{meta['title']}. Correção: {meta['fix']} PoC público: {meta['refs'][0]}"
+        desc = (f.get("desc") or "").strip()
+        f["desc"] = f"{desc} — {extra}" if desc else extra
+
+
+def _exploit_rank(f: dict) -> int:
+    """0 = evidência de exploração (KEV ou exploit público), 1 = resto."""
+    return 0 if (f.get("kev") or f.get("public_exploit")) else 1
+
+
 
 def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
     """
@@ -175,7 +210,9 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
     2. Versioned, CPE returns 0: keyword fallback, filter to CVEs with CPE config match.
     3. Unversioned: keyword search, min_year=2020, filter by CPE config presence.
     4. Enrich all results with EPSS scores (FIRST.org) and CISA KEV flags.
-    5. Sort: KEV-listed first, then EPSS×CVSS descending.
+    5. CVEs com exploit público conhecido (_KNOWN_EXPLOITS) ganham referência do PoC,
+       correção específica e o mesmo peso de KEV na ordenação.
+    6. Sort: KEV/exploit público primeiro, depois EPSS×CVSS decrescente.
     """
     from urllib.parse import urlencode
     import time as _time
@@ -272,7 +309,9 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
 
     def _query_cpe(cpe_name: str, version: str, product: str) -> list[dict]:
         """Query NVD virtualMatchString — returns only CVEs where product:version is in configs."""
-        vms = f"cpe:2.3:a:*:{cpe_name}:{version}:*:*:*:*:*:*:*"
+        # "fabricante:produto" fixa o fabricante; só "produto" usa curinga (comportamento antigo)
+        vms = (f"cpe:2.3:a:{cpe_name}:{version}:*:*:*:*:*:*:*" if ":" in cpe_name
+               else f"cpe:2.3:a:*:{cpe_name}:{version}:*:*:*:*:*:*:*")
         if vms in queries_done:
             return []
         queries_done.add(vms)
@@ -417,6 +456,9 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
     for f in all_unique:
         f["kev"] = _KEV_CACHE.get(f["cve_id"], False)
 
+    # Exploits públicos confirmados: referência do PoC, correção específica e peso de KEV na ordem
+    apply_known_exploits(all_unique)
+
     # Sem versão detectada não há como saber se o alvo é vulnerável: a CVE é só "possível" (nunca crítica/alta).
     from core.finding_hygiene import unversioned_cve_severity
     for f in all_unique:
@@ -425,10 +467,10 @@ def run_cve_lookup(hosts: list, nvd_key: str = "") -> dict:
             f["severity"] = unversioned_cve_severity(f["severity"], f["kev"])
             f["verified"] = False
 
-    # Sort: KEV first, then EPSS×CVSS descending
+    # Sort: KEV/exploit público first, then EPSS×CVSS descending
     all_findings = sorted(
         all_unique,
-        key=lambda x: (0 if x["kev"] else 1, -(x["epss"] * x["score"]), -x["score"]),
+        key=lambda x: (_exploit_rank(x), -(x["epss"] * x["score"]), -x["score"]),
     )
 
     sev_counts: dict[str, int] = {s: 0 for s in ("critical", "high", "medium", "low")}

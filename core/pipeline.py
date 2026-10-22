@@ -3562,7 +3562,7 @@ class ReconRunner:
                     title = f"{f.get('cve_id', '')} — {f.get('product', '')}".strip()
                     if f.get('detected_version'):
                         title += f" {f['detected_version']}"
-                    all_findings.append({'key': key, 'type': 'cve', 'title': title, 'severity': f.get('severity', 'high'), 'category': 'cve', 'desc': f.get('desc', ''), 'host': host_str, 'affected_hosts': affected, 'value': f.get('cve_id', ''), 'url': f.get('url', ''), 'score': f.get('score', 0), 'epss': f.get('epss', 0), 'kev': f.get('kev', False), 'module': 'cve_scan'})
+                    all_findings.append({'key': key, 'type': 'cve', 'title': title, 'severity': f.get('severity', 'high'), 'category': 'cve', 'desc': f.get('desc', ''), 'host': host_str, 'affected_hosts': affected, 'value': f.get('cve_id', ''), 'url': f.get('url', ''), 'score': f.get('score', 0), 'epss': f.get('epss', 0), 'kev': f.get('kev', False), 'public_exploit': f.get('public_exploit', False), 'exploit_refs': f.get('exploit_refs', []), 'module': 'cve_scan'})
                     existing_keys.add(key)
         _HEADER_SEV = {'Strict-Transport-Security': 'medium', 'Content-Security-Policy': 'medium', 'X-Frame-Options': 'low', 'X-Content-Type-Options': 'low'}
         for r in _result('headers').get('results', []):

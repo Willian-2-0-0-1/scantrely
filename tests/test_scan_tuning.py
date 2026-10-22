@@ -1067,6 +1067,28 @@ def test_python_cves_from_other_products_are_dismissed():
     assert [f["key"] for f in dismiss_false_positives(fs, co)] == ["c"]
 
 
+# ── 22/10, php2shell: CVE de ontem com exploit público não pode afundar no EPSS ──
+def test_known_public_exploit_enriches_cve_finding():
+    from core.reconlib.cve import _KNOWN_EXPLOITS, apply_known_exploits
+    poc = "https://github.com/eness/php2shell-CVE-2026-109618-CVE-2026-109619-PoC"
+    assert _KNOWN_EXPLOITS["CVE-2026-109618"]["refs"] == [poc]
+    assert _KNOWN_EXPLOITS["CVE-2026-109619"]["refs"] == [poc]
+    f = {"cve_id": "CVE-2026-109618", "desc": "PHP uses longjmp() for OOM errors…", "kev": False, "epss": 0.0, "score": 9.8}
+    other = {"cve_id": "CVE-2019-9999", "desc": "nada a ver", "kev": False}
+    apply_known_exploits([f, other])
+    assert f["public_exploit"] is True and other.get("public_exploit") is None
+    assert f["exploit_refs"] == [poc]
+    assert "session.upload_progress.enabled=Off" in f["desc"] and poc in f["desc"]
+    assert other["desc"] == "nada a ver"
+
+
+def test_public_exploit_ranks_with_kev():
+    from core.reconlib.cve import _exploit_rank
+    assert _exploit_rank({"kev": True, "public_exploit": False}) == 0
+    assert _exploit_rank({"kev": False, "public_exploit": True}) == 0   # PoC público = evidência de exploração
+    assert _exploit_rank({"kev": False, "public_exploit": False}) == 1
+
+
 # ── borda (WAF/CDN) e validação por conteúdo ────────────────────────────────
 def test_edge_classify_separates_proxy_from_enforcement():
     from core.reconlib.edge import classify, APPLICATION, EDGE_BLOCKED, EDGE_THROTTLED
