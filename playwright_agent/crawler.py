@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from collections import deque
 from pathlib import Path
-from urllib.parse import urlparse
 
 from .input_surface import collect_input_surface
 from .models import PageSnapshot
-from .network import dedupe_endpoints, normalize_endpoint_from_response
+from .network import normalize_endpoint_from_response
 from .url_utils import extract_surface, in_scope, normalize_url
 
 

@@ -11,7 +11,6 @@ from contextlib import contextmanager
 import logging as _logging
 _log = _logging.getLogger('scantrely.http_cache')
 from pathlib import Path
-from typing import Any
 from urllib.request import Request
 
 

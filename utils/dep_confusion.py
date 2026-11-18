@@ -27,10 +27,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:

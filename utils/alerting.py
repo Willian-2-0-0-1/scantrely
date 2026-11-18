@@ -6,7 +6,6 @@ Alerting engine — scan deltas → alerts → dispatch to webhooks/Slack/email.
 from __future__ import annotations
 
 import json
-import os
 import smtplib
 import threading
 from datetime import datetime

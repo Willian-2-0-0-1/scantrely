@@ -171,9 +171,9 @@ function renderLiveTerminal(cid) {
           <div class="lt-dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
           <span>scantrely@asm:~$ pipeline monitor — ${esc(cid)}</span>
           <span style="margin-left:auto;display:flex;gap:8px">
-            <span id="lt-live-badge" style="display:none;color:#4ade80;font-weight:600">⬤ LIVE</span>
+            <span id="lt-live-badge" style="display:none;color:var(--text-low);font-weight:600">${icoHtml("dot",12)} LIVE</span>
             <button id="lt-pause-btn" class="btn btn-secondary btn-icon" onclick="toggleLTPause()">${_ltPaused ? icoHtml("play",14)+' Resume' : icoHtml("pause",14)+' Pause'}</button>
-            <button class="btn btn-secondary btn-icon" onclick="_ltModules={};_ltSince=Date.now()/1000;_renderLTTerminal()" aria-label="Clear terminal">↻ Clear</button>
+            <button class="btn btn-secondary btn-icon" onclick="_ltModules={};_ltSince=Date.now()/1000;_renderLTTerminal()" aria-label="Clear terminal">${icoHtml("reload",14)} Clear</button>
           </span>
         </div>
         <div class="lt-body" id="lt-body"></div>

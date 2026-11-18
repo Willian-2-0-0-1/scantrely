@@ -1,6 +1,6 @@
 """JavaScript Recon — extraído de core/recon.py (ver core/recon.py para o índice completo)."""
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import as_completed
+from concurrent.futures import as_completed, TimeoutError as _FutTimeout
 from datetime import datetime
 from pathlib import Path
 import json
@@ -854,7 +854,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
                     raw_js_urls.update(fut.result())
                 except Exception:
                     _log.debug("js discovery %s falhou", futs[fut], exc_info=True)
-        except TimeoutError:
+        except _FutTimeout:
             _log.info("js discovery: prazo de %.0fs — seguindo com o que veio", disc_budget)
         finally:
             ex.shutdown(wait=False, cancel_futures=True)
@@ -1001,7 +1001,7 @@ def run_js_recon(domains: list, hosts: list) -> dict:
                 continue
             if result:
                 _accept_js_file(result)
-    except TimeoutError:
+    except _FutTimeout:
         _log.info("js: prazo da análise — %s de %s arquivos analisados", sum(f.done() for f in futures), len(futures))
     finally:
         ex.shutdown(wait=False, cancel_futures=True)

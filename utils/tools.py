@@ -7,7 +7,6 @@ _log = _logging.getLogger('scantrely.tools')
 from pathlib import Path
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import Callable
 from utils.tool_gate import gate_for as _gate_for
 
 import re
@@ -509,7 +508,6 @@ class SubfinderTool(CommandTool):
             cfg_path = f"/tmp/subfinder_cfg_{target.replace('.','_')}.yaml"
             fd = os.open(cfg_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # tem chaves de API
             with os.fdopen(fd, "w") as f:
-                import yaml
                 yaml.dump(providers, f)
             self._tmp_cfg = cfg_path
             cmd.extend(["-pc", cfg_path])
@@ -547,7 +545,6 @@ class AmassTool(CommandTool):
         # -timeout é em MINUTOS: com 20, segurava a fase 1 por 4–5 min por domínio e, sem chaves de API,
         # quase nunca trouxe nada (15/10/2026: timeout/erro vazio em quase todas as execuções)
         return ["amass", "enum", "-passive", "-d", target, "-timeout", "3", "-rf", resolvers_file()]
-        return cmd
 
     def parse(self, stdout: str, stderr: str, target: str) -> list[Finding]:
         findings = []

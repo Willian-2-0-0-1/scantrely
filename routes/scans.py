@@ -9,7 +9,6 @@ import json
 import logging as _logging
 _log = _logging.getLogger('scantrely.scans')
 import os
-import re
 import shutil
 from collections import Counter
 from datetime import datetime
@@ -348,7 +347,6 @@ def create_scan_blueprint(
     @require_auth
     def api_cve_feed():
         """Proxy NVD CVE feed — uses nvd_key from settings if available."""
-        import json as _json
         import requests as _r
         from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 

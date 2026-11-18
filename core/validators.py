@@ -7,7 +7,6 @@ Applied at all merge points in pipeline.py to reduce noise.
 import fnmatch
 import ipaddress
 import re
-from typing import Any
 
 
 # ── RFC 1035 label: 1-63 chars, alphanumeric + hyphen, no leading/trailing hyphen ──

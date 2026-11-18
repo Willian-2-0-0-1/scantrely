@@ -194,18 +194,29 @@ PLAYWRIGHT_BROWSERS_PATH="$HOME/.asm-playwright" python3 -m playwright install c
 bash restart_server.sh
 ```
 
-Acesse `http://localhost:5000` — login padrão: `admin` / `admin`
+Acesse `http://localhost:5000` — usuário `admin`; a senha inicial é aleatória e aparece uma vez no console / `logs/server.log` (ou use `ASM_ADMIN_PASSWORD`).
 
-> **Troque a senha imediatamente** via Settings.
+> **Troque a senha** via Settings.
 
 ### Dependências Python (`requirements.txt`)
 
 ```
-flask>=3.0, flask-limiter>=3.0, gunicorn>=21.0
-httpx>=0.27, playwright>=1.45
-jinja2>=3.1, pyyaml>=6.0
-psycopg2-binary>=2.9 (opcional), celery>=5.3 (opcional), redis>=5.0 (opcional)
+flask>=3.0, requests>=2.32, httpx>=0.27, pyyaml>=6.0
+dnspython>=2.6, pyotp>=2.9, psutil>=5.9, playwright>=1.45
+curl_cffi>=0.7 (opcional)
 ```
+
+---
+
+## Monitor CertStream (Certificate Transparency)
+
+Escuta contínua de certificados novos; alerta (`certstream_new_host`) quando surge um nome sob um domínio em escopo que não está no inventário. Desligado por padrão.
+
+1. Suba um servidor próprio: `docker run -d -p 8080:8080 0rickyy0/certstream-server-go` (endpoints: `/` lite, `/full-stream`, `/domains-only`).
+2. Em **Configurações → Certificate Transparency**: `Ligar monitor` = `1` e `Servidor(es)` = `ws://127.0.0.1:8080/` (ou `/domains-only`, menos tráfego). Vários servidores, separados por vírgula, são tentados em ordem.
+3. O servidor público (`wss://certstream.calidog.io/`) entra como reserva; `0` em *Servidor público de reserva* desativa.
+
+Equivalentes por ambiente: `ASM_CERTSTREAM=1`, `ASM_CERTSTREAM_URL=ws://…`. Estado: `GET /api/certstream/status`. O módulo `certstream` do pipeline usa o que o monitor já viu quando ele está conectado; sem monitor, escuta 45 s sozinho e cai no crt.sh.
 
 ---
 

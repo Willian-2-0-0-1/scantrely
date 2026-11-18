@@ -158,6 +158,7 @@ from core.reconlib.certs import (  # noqa: F401
     run_cert_recon,
 )
 from core.reconlib.certstream import (  # noqa: F401
+    _listen,
     run_certstream_snapshot,
 )
 from core.reconlib.cloud import (  # noqa: F401

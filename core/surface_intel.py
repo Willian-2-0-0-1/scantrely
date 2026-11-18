@@ -12,7 +12,6 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Iterable
-from urllib.parse import urlparse
 
 CDN_CNAME_RULES: list[tuple[re.Pattern, str, str]] = [
     (re.compile(r"\.cloudfront\.net$", re.I), "aws_cloudfront", "AWS CloudFront"),

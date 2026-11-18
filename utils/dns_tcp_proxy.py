@@ -4,7 +4,7 @@ DNS UDP→TCP proxy.
 Recebe queries UDP em 127.0.0.1:53, encaminha via TCP para upstream (8.8.8.8:53).
 Necessário quando UDP porta 53 está bloqueado (ex: VMware NAT).
 """
-import socket, struct, threading, sys
+import socket, struct, threading
 
 UPSTREAM = ("8.8.8.8", 53)
 LISTEN   = ("127.0.0.1", 53)

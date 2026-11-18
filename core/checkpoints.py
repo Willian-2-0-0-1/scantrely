@@ -11,7 +11,7 @@ Only hosts in diff.changed + diff.new need a deep re-scan.
 """
 
 from __future__ import annotations
-import hashlib, json, re, time, concurrent.futures
+import hashlib, json, re, concurrent.futures
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from pathlib import Path
@@ -289,7 +289,7 @@ def run_checkpoint_scan(
 
 
 if __name__ == "__main__":
-    import sys, argparse
+    import argparse
 
     ap = argparse.ArgumentParser(description="ASM Checkpoint Scanner")
     ap.add_argument("company_id")

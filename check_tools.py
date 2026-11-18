@@ -65,11 +65,12 @@ CLI_TOOLS = [
 
 PYTHON_PACKAGES = [
     ("flask",          "flask>=3.0",       True),
-    ("flask_limiter",  "flask-limiter>=3", False),
     ("playwright",     "playwright>=1.45", True),
     ("httpx",          "httpx>=0.27",      False),
-    ("jinja2",         "jinja2>=3.1",      False),
     ("yaml",           "pyyaml>=6.0",      False),
+    ("pyotp",          "pyotp>=2.9",       False),
+    ("psutil",         "psutil>=5.9",      False),
+    ("websocket",      "websocket-client>=1.6", False),
     ("bbot",           "bbot",             False),
     ("dnsgen",         "dnsgen",           False),
     ("requests",       "requests",         False),
@@ -95,7 +96,7 @@ def _find_bin(name: str) -> str | None:
 def _check_playwright() -> bool:
     try:
         # Try import
-        import playwright  # noqa
+        import playwright  # noqa: F401
         # Check if browsers are installed
         result = subprocess.run(
             [sys.executable, "-m", "playwright", "install", "--dry-run"],

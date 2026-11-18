@@ -702,7 +702,7 @@ function renderTyposquatTab(co) {
       <div style="white-space:nowrap;padding-top:2px;color:${st.color};font-size:.65rem;font-weight:700">${st.ico ? icoHtml(st.ico,14)+' ' : (st.icon||'')} ${st.label}</div>
       <div style="padding-top:2px">${riskLabel}</div>
       <div style="padding-top:2px"><a href="https://who.is/whois/${escAttr(r.domain)}" target="_blank" rel="noopener"
-              style="font-size:.63rem;color:var(--text3);text-decoration:none">WHOIS ↗</a></div>
+              style="font-size:.63rem;color:var(--text3);text-decoration:none">WHOIS ${icoHtml("external",11)}</a></div>
     </div>`;
   };
 

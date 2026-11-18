@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 import json
 import time
 from urllib.parse import urlparse
@@ -46,7 +46,7 @@ def _lazy_playwright():
         ("libasound.so.2",    "libasound2"),
     ]
     missing = []
-    from ctypes import CDLL, cdll as _cdll
+    from ctypes import cdll as _cdll
     for soname, pkg in _MISSING_VPS_LIBS:
         try:
             _cdll.LoadLibrary(soname)  # fast — ctypes caches

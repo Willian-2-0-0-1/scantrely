@@ -106,15 +106,20 @@ def run_graphql_discovery(hosts: list, domains: list) -> dict:
         return local_findings, local_endpoints
 
     # Run probes in parallel with a hard 3-minute cap
-    with _cf.ThreadPoolExecutor(max_workers=5) as ex:
-        futs = {ex.submit(_probe_host, t): t for t in targets}
+    ex = _cf.ThreadPoolExecutor(max_workers=5)
+    futs = {ex.submit(_probe_host, t): t for t in targets}
+    try:
         for fut in _cf.as_completed(futs, timeout=180):
             try:
                 lf, le = fut.result()
                 findings.extend(lf)
                 endpoints_found.extend(le)
             except Exception:
-                _log.debug('recon.py:8229 erro ignorado', exc_info=True)
+                _log.debug('graphql: probe falhou', exc_info=True)
+    except _cf.TimeoutError:
+        _log.info("graphql: prazo de 180s — seguindo com o que veio")
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
 
     return {
         "total_found": len(findings),

@@ -12,7 +12,6 @@ Read-only GET replays only; never destructive. Active → gate behind safe-mode 
 """
 from __future__ import annotations
 
-from pathlib import Path
 import re
 
 from .race_mapper import _cookies_from_state

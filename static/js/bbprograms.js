@@ -180,7 +180,7 @@ function _bbpRenderSetup() {
       </div>
       <div class="bbp-setup-note">
         Suas credenciais são armazenadas localmente e nunca compartilhadas.
-        Após configurar, clique em <strong>↻ Atualizar</strong> para carregar os programas.
+        Após configurar, clique em <strong>Atualizar</strong> para carregar os programas.
       </div>
     </div>`;
   const pag = document.getElementById('bbp-pagination');

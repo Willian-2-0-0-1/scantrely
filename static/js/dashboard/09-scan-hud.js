@@ -179,7 +179,7 @@ async function openScanModal(companyId) {
 
   // Show targets with loading state while validating
   const targetsEl = document.getElementById("scan-targets-list");
-  targetsEl.innerHTML = (co.domains||[]).map(d=>`<div>⏳ ${esc(d)}</div>`).join("");
+  targetsEl.innerHTML = (co.domains||[]).map(d=>`<div>${icoHtml("clock",13)} ${esc(d)}</div>`).join("");
 
   try {
     const r = await fetch("/api/validate-domains", {

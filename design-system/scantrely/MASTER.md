@@ -38,6 +38,26 @@
 
 **Color Notes:** Dark tech + status green
 
+### Semantic Text Tokens
+
+Texto de status sobre as superfícies escuras (`--bg` #0F172A, `--card`, `--card2`).
+São a camada semântica: **use estes, nunca o tom 500 cru** (`--red`, `--blue`, `--purple`),
+que fica entre 3.1:1 e 4.4:1 sobre fundo tingido e reprova no checklist.
+
+| Token | Hex | Uso | Pior contraste |
+|---|---|---|---|
+| `--text-muted` | `#94A3B8` | rótulo secundário, estado neutro | 5.43:1 |
+| `--text-faint` | `#8696AD` | pendente, pulado, desabilitado | 4.62:1 |
+| `--text-critical` | `#F87171` | crítico, erro | 5.03:1 |
+| `--text-high` | `#FB923C` | alto, em execução | 6.15:1 |
+| `--text-medium` | `#FBBF24` | médio, aviso | 8.33:1 |
+| `--text-low` | `#34D399` | baixo, sucesso | 7.24:1 |
+| `--text-info` | `#60A5FA` | informação, link de dado | 5.47:1 |
+| `--text-alt` | `#A78BFA` | tecnologia, categoria | 5.11:1 |
+
+Chip de status = fundo tingido (alpha .10–.15) + um destes tons. Nunca cor sozinha:
+todo chip carrega texto ou ponto, para o significado não depender do matiz.
+
 ### Typography
 
 - **Heading Font:** Fira Code

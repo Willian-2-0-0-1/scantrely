@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import re
 
 from .browser import BrowserRuntime
 from .file_utils import ensure_dir
-from .models import IdorCandidate, IdorResult, Endpoint
+from .models import IdorCandidate, IdorResult
 from .url_utils import normalize_url
 
 

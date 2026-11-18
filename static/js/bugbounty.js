@@ -262,7 +262,7 @@ function _renderExtGrid() {
         <div class="bbh-module-label">${tool.label}</div>
         <div class="bbh-ext-desc">${tool.desc}</div>
       </div>
-      <span style="margin-left:auto;font-size:.75rem;color:var(--text3);flex-shrink:0">↗</span>
+      <span style="margin-left:auto;color:var(--text3);flex-shrink:0" aria-hidden="true">${icoHtml("external",14)}</span>
     </a>`;
   }).join("");
 }

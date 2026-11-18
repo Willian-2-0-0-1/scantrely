@@ -1,7 +1,6 @@
 """Exposed Services — extraído de core/recon.py (ver core/recon.py para o índice completo)."""
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
-import secrets
 from core.reconlib.base import bind_cancel, current_cancel, http_get
 from core.reconlib.edge import fetch_baseline, classify
 from core.verification import has_content_rule, looks_like_sensitive_file

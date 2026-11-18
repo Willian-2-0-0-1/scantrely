@@ -83,7 +83,6 @@
   var ASM = window.ASM = {
 
     // ── Demo data (used when backend not available) ──────────────────────
-    DEMO_DATA: null,
 
     // ── Runtime state ────────────────────────────────────────────────────
     currentId: null,          // company id, null = "All Companies"
@@ -134,8 +133,6 @@
       ASM.data = { version: '1.0', generated: null, companies: [] };
     } else if (typeof window.ASM_DATA !== 'undefined') {
       ASM.data = window.ASM_DATA;
-    } else if (ASM.DEMO_DATA) {
-      ASM.data = ASM.DEMO_DATA;
     } else {
       ASM.data = { version: '1.0', generated: null, companies: [] };
     }

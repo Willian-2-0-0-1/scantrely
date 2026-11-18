@@ -4,7 +4,6 @@ host merging, and full multi-phase pipeline orchestration.
 """
 from __future__ import annotations
 import fnmatch
-import importlib.util
 import inspect
 import json
 import os
@@ -19,7 +18,7 @@ from urllib.parse import urlparse
 from collections import defaultdict
 import concurrent.futures
 import secrets
-from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed_pool
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 import hashlib
@@ -4562,7 +4561,7 @@ class ReconRunner:
         and pushes new domain findings into the ASM DB for the given company.
         Returns {"installed": True/False, "cron_line": str}.
         """
-        import shutil, pwd, os
+        import shutil, os
         script = str(self.base / 'scripts' / 'opensquat_daily.py')
         kw_file = str(self.base / 'scripts' / f'opensquat_kw_{cid}.txt')
         (self.base / 'scripts').mkdir(parents=True, exist_ok=True)

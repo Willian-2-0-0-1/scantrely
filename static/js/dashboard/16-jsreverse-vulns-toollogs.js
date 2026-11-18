@@ -299,12 +299,12 @@ function copyInstall(name){
   if (navigator.clipboard) {
     navigator.clipboard.writeText(el.textContent).then(()=>{
       const btn = el.nextElementSibling;
-   if(btn){ btn.textContent = ""; setTimeout(()=>btn.textContent="⎘", 1500); }
+   if(btn){ btn.innerHTML = icoHtml("check",13); setTimeout(()=>{ btn.innerHTML = icoHtml("clipboard",13); }, 1500); }
     });
   } else {
     _fallbackCopy(el.textContent);
     const btn = el.nextElementSibling;
-  if(btn){ btn.textContent = ""; setTimeout(()=>btn.textContent="⎘", 1500); }
+  if(btn){ btn.innerHTML = icoHtml("check",13); setTimeout(()=>{ btn.innerHTML = icoHtml("clipboard",13); }, 1500); }
   }
 }
 

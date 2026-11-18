@@ -7,10 +7,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
-  <link rel="stylesheet" href="dashboard.css?v=42">
+  <link rel="stylesheet" href="dashboard.css?v=43">
   <script src="js/config.js?v=1"></script>
 <script src="js/i18n.js?v=23"></script>
-<script src="js/icons.js?v=3"></script>
+<script src="js/icons.js?v=4"></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
@@ -761,7 +761,7 @@
         <div class="hud-panels-row bot" id="hud-bot"></div>
       </div>
       <div class="hud-mini-log" id="hud-mini-log"></div>
-      <div class="hud-action-bar" id="hud-action">▶ Aguardando início do scan…</div>
+      <div class="hud-action-bar" id="hud-action"><span data-ico="play" data-ico-size="12" aria-hidden="true"></span> Aguardando início do scan…</div>
     </div>
     <div class="terminal-footer">
       <span id="term-stats">0 lines</span>
@@ -785,8 +785,8 @@
     <div class="log-modal-ftr">
       <span id="log-modal-count"></span>
       <span style="margin-left:auto">
-        <button class="btn btn-secondary" style="font-size:.65rem;padding:2px 8px" onclick="scrollLogTo('top')">▲ Topo</button>
-        <button class="btn btn-secondary" style="font-size:.65rem;padding:2px 8px;margin-left:4px" onclick="scrollLogTo('bottom')">▼ Fim</button>
+        <button class="btn btn-secondary" style="font-size:.65rem;padding:2px 8px" onclick="scrollLogTo('top')"><span data-ico="arrow-up" data-ico-size="12" aria-hidden="true"></span> Topo</button>
+        <button class="btn btn-secondary" style="font-size:.65rem;padding:2px 8px;margin-left:4px" onclick="scrollLogTo('bottom')"><span data-ico="arrow-down" data-ico-size="12" aria-hidden="true"></span> Fim</button>
       </span>
     </div>
   </div>
@@ -895,11 +895,11 @@
 </div>
 
 <!-- ── Core modules ── -->
-<script src="js/asm.js?v=2"></script>
+<script src="js/asm.js?v=3"></script>
 <script src="js/api.js?v=2"></script>
-<script src="js/bugbounty.js?v=4"></script>
-<script src="js/bbprograms.js?v=5"></script>
-<script src="js/generators.js?v=9"></script>
+<script src="js/bugbounty.js?v=5"></script>
+<script src="js/bbprograms.js?v=6"></script>
+<script src="js/generators.js?v=10"></script>
 <script src="js/theme.js?v=2"></script>
 <script src="js/asset-graph.js?v=8"></script>
 <script src="js/extras.js?v=1"></script>
@@ -909,24 +909,24 @@
 <script src="js/priorities.js?v=2"></script>
 
 <!-- ── Optional: load generated data from parser ── -->
-<script src="js/dashboard/01-compat-demo-data.js?v=3"></script>
+<script src="js/dashboard/01-compat.js?v=4"></script>
 <script src="js/dashboard/02-navigation.js?v=4"></script>
 <script src="js/dashboard/03-companies-overview.js?v=1"></script>
 <script src="js/dashboard/04-global-search.js?v=2"></script>
 <script src="js/dashboard/05-findings-cve-supplychain.js?v=5"></script>
 <script src="js/dashboard/06-hosts-ports-subdomains.js?v=6"></script>
 <script src="js/dashboard/06b-asset-matrix.js?v=5"></script>
-<script src="js/dashboard/07-endpoints.js?v=3"></script>
+<script src="js/dashboard/07-endpoints.js?v=4"></script>
 <script src="js/dashboard/08-infra-add-company.js?v=2"></script>
-<script src="js/dashboard/09-scan-hud.js?v=2"></script>
+<script src="js/dashboard/09-scan-hud.js?v=3"></script>
 <script src="js/dashboard/10-helpers-auth-routing.js?v=2"></script>
 <script src="js/dashboard/11-jobs-detail.js?v=2"></script>
 <script src="js/dashboard/12-operation-recon-screenshots.js?v=3"></script>
 <script src="js/dashboard/13-jobs-queue.js?v=1"></script>
-<script src="js/dashboard/14-settings-webhooks-tools.js?v=1"></script>
+<script src="js/dashboard/14-settings-webhooks-tools.js?v=2"></script>
 <script src="js/dashboard/15-admins-pipeline.js?v=2"></script>
-<script src="js/dashboard/16-jsreverse-vulns-toollogs.js?v=7"></script>
-<script src="js/dashboard/17-terminal-alerts-init.js?v=8"></script>
+<script src="js/dashboard/16-jsreverse-vulns-toollogs.js?v=8"></script>
+<script src="js/dashboard/17-terminal-alerts-init.js?v=9"></script>
 
 </body>
 </html>

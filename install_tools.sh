@@ -382,12 +382,12 @@ WRAPPER
   ln -sfn theHarvester "$BIN_DIR/theharvester"
 fi
 
-# certstream (python import — crt.sh fallback if missing)
-if ! "$VENV_DIR/bin/python3" -c "import certstream" 2>/dev/null; then
-  log "Instalando certstream (pip)..."
-  "$PIP" install -q certstream && echo "  ✓ certstream (python)" || warn "certstream: pip install falhou (crt.sh continua como fallback)"
+# websocket-client (monitor CertStream — sem ele o módulo cai no crt.sh)
+if ! "$VENV_DIR/bin/python3" -c "import websocket" 2>/dev/null; then
+  log "Instalando websocket-client (pip)..."
+  "$PIP" install -q websocket-client && echo "  ✓ websocket-client" || warn "websocket-client: pip install falhou (crt.sh continua como fallback)"
 else
-  skip "certstream"
+  skip "websocket-client"
 fi
 
 # cloud_enum

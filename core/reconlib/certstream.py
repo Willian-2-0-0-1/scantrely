@@ -5,13 +5,61 @@ from core.reconlib.base import _log, http_get
 
 # ── CertStream Monitor (one-shot snapshot) ──
 
+def _listen(urls: list, duration_sec: int, matches) -> tuple:
+    """Escuta o primeiro servidor CertStream que responder por `duration_sec` s. -> (achados, erro|None)."""
+    import time
+    import websocket                       # websocket-client; sem ele o chamador cai no crt.sh
+    from core.certmonitor import extract_names
+    deadline = time.monotonic() + duration_sec
+    found, last_err = [], None
+    for url in urls:
+        if deadline - time.monotonic() <= 1:
+            break
+        try:
+            ws = websocket.create_connection(url, timeout=5)
+        except Exception as e:
+            last_err = f"{url}: {e}"
+            continue
+        try:
+            ws.settimeout(2)
+            while time.monotonic() < deadline:
+                try:
+                    raw = ws.recv()
+                except websocket.WebSocketTimeoutException:
+                    continue
+                if not raw:
+                    break
+                try:
+                    names, meta = extract_names(json.loads(raw))
+                except ValueError:
+                    continue
+                for name in names:
+                    if matches(name):
+                        found.append({
+                            "domain": str(name).lstrip("*."), "cn": str(name),
+                            "issuer": str(meta.get("issuer", ""))[:60],
+                            "not_before": meta.get("not_before") or "", "not_after": meta.get("not_after") or "",
+                            "source": "certstream",
+                        })
+            last_err = None
+            break
+        except Exception as e:
+            last_err = f"{url}: {e}"
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                _log.debug("certstream: close falhou", exc_info=True)
+    return found, last_err
+
+
 def run_certstream_snapshot(domains: list, duration_sec: int = 60) -> dict:
     """
     Listen to CertStream for `duration_sec` seconds and collect any new
-    certificates matching the target domains. Requires certstream package.
-    Falls back to crt.sh polling if certstream not available.
+    certificates matching the target domains.
+    Se o monitor contínuo (core/certmonitor.py) estiver conectado, usa o que ele já viu; senão escuta
+    por conta própria. Cai no crt.sh se não houver websocket-client ou nada for visto.
     """
-    import urllib.request, threading
 
     new_certs = []
     errors    = []
@@ -57,39 +105,21 @@ def run_certstream_snapshot(domains: list, duration_sec: int = 60) -> dict:
                 errors.append(str(e))
 
     try:
-        import certstream
-        found = []
-
-        def _cb(msg, ctx):
-            try:
-                leaf = msg.get("data", {}).get("leaf_cert", {})
-                subject = leaf.get("subject") or {}
-                cn = subject.get("CN", "") if isinstance(subject, dict) else ""
-                issuer = leaf.get("issuer") or {}
-                issuer_o = issuer.get("O", "") if isinstance(issuer, dict) else ""
-                sans = leaf.get("all_domains") or []
-                for name in ([cn] + list(sans)):
-                    if _matches(name):
-                        found.append({
-                            "domain":     str(name).lstrip("*."),
-                            "cn":         cn,
-                            "issuer":     issuer_o,
-                            "not_before": leaf.get("not_before", ""),
-                            "not_after":  leaf.get("not_after", ""),
-                            "source":     "certstream",
-                        })
-            except Exception:
-                _log.debug('recon.py:6486 erro ignorado', exc_info=True)
-
-        t = threading.Thread(
-            target=certstream.listen_for_events,
-            args=(_cb,),
-            kwargs={"url": "wss://certstream.calidog.io/"},
-            daemon=True,
-        )
-        t.start()
-        t.join(timeout=duration_sec)
-        new_certs = found
+        from core.certmonitor import get_monitor, resolve_urls
+        mon = get_monitor()
+        if mon is not None and mon.is_connected():
+            # o monitor contínuo já está escutando: aproveita o que ele viu em vez de escutar de novo
+            for r in mon.recent_for(base_domains):
+                new_certs.append({
+                    "domain": r["host"], "cn": r["cn"], "issuer": str(r.get("issuer") or "")[:60],
+                    "not_before": r.get("not_before", ""), "not_after": r.get("not_after", ""),
+                    "source": "certstream-monitor",
+                })
+        else:
+            found, err = _listen(resolve_urls(None), duration_sec, _matches)
+            new_certs = found
+            if err:
+                errors.append(err)
         if not new_certs:
             _from_crtsh()
 

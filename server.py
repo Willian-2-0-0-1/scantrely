@@ -5,7 +5,7 @@ ASM Platform — Backend Server
 Usage:
     python3 server.py [--port 5000]
 """
-import json, sys, os, threading, uuid, time, re, subprocess
+import json, sys, os, threading, uuid, time, re
 import logging as _logging
 _log = _logging.getLogger('scantrely.server')
 import hashlib, secrets, base64, hmac
@@ -33,7 +33,7 @@ from core.jobs import JobScheduler
 from core.pipeline import ReconRunner, PIPELINE_PHASES, SELF_CONTAINED_MODULES
 
 try:
-    from flask import Flask, jsonify, request, Response, abort, send_from_directory, stream_with_context, g, has_request_context
+    from flask import Flask, jsonify, request, abort, g, has_request_context
 except ImportError:
     print("[!] Flask not installed. Run: pip install flask")
     sys.exit(1)
@@ -155,21 +155,23 @@ def load_admins() -> list:
     if admins:
         return admins
     # Bootstrap first admin on fresh install
+    # Senha inicial aleatória (ou ASM_ADMIN_PASSWORD) — nada de credencial fixa conhecida.
+    initial_pw = os.environ.get("ASM_ADMIN_PASSWORD") or secrets.token_urlsafe(12)
     default = {
         "id":            uuid.uuid4().hex,
         "username":      "admin",
         "email":         "",
-        "password_hash": _hash_pw("admin"),
+        "password_hash": _hash_pw(initial_pw),
         "role":          "super_admin",
         "created_at":    datetime.now().isoformat(timespec="seconds"),
         "last_login":    None,
     }
     save_admins([default])
-    print("  ┌─────────────────────────────────────────┐")
-    print("  │  Default admin created:                 │")
-    print("  │  Username: admin  /  Password: admin    │")
-    print("  │  !! CHANGE THE PASSWORD IMMEDIATELY !!  │")
-    print("  └─────────────────────────────────────────┘")
+    print("  ┌─────────────────────────────────────────────")
+    print("  │  Admin inicial criado (aparece só desta vez):")
+    print(f"  │  Usuário: admin   Senha: {initial_pw}")
+    print("  │  Troque a senha em Configurações.")
+    print("  └─────────────────────────────────────────────")
     return [default]
 
 
@@ -875,6 +877,8 @@ _SETTINGS_KEYS = {
     "slack_webhook_url", "discord_webhook_url", "alert_webhook_url",
     "defectdojo_url", "defectdojo_token", "defectdojo_product",
     "slash_token", "vapid_public_key", "vapid_private_key",
+    # Certificate Transparency (core/certmonitor.py)
+    "certstream_enabled", "certstream_url", "certstream_public_fallback",
 }
 
 _PUBLIC_SETTINGS_KEYS = {
@@ -883,6 +887,7 @@ _PUBLIC_SETTINGS_KEYS = {
     "playwright_max_depth", "playwright_timeout", "playwright_slow_mo",
     "playwright_user_agent", "playwright_auth_state", "playwright_auth_state_b",
     "playwright_test_xss", "playwright_test_race", "playwright_test_access",
+    "certstream_enabled", "certstream_url", "certstream_public_fallback",
 }
 
 _runner = ReconRunner(
@@ -1029,6 +1034,13 @@ JOB_SCHEDULER = JobScheduler(
 JOB_SCHEDULER.start()
 _register_health_endpoint()
 
+# Monitor contínuo de Certificate Transparency: a thread sobe sempre e só conecta se
+# certstream_enabled (Configurações) ou ASM_CERTSTREAM=1 estiver ligado.
+from core.certmonitor import CertStreamMonitor, set_monitor
+CERT_MONITOR = CertStreamMonitor(db=DB, get_settings=_get_settings, base_dir=BASE)
+set_monitor(CERT_MONITOR)
+CERT_MONITOR.start()
+
 
 app.register_blueprint(create_recon_blueprint(
     require_auth=require_auth,
@@ -1077,6 +1089,7 @@ app.register_blueprint(create_extras_blueprint(
     get_company_data=_get_company_data,
     sessions=_sessions,
     session_ttl=_SESSION_TTL,
+    cert_monitor=CERT_MONITOR,
 ))
 
 

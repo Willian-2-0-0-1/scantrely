@@ -483,9 +483,9 @@ function _bulkControls(genId, hasMask=true, extra=''){
         ${extra}
       </div>
       <div class="gen-bulk-actions" style="margin-top:12px">
-        <button class="btn btn-primary" onclick="genExec_${genId}()">↻ Gerar</button>
+        <button class="btn btn-primary" onclick="genExec_${genId}()">${icoHtml("reload",14)} Gerar</button>
         <button class="btn btn-secondary" id="bulk-copy-all" onclick="_bulkCopyAll()">Copiar tudo</button>
-        <button class="btn btn-secondary" onclick="_bulkDownload('${genId}')">⬇ .TXT</button>
+        <button class="btn btn-secondary" onclick="_bulkDownload('${genId}')">${icoHtml("download",14)} .TXT</button>
       </div>
     </div>
     <div class="gen-card gen-bulk-output-card">
@@ -706,9 +706,9 @@ function _genRender_senha(){return`
       <label><input type="checkbox" id="pw-syms"  checked> !@#...</label>
     </div>
     <div class="gen-bulk-actions" style="margin-top:12px">
-      <button class="btn btn-primary" onclick="genExec_senha()">↻ Gerar</button>
+      <button class="btn btn-primary" onclick="genExec_senha()">${icoHtml("reload",14)} Gerar</button>
       <button class="btn btn-secondary" id="bulk-copy-all" onclick="_bulkCopyAll()">Copiar tudo</button>
-      <button class="btn btn-secondary" onclick="_bulkDownload('senhas')">⬇ .TXT</button>
+      <button class="btn btn-secondary" onclick="_bulkDownload('senhas')">${icoHtml("download",14)} .TXT</button>
     </div>
   </div>
   <div class="gen-card gen-bulk-output-card"><div class="gen-bulk-stats" id="senha-stats" style="display:none"></div><div class="gen-bulk-list" id="senha-output"></div></div>`;
@@ -734,9 +734,9 @@ function _genRender_numeros(){return`
       <div class="gen-field-group" style="justify-content:flex-end;padding-top:18px"><label><input type="checkbox" id="num-unique"> Sem repetição</label></div>
     </div>
     <div class="gen-bulk-actions" style="margin-top:12px">
-      <button class="btn btn-primary" onclick="genExec_numeros()">↻ Gerar</button>
+      <button class="btn btn-primary" onclick="genExec_numeros()">${icoHtml("reload",14)} Gerar</button>
       <button class="btn btn-secondary" id="bulk-copy-all" onclick="_bulkCopyAll()">Copiar tudo</button>
-      <button class="btn btn-secondary" onclick="_bulkDownload('numeros')">⬇ .TXT</button>
+      <button class="btn btn-secondary" onclick="_bulkDownload('numeros')">${icoHtml("download",14)} .TXT</button>
     </div>
   </div>
   <div class="gen-card gen-bulk-output-card"><div class="gen-bulk-stats" id="numeros-stats" style="display:none"></div><div class="gen-bulk-list" id="numeros-output"></div></div>`;
@@ -771,8 +771,8 @@ function _genRender_pessoa(){
       <div class="gen-field-group"><label>Quantidade</label><input type="number" id="p-qty" value="1" min="1" max="50" class="gen-input" style="width:80px"></div>
     </div>
     <div class="gen-bulk-actions" style="margin-top:12px">
-      <button class="btn btn-primary" onclick="genExec_pessoa()">↻ Gerar Pessoa</button>
-      <button class="btn btn-secondary" onclick="_bulkDownload('pessoa')">⬇ .TXT</button>
+      <button class="btn btn-primary" onclick="genExec_pessoa()">${icoHtml("reload",14)} Gerar Pessoa</button>
+      <button class="btn btn-secondary" onclick="_bulkDownload('pessoa')">${icoHtml("download",14)} .TXT</button>
     </div>
   </div>
   <div id="pessoa-output"></div>`;

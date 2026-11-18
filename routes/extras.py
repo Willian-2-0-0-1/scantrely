@@ -12,10 +12,10 @@ import os
 import re
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, Response, g, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 
 _OPENAPI = {
@@ -88,8 +88,16 @@ def create_extras_blueprint(
     get_company_data=None,
     sessions=None,
     session_ttl=86400,
+    cert_monitor=None,
 ):
     bp = Blueprint("extras_routes", __name__)
+
+    @bp.route("/api/certstream/status", methods=["GET"])
+    @require_auth
+    def api_certstream_status():
+        if cert_monitor is None:
+            return jsonify({"state": "unavailable"})
+        return jsonify(cert_monitor.status())
     base = Path(base_dir) if base_dir else Path(".")
     settings_keys = set(settings_keys or [])
 
@@ -260,7 +268,7 @@ a{color:#00e5ff}pre{background:#1e293b;padding:16px;border-radius:8px;overflow:a
         save_admins(admins)
         db.mark_invite_used(token)
         _audit("invite_accept", new_admin["username"])
-        return jsonify({k: v for k, v in new_admin.items() if k != "password_hash"}), 201
+        return jsonify({k: v for k, v in new_admin.items() if k not in ("password_hash", "totp_secret")}), 201
 
     @bp.route("/api/integrations/slash", methods=["POST"])
     def api_slash_scan():

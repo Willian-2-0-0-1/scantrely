@@ -89,7 +89,7 @@ asm/
 │   ├── rate_limiter.py    # Rate limiting por fase
 │   ├── alerting.py        # Regras de alerta
 │   ├── http_cache.py      # Cache de respostas HTTP
-│   ├── dep_confusion.py   # Checagem de dependency confusion (usa node/jsdom)
+│   ├── dep_confusion.py   # Checagem de dependency confusion (npm/PyPI/RubyGems…)
 │   ├── mullvad_rotator.py # Rotação de saída VPN (Mullvad)
 │   └── dns_tcp_proxy.py   # Proxy DNS-over-TCP
 │
@@ -104,9 +104,7 @@ asm/
 ├── logs/                  # server.log, audit.log, server.pid
 ├── bin/                   # 35+ binários das ferramentas (gitignored, ~775 MB)
 ├── wordlists/             # Wordlists de fuzzing/brute (~220 MB)
-├── migrations/            # 001_initial.sql (schema base)
-├── tests/                 # test_asm.py (suíte pytest)
-└── node_modules/          # jsdom — usado por utils/dep_confusion.py
+└── tests/                 # suíte pytest (+ oráculo node da matriz de ativos)
 ```
 
 > **Shims de raiz** (`database.py`, `pipeline.py`, `validators.py`, `*_routes.py`):

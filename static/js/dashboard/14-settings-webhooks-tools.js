@@ -61,6 +61,13 @@ const SETTINGS_SCHEMA = [
       {key:"hackerone_token",     label:"HackerOne API Token",     tag:"optional", hint:"Token de API gerado em hackerone.com/settings/api_token_v2", signup:"https://hackerone.com/settings/api_token_v2"},
     ]
   },
+  { group:"Certificate Transparency (CertStream)", ico:"radar", desc:"Monitor contínuo: avisa quando sai certificado para um nome novo sob um domínio em escopo. Aponte para o seu certstream-server-go (docker run -p 8080:8080 0rickyy0/certstream-server-go); o servidor público fica como reserva.",
+    fields:[
+      {key:"certstream_enabled",         label:"Ligar monitor",          tag:"optional", hint:"1 liga, 0 desliga (padrão: desligado)"},
+      {key:"certstream_url",             label:"Servidor(es) CertStream", tag:"optional", hint:"ws://127.0.0.1:8080/ — vários separados por vírgula, tentados em ordem"},
+      {key:"certstream_public_fallback", label:"Servidor público de reserva", tag:"optional", hint:"0 não usa wss://certstream.calidog.io/ como reserva (padrão: usa)"},
+    ]
+  },
   { group:"Notificações por E-mail (SMTP)", ico:"mail", desc:"Canal de e-mail usado pelas regras de alerta e pelo webhook tipo Email",
     fields:[
       {key:"smtp_host",    label:"SMTP Host",        tag:"optional", hint:"smtp.example.com"},

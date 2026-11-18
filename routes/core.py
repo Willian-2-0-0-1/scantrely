@@ -181,7 +181,7 @@ def create_core_blueprint(
     @require_super_admin
     def api_list_admins():
         admins = load_admins()
-        return jsonify([{k: v for k, v in admin.items() if k != "password_hash"} for admin in admins])
+        return jsonify([{k: v for k, v in admin.items() if k not in ("password_hash", "totp_secret")} for admin in admins])
 
     @bp.route("/api/admins", methods=["POST"])
     @require_super_admin
@@ -221,7 +221,7 @@ def create_core_blueprint(
         }
         admins.append(new_admin)
         save_admins(admins)
-        return jsonify({k: v for k, v in new_admin.items() if k != "password_hash"}), 201
+        return jsonify({k: v for k, v in new_admin.items() if k not in ("password_hash", "totp_secret")}), 201
 
     @bp.route("/api/admins/<aid>", methods=["PUT"])
     @require_super_admin
@@ -252,7 +252,7 @@ def create_core_blueprint(
                     sessions.pop(token, None)
 
         save_admins(admins)
-        return jsonify({k: v for k, v in admin.items() if k != "password_hash"})
+        return jsonify({k: v for k, v in admin.items() if k not in ("password_hash", "totp_secret")})
 
     @bp.route("/api/admins/<aid>", methods=["DELETE"])
     @require_super_admin

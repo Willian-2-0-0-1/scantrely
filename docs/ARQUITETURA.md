@@ -170,7 +170,7 @@ Todas as rotas de API (exceto `GET /` e `POST /api/auth/login`) são protegidas 
 
 ```
 POST /api/auth/login
-Body: {"username": "admin", "password": "admin"}
+Body: {"username": "admin", "password": "<sua-senha>"}
 Response: {"token": "<hex>", "username": "admin", "role": "admin"}
 ```
 
