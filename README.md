@@ -56,6 +56,7 @@ sai são apenas as chamadas que as próprias ferramentas de recon fazem para a i
 | **Vulnerabilidades** | nuclei com templates curados, CVE enriquecida com KEV/EPSS/exploit público conhecido, severidade ajustada pela prova disponível |
 | **Higiene de achados** | colapso de vhosts idênticos, segredos mascarados em relatórios, falso-positivo de config de build/CVE de outro produto removidos automaticamente |
 | **Gestão** | checkpoints incrementais, agendamento, webhooks, diff entre scans, exportação (CSV/SARIF/PDF/HTML), RBAC, 2FA |
+| **Proxy residencial** | Roda em IP direto por padrão; liga automaticamente ao detectar bloqueio de WAF e rotaciona a sessão se o bloqueio continuar (Webshare e compatíveis) |
 
 ## Como usar
 
@@ -94,6 +95,16 @@ Troque a senha em **Configurações** depois do primeiro login.
 ```bash
 HOST=0.0.0.0 PORT=8080 bash restart_server.sh   # override de host/porta
 ```
+
+### Proxy residencial (opcional)
+
+O scan roda em IP direto por padrão. Só quando uma sondagem bate num bloqueio real de
+WAF/CDN é que o proxy residencial configurado entra para aquele host — e se o bloqueio
+continuar mesmo pelo proxy, a sessão é rotacionada para sair por outra IP, sem reiniciar
+o scan. Configurável em **Configurações → Proxy Residencial**: URL no formato
+`http://usuario-PAIS-1:senha@p.webshare.io:80` (Webshare e compatíveis — o número final
+é a sessão que a rotação troca). Detalhes em
+[`docs/REFERENCIA.md`](docs/REFERENCIA.md#proxy-residencial-rotação-de-ip-ao-detectar-bloqueio).
 
 ### Monitor CertStream (opcional)
 

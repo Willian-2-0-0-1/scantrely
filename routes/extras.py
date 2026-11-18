@@ -98,6 +98,17 @@ def create_extras_blueprint(
         if cert_monitor is None:
             return jsonify({"state": "unavailable"})
         return jsonify(cert_monitor.status())
+
+    @bp.route("/api/proxy/test", methods=["POST"])
+    @require_auth
+    def api_proxy_test():
+        """Testa o proxy residencial configurado nas Configurações: faz uma requisição
+        real pela proxy e devolve a IP de saída, sem precisar esperar um scan bloquear."""
+        from utils import proxy_rotator as _pr
+        settings = get_settings() if get_settings else {}
+        if not _pr.is_enabled(settings):
+            return jsonify({"ok": False, "error": "proxy desabilitado ou sem URL configurada"}), 400
+        return jsonify(_pr.test(_pr.base_url(settings)))
     base = Path(base_dir) if base_dir else Path(".")
     settings_keys = set(settings_keys or [])
 

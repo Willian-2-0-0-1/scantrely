@@ -86,6 +86,10 @@ from core.reconlib.base import (  # noqa: F401
     http_get,
     run_bounded,
     set_subprocess_context,
+    set_proxy_available,
+    get_proxy_available,
+    set_proxy_forced,
+    get_proxy_forced,
     subprocess,
 )
 from core.reconlib.breach import (  # noqa: F401

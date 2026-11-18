@@ -2,7 +2,12 @@
 
 Todas as mudanças relevantes do projeto são documentadas aqui.
 
-## [Não lançado] - 2026-10-15
+## [Não lançado] - 2026-11-18
+
+### Proxy residencial com rotação automática de IP
+
+- **Bypass de WAF/bloqueio por IP** (`utils/proxy_rotator.py`, `core/reconlib/base.py`, `core/pipeline.py`): o scan roda em IP direto por padrão. Quando o motor HTTP (`http_get`) detecta um bloqueio real de WAF/CDN num host, liga automaticamente o proxy residencial configurado para aquele domínio; se o bloqueio continuar mesmo pelo proxy, a sessão é rotacionada (novo número de sessão no usuário, formato Webshare `usuario-pais-NNN`) para saír por outra IP — sem reiniciar o scan, sem perder o que já foi coletado. Ferramentas externas (subfinder, nuclei, httpx, ffuf, amass…) herdam o mesmo proxy via `HTTP_PROXY`/`HTTPS_PROXY` quando o pipeline já confirmou bloqueio na saída de uma delas (`_check_blocked_and_rotate`, que também ganhou um endpoint de teste, `POST /api/proxy/test`). Configurável em Configurações → Proxy Residencial (`proxy_enabled`, `proxy_url`).
+- **Correção:** a rotação por Mullvad VPN (`_check_blocked_and_rotate`) nunca funcionava mesmo habilitada — `import mullvad_rotator` sem o prefixo `utils.` sempre levantava `ModuleNotFoundError`, silenciosamente engolido pelo `except ImportError`. Corrigido para `from utils import mullvad_rotator`; agora cai para o proxy residencial quando o Mullvad não está conectado.
 
 ### Do recon para o teste manual
 

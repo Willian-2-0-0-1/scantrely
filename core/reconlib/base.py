@@ -14,6 +14,32 @@ _MAX_RATE_WAIT = float(os.environ.get("ASM_HTTP_RATE_MAX_WAIT", "30") or 30)
 
 _SUBPROCESS_CONTEXT = threading.local()
 
+# Proxy residencial (Webshare e compatíveis) — ver utils/proxy_rotator.py.
+# "available": a URL configurada nas settings, consultada pelo http_get para decidir,
+#   por domínio, quando vale a pena ligar o proxy (só depois de um bloqueio real).
+# "forced": setada pelo pipeline (core/pipeline.py:_check_blocked_and_rotate) quando um
+#   bloqueio já foi confirmado pela saída de uma ferramenta externa (subfinder/nuclei/...);
+#   força TODO o tráfego do módulo (Python e subprocess) a passar pelo proxy imediatamente.
+_PROXY_AVAILABLE = threading.local()
+_PROXY_FORCED = threading.local()
+
+
+def set_proxy_available(url: str | None) -> None:
+    _PROXY_AVAILABLE.url = url or None
+
+
+def get_proxy_available() -> str | None:
+    return getattr(_PROXY_AVAILABLE, "url", None)
+
+
+def set_proxy_forced(url: str | None) -> None:
+    _PROXY_FORCED.url = url or None
+
+
+def get_proxy_forced() -> str | None:
+    return getattr(_PROXY_FORCED, "url", None)
+
+
 
 def set_subprocess_context(db=None, cid: str = "", module: str = ""):
     _SUBPROCESS_CONTEXT.db = db
@@ -71,6 +97,13 @@ class _GatedSubprocess:
                 )
             except Exception:
                 run_id = None
+        proxy_url = get_proxy_forced()
+        if proxy_url and "env" not in kw:
+            import os as _os
+            env = dict(_os.environ)
+            for _k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+                env[_k] = proxy_url
+            kw["env"] = env
         with _gate_for(tool).slot():
             status = "error"
             proc = None
@@ -273,6 +306,7 @@ def _get_domain_state(domain: str) -> dict:
                 "last": 0.0,
                 "blocked_until": 0.0,
                 "consecutive_blocks": 0,
+                "proxy_url": None,  # escalado para a URL de proxy depois de um bloqueio real
             }
         return _domain_state[domain]
 
@@ -364,11 +398,13 @@ def http_get(url: str, timeout: int = 10, retries: int = 3,
     """
     from urllib.parse import urlparse
     from utils.circuit_breaker import breaker_for
+    from utils import proxy_rotator as _pr
     domain = urlparse(url).netloc.split(":")[0]
     headers = _make_headers(extra_headers)
     last_exc = None
     br = breaker_for(domain or "http")
     attempts = max(1, int(retries or 1))
+    dom_state = _get_domain_state(domain)
 
     for attempt in range(attempts):
         if cancelled():
@@ -376,19 +412,30 @@ def http_get(url: str, timeout: int = 10, retries: int = 3,
         if not br.allow():
             return 0, b"", {"X-Circuit-Breaker": "open"}
         _rate_wait(domain)
+        # proxy forçado pelo pipeline (bloqueio já confirmado por outra ferramenta) tem
+        # prioridade; senão usa o proxy já escalado para este domínio (bloqueio anterior).
+        proxy_now = get_proxy_forced() or dom_state.get("proxy_url")
+        proxies_kw = {"http": proxy_now, "https": proxy_now} if proxy_now else None
         try:
             if _CFFI_AVAILABLE:
                 resp = _cffi_requests.get(
                     url, headers=headers, timeout=timeout,
                     impersonate=impersonate, allow_redirects=True,
-                    verify=False,
+                    verify=False, proxies=proxies_kw,
                 )
                 status  = resp.status_code
                 body    = resp.content
                 resp_h  = dict(resp.headers)
             else:
                 req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=timeout) as r:
+                if proxy_now:
+                    opener = urllib.request.build_opener(
+                        urllib.request.ProxyHandler({"http": proxy_now, "https": proxy_now})
+                    )
+                    r_ctx = opener.open(req, timeout=timeout)
+                else:
+                    r_ctx = urllib.request.urlopen(req, timeout=timeout)
+                with r_ctx as r:
                     status = r.status
                     body   = r.read()
                     resp_h = dict(r.headers)
@@ -403,6 +450,15 @@ def http_get(url: str, timeout: int = 10, retries: int = 3,
             if _is_block_response(status, body_preview):
                 br.failure()
                 _record_block(domain, status)
+                available = get_proxy_available()
+                if available:
+                    with dom_state["lock"]:
+                        if not dom_state.get("proxy_url"):
+                            dom_state["proxy_url"] = available
+                            _log.info("[proxy] bloqueio em %s — ativando proxy residencial", domain)
+                        else:
+                            dom_state["proxy_url"] = _pr.rotate(dom_state["proxy_url"])
+                            _log.info("[proxy] ainda bloqueado via proxy em %s — rotacionando sessão", domain)
                 wait = 2 ** attempt + random.uniform(0, 1)
                 time.sleep(wait)
                 headers = _make_headers(extra_headers)  # rotate UA on retry
@@ -427,6 +483,15 @@ def http_get(url: str, timeout: int = 10, retries: int = 3,
             if status == 429:
                 br.failure()
                 _record_block(domain, status)
+                available = get_proxy_available()
+                if available:
+                    with dom_state["lock"]:
+                        if not dom_state.get("proxy_url"):
+                            dom_state["proxy_url"] = available
+                            _log.info("[proxy] 429 em %s — ativando proxy residencial", domain)
+                        else:
+                            dom_state["proxy_url"] = _pr.rotate(dom_state["proxy_url"])
+                            _log.info("[proxy] ainda bloqueado via proxy em %s — rotacionando sessão", domain)
                 wait = 2 ** attempt + random.uniform(0, 2)
                 time.sleep(wait)
                 continue

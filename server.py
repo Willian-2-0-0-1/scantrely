@@ -879,6 +879,8 @@ _SETTINGS_KEYS = {
     "slash_token", "vapid_public_key", "vapid_private_key",
     # Certificate Transparency (core/certmonitor.py)
     "certstream_enabled", "certstream_url", "certstream_public_fallback",
+    # Proxy residencial / rotação de IP ao detectar bloqueio (utils/proxy_rotator.py)
+    "proxy_enabled", "proxy_url",
 }
 
 _PUBLIC_SETTINGS_KEYS = {
@@ -888,6 +890,7 @@ _PUBLIC_SETTINGS_KEYS = {
     "playwright_user_agent", "playwright_auth_state", "playwright_auth_state_b",
     "playwright_test_xss", "playwright_test_race", "playwright_test_access",
     "certstream_enabled", "certstream_url", "certstream_public_fallback",
+    "proxy_enabled",
 }
 
 _runner = ReconRunner(

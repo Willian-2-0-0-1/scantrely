@@ -68,6 +68,12 @@ const SETTINGS_SCHEMA = [
       {key:"certstream_public_fallback", label:"Servidor público de reserva", tag:"optional", hint:"0 não usa wss://certstream.calidog.io/ como reserva (padrão: usa)"},
     ]
   },
+  { group:"Proxy Residencial (rotação de IP)", ico:"globe", desc:"O scan roda em IP direto por padrão. Só quando uma sondagem bate num bloqueio real de WAF/CDN é que o proxy entra — e se o bloqueio continuar, a sessão é rotacionada para sair por outra IP residencial, sem precisar reiniciar o scan.",
+    fields:[
+      {key:"proxy_enabled", label:"Ligar proxy ao detectar bloqueio", tag:"optional", hint:"1 liga, 0 desliga (padrão: desligado)"},
+      {key:"proxy_url",     label:"URL do proxy",                     tag:"optional", hint:"http://usuario-PAIS-1:senha@p.webshare.io:80 — o '-1' final é a sessão; trocar o número é o que muda a IP de saída"},
+    ]
+  },
   { group:"Notificações por E-mail (SMTP)", ico:"mail", desc:"Canal de e-mail usado pelas regras de alerta e pelo webhook tipo Email",
     fields:[
       {key:"smtp_host",    label:"SMTP Host",        tag:"optional", hint:"smtp.example.com"},

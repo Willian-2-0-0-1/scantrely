@@ -220,6 +220,31 @@ Equivalentes por ambiente: `ASM_CERTSTREAM=1`, `ASM_CERTSTREAM_URL=ws://…`. Es
 
 ---
 
+## Proxy Residencial (rotação de IP ao detectar bloqueio)
+
+O scan roda em IP direto por padrão — sem custo de proxy. Só quando `http_get`
+(`core/reconlib/base.py`) detecta um bloqueio real de WAF/CDN num host (403/406/419 com
+texto de bloqueio, ou 429) é que o proxy configurado entra para aquele domínio; se o
+bloqueio persistir mesmo pelo proxy, a sessão é rotacionada (novo IP residencial).
+Ferramentas externas (subfinder, httpx, nuclei, ffuf, amass…) herdam o mesmo proxy via
+`HTTP_PROXY`/`HTTPS_PROXY` quando o pipeline (`_check_blocked_and_rotate`) já confirmou
+bloqueio na saída de uma delas — a saída de cada ferramenta já é escaneada pelo pipeline
+para esse fim (ver `utils/mullvad_rotator.is_blocked`, reaproveitado aqui).
+
+1. Compre um proxy residencial rotativo (ex.: Webshare). O formato de autenticação
+   padrão é `http://usuario-PAIS-N:senha@p.webshare.io:80` — o número `N` no final do
+   usuário é a sessão: fixa a mesma IP de saída enquanto não muda. Rotacionar aqui é só
+   sortear um novo número, sem chamada de API.
+2. Em **Configurações → Proxy Residencial**: `Ligar proxy ao detectar bloqueio` = `1` e
+   `URL do proxy` = a URL completa acima (com usuário, senha, host e porta).
+3. `POST /api/proxy/test` faz uma requisição real pelo proxy e devolve a IP de saída —
+   útil para confirmar a configuração sem esperar um scan bloquear.
+
+Sem o padrão `usuario-...-N` no usuário (proxy fixo, sem sessão numerada), a rotação não
+tem o que trocar — o proxy ainda é usado normalmente, só não varia de IP entre tentativas.
+
+---
+
 ## Variáveis de Ambiente
 
 | Variável | Padrão | Descrição |

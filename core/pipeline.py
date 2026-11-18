@@ -1472,39 +1472,79 @@ class ReconRunner:
         files = sorted((p for p in root.iterdir() if p.suffix.lower() in {'.yaml', '.yml'} and p.is_file()))
         return [str(p) for p in files]
 
-    def _check_blocked_and_rotate(self, cid: str, module: str, proc_stdout: str='', proc_stderr: str='', *, forced: bool=False) -> bool:
-        """Check if a tool's output indicates rate-limiting/WAF blocking.
-        If blocked AND Mullvad is connected, rotate IP and return True (retry needed).
-        Set forced=True to skip output check (when blocked was already detected by caller).
-        Returns False if no block detected or rotation not possible."""
-        if not _mullvad_enabled():
-            return False
+    def _activate_proxy_for_module(self) -> None:
+        """Lê as settings de proxy uma vez por módulo e expõe ao core.recon — é isso
+        que o http_get (core/reconlib/base.py) consulta para decidir, por domínio, quando
+        ligar o proxy residencial (só depois de detectar um bloqueio real nesse host)."""
+        if not self._recon or not hasattr(self._recon, 'set_proxy_available'):
+            return
         try:
-            import mullvad_rotator as _mr
-        except ImportError:
+            from utils import proxy_rotator as _pr
+            settings = self.get_settings()
+            url = _pr.base_url(settings) if _pr.is_enabled(settings) else None
+            self._recon.set_proxy_available(url)
+        except Exception as _e:
+            _ignore(_e, 'pipeline.py:proxy-available')
+
+    def _clear_proxy_for_module(self) -> None:
+        if not self._recon:
+            return
+        for fn_name in ('set_proxy_available', 'set_proxy_forced'):
+            fn = getattr(self._recon, fn_name, None)
+            if fn:
+                try:
+                    fn(None)
+                except Exception as _e:
+                    _ignore(_e, 'pipeline.py:proxy-clear')
+
+    def _check_blocked_and_rotate(self, cid: str, module: str, proc_stdout: str='', proc_stderr: str='', *, forced: bool=False) -> bool:
+        """Saída de uma ferramenta externa indica bloqueio de WAF/rate-limit? Se sim,
+        tenta trocar a IP de saída — primeiro via Mullvad (se conectado), senão via o
+        proxy residencial configurado (Webshare e compatíveis, ver utils/proxy_rotator.py)
+        — e devolve True para o chamador tentar de novo. forced=True pula a checagem de
+        saída (quando o chamador já classificou o resultado como bloqueado).
+        Devolve False se não há bloqueio ou nenhuma rotação é possível."""
+        from utils import mullvad_rotator as _mr  # só casamento de padrão — não precisa do CLI
+        if not forced and not _mr.is_blocked(proc_stdout, proc_stderr):
             return False
-        if not forced:
-            combined = (proc_stdout + proc_stderr).lower()
-            if not combined or not _mr.is_blocked(proc_stdout, proc_stderr):
-                return False
-        if _mr.is_connected():
+
+        if _mullvad_enabled() and _mr.is_connected():
             rotator = (getattr(self, '_mullvad_rotators', {}) or {}).get(cid) or _mr._get_default()
             try:
                 new_ip = rotator.rotate(wait=15)
                 self.pipeline_state[cid]['mullvad_ip'] = new_ip
-                msg = f'  🔄 {module}: block detected — IP rotated → {new_ip}, retrying...'
-            except Exception as e:
-                msg = f'  ⚠ {module}: block detected but rotation failed: {e}'
+                msg = f'  🔄 {module}: bloqueio detectado — IP rotacionado (Mullvad) → {new_ip}, tentando de novo...'
                 self.pipeline_state[cid]['log'].append({'ts': datetime.now().isoformat(timespec='seconds'), 'msg': msg})
-                return False
-            self.pipeline_state[cid]['log'].append({'ts': datetime.now().isoformat(timespec='seconds'), 'msg': msg})
-            return True
-        else:
-            msg = f'  ⚠ {module}: block detected — Mullvad not connected, cannot rotate'
-            log_list = self.pipeline_state.get(cid, {}).get('log')
-            if isinstance(log_list, list):
-                log_list.append({'ts': datetime.now().isoformat(timespec='seconds'), 'msg': msg})
-        return False
+                return True
+            except Exception as e:
+                msg = f'  ⚠ {module}: bloqueio detectado mas rotação via Mullvad falhou: {e} — tentando proxy residencial'
+                self.pipeline_state.setdefault(cid, {}).setdefault('log', []).append({'ts': datetime.now().isoformat(timespec='seconds'), 'msg': msg})
+                # cai para o proxy residencial abaixo em vez de desistir
+
+        try:
+            from utils import proxy_rotator as _pr
+        except ImportError:
+            return False
+        settings = self.get_settings()
+        if not _pr.is_enabled(settings):
+            if _mullvad_enabled():
+                msg = f'  ⚠ {module}: bloqueio detectado — Mullvad não conectado e nenhum proxy configurado'
+                log_list = self.pipeline_state.get(cid, {}).get('log')
+                if isinstance(log_list, list):
+                    log_list.append({'ts': datetime.now().isoformat(timespec='seconds'), 'msg': msg})
+            return False
+        current = (getattr(self, '_active_proxy', None) or {}).get(cid) or _pr.base_url(settings)
+        rotated = _pr.rotate(current)
+        self._active_proxy = getattr(self, '_active_proxy', {})
+        self._active_proxy[cid] = rotated
+        if self._recon and hasattr(self._recon, 'set_proxy_forced'):
+            try:
+                self._recon.set_proxy_forced(rotated)
+            except Exception as _e:
+                _ignore(_e, 'pipeline.py:proxy-forced')
+        msg = f'  🔄 {module}: bloqueio detectado — proxy residencial rotacionado ({_pr.redact(rotated)}), tentando de novo...'
+        self.pipeline_state.setdefault(cid, {}).setdefault('log', []).append({'ts': datetime.now().isoformat(timespec='seconds'), 'msg': msg})
+        return True
 
     def _save_pipeline_state(self, cid: str):
         """Persist minimal pipeline state to disk so GET /pipeline survives restarts."""
@@ -2374,6 +2414,7 @@ class ReconRunner:
                     self._recon.set_subprocess_context(self.db, cid, module)
                 except Exception as _e:
                     _ignore(_e, 'pipeline.py:2663')
+            self._activate_proxy_for_module()
             _ct.set_tracer(lambda cmd, _m=module: self._record_tool_log(cid, _m, cmd))
             if limiter:
                 _rl.set_limiter(limiter)
@@ -2406,6 +2447,7 @@ class ReconRunner:
                         self._recon.set_subprocess_context(None, '', '')
                     except Exception as _e:
                         _ignore(_e, 'pipeline.py:2696')
+                self._clear_proxy_for_module()
                 _ct.clear_tracer()
                 _rl.clear_limiter()
         threading.Thread(target=_run, daemon=True).start()
@@ -4101,6 +4143,7 @@ class ReconRunner:
                         self._recon.set_subprocess_context(self.db, cid, module)
                     except Exception as _e:
                         _ignore(_e, 'pipeline.py:5282')
+                self._activate_proxy_for_module()
                 _ct.set_tracer(lambda cmd, _m=module: self._record_tool_log(cid, _m, cmd))
                 if limiter:
                     _rl.set_limiter(limiter)
@@ -4188,6 +4231,7 @@ class ReconRunner:
                             self._recon.set_subprocess_context(None, '', '')
                         except Exception as _e:
                             _ignore(_e, 'pipeline.py:5413')
+                    self._clear_proxy_for_module()
                     _ct.clear_tracer()
                     _rl.clear_limiter()
                 break
